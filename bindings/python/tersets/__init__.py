@@ -37,6 +37,10 @@ def __load_library():
         library_path = script_folder + "/../../../zig-out/lib/libtersets.so.0.0.1"
     elif cpu_architecture == "arm64" and operating_system == "Darwin":
         library_path = script_folder + "/../../../zig-out/lib/libtersets.0.0.1.dylib"
+    elif cpu_architecture == "x86_64" and operating_system == "Darwin":
+        library_path = script_folder + "/../../../zig-out/lib/libtersets.0.0.1.dylib"
+    elif cpu_architecture == "AMD64" and operating_system == "Windows":
+        library_path = script_folder + "\\..\\..\\..\\zig-out\\lib\\tersets.dll"
     elif cpu_architecture == "x86_64" and operating_system == "Windows":
         library_path = script_folder + "\\..\\..\\..\\zig-out\\lib\\tersets.dll"
     else:
