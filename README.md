@@ -25,7 +25,7 @@ TODO
 TerseTS provides a C-API that is designed to be simple to wrap. Currently, TerseTS includes bindings for the current programming languages which can be used without installation of any dependencies:
 - [Zig](tersets/capi.zig)
 - [C](tersets/capi.zig)
-- [C++](tersets/capi.zig) 
+- [C++](tersets/capi.zig)
 - [Python](bindings/tersets.py) using [ctypes](https://docs.python.org/3/library/ctypes.html)
 
 # License
