@@ -1,6 +1,7 @@
-# ![Alt text](docs/tersets.jpg "TerseTS")
+<h1 align="center">
+  <img src="docs/tersets.jpg" alt="TerseTS">
+</h1>
 
-# TerseTS
 TerseTS is a library that provides methods for lossless and lossy compressing time series. To match existing literature the methods are organized based on [Time Series Compression Survey](https://dl.acm.org/doi/10.1145/3560814). The library is implemented in Zig and provides a C-API with [bindings](#Installation) for other languages.
 
 # Installation
