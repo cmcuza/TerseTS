@@ -12,10 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-.idea
-.vscode
-zig-cache
-zig-out
-__pycache__
-TerseTS.egg-info
-build
+
+import unittest
+
+from tersets import compress
+
+
+class TerseTSPythonTest(unittest.TestCase):
+    def test_compress(self):
+        values = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+        self.assertEqual(compress(values), 0)
