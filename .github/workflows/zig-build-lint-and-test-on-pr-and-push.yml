@@ -49,7 +49,7 @@ jobs:
       working-directory: bindings/python
 
   zig_lint:
-    name: Zig Build and Test
+    name: Zig Lint
 
     # Microsoft Windows disagrees with the Unix-like systems about formatting.
     runs-on: ${{ matrix.operating-system }}
