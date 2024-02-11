@@ -83,9 +83,8 @@ def compress(values: List[float]) -> bytes:
         uncompressed_values, byref(compressed_values), configuration
     )
 
-    match error:
-        case 1:
-            raise ValueError("Unknown compression method.")
+    if error == 1:
+        raise ValueError("Unknown compression method.")
 
     return compressed_values.data[: compressed_values.len]
 
@@ -105,8 +104,7 @@ def decompress(values: bytes) -> List[float]:
         compressed_values, byref(decompressed_values), configuration
     )
 
-    match error:
-        case 1:
-            raise ValueError("Unknown decompression method.")
+    if error == 1:
+        raise ValueError("Unknown decompression method.")
 
     return decompressed_values.data[: decompressed_values.len]
