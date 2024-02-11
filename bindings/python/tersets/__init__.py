@@ -23,7 +23,7 @@ from ctypes import cdll, Structure, c_byte, c_float, c_double, c_size_t, POINTER
 
 # Private Functions.
 def __load_library():
-    """ Locates the correct library for this system and loads it. """
+    """Locates the correct library for this system and loads it."""
 
     # Compute the path to the current working directory to locate the library.
     script_folder = os.path.dirname(os.path.abspath(__file__))
@@ -44,8 +44,7 @@ def __load_library():
     elif cpu_architecture == "x86_64" and operating_system == "Windows":
         library_path = script_folder + "\\..\\..\\..\\zig-out\\lib\\tersets.dll"
     else:
-        raise ValueError(
-            f"{operating_system} on {cpu_architecture} is not supported")
+        raise ValueError(f"{operating_system} on {cpu_architecture} is not supported")
 
     return cdll.LoadLibrary(library_path)
 
@@ -59,52 +58,55 @@ __library = __load_library()
 class __UncompressedValues(Structure):
     _fields_ = [("data", POINTER(c_double)), ("len", c_size_t)]
 
+
 class __CompressedValues(Structure):
     _fields_ = [("data", POINTER(c_byte)), ("len", c_size_t)]
+
 
 class __Configuration(Structure):
     _fields_ = [("method", c_byte), ("error_bound", c_float)]
 
+
 # Public Functions.
 def compress(values: List[float]) -> bytes:
-    """ Compresses values. """
+    """Compresses values."""
 
     uncompressed_values = __UncompressedValues()
     uncompressed_values.data = (c_double * len(values))(*values)
     uncompressed_values.len = len(values)
-    uncompressed_values_ptr = byref(uncompressed_values)
 
     compressed_values = __CompressedValues()
-    compressed_values_ptr = byref(compressed_values)
 
     configuration = __Configuration(0, 0.0)
 
-    error = __library.compress(uncompressed_values_ptr, compressed_values_ptr, configuration)
+    error = __library.compress(
+        uncompressed_values, byref(compressed_values), configuration
+    )
 
     match error:
         case 1:
             raise ValueError("Unknown compression method.")
 
-    return compressed_values.data[:compressed_values.len]
+    return compressed_values.data[: compressed_values.len]
 
 
 def decompress(values: bytes) -> List[float]:
-    """ Decompresses values. """
+    """Decompresses values."""
 
     compressed_values = __CompressedValues()
     compressed_values.data = (c_byte * len(values))(*values)
     compressed_values.len = len(values)
-    compressed_values_ptr = byref(compressed_values)
 
     decompressed_values = __UncompressedValues()
-    decompressed_values_ptr = byref(decompressed_values)
 
     configuration = __Configuration(0, 0.0)
 
-    error = __library.decompress(compressed_values_ptr, decompressed_values_ptr, configuration)
+    error = __library.decompress(
+        compressed_values, byref(decompressed_values), configuration
+    )
 
     match error:
         case 1:
             raise ValueError("Unknown decompression method.")
 
-    return decompressed_values.data[:decompressed_values.len]
+    return decompressed_values.data[: decompressed_values.len]

@@ -19,10 +19,10 @@ const math = std.math;
 const testing = std.testing;
 
 /// A pointer to uncompressed values and the number of values.
-pub const UncompressedValues = extern struct { data: [*]const f64, len: usize }; //Array(f64);
+pub const UncompressedValues = Array(f64);
 
 /// A pointer to compressed values and the number of bytes.
-pub const CompressedValues = extern struct { data: [*]const u8, len: usize }; //Array(u8);
+pub const CompressedValues = Array(u8);
 
 /// Configuration to use for compression and/or decompression.
 pub const Configuration = extern struct { method: u8, error_bound: f32 };
@@ -31,13 +31,10 @@ pub const Configuration = extern struct { method: u8, error_bound: f32 };
 /// `configuration`. The following non-zero values are returned on errors:
 /// - 1) Unsupported compression method.
 export fn compress(
-    uncompressed_values: *const UncompressedValues,
+    uncompressed_values: UncompressedValues,
     compressed_values: *CompressedValues,
     configuration: Configuration,
 ) i32 {
-    std.debug.print("{}\n", .{uncompressed_values});
-    std.debug.print("{}\n", .{compressed_values});
-    std.debug.print("{}\n", .{configuration});
     switch (configuration.method) {
         0 => {
             compressed_values.data = @ptrCast(uncompressed_values.data);
@@ -53,7 +50,7 @@ export fn compress(
 /// `configuration`. The following non-zero values are returned on errors:
 /// - 1) Unsupported decompression method.
 export fn decompress(
-    compressed_values: *const CompressedValues,
+    compressed_values: CompressedValues,
     uncompressed_values: *UncompressedValues,
     configuration: Configuration,
 ) i32 {
@@ -91,14 +88,14 @@ test "compress and decompress" {
     const configuration = Configuration{ .method = 0, .error_bound = 0 };
 
     const compress_result = compress(
-        &uncompressed_values,
+        uncompressed_values,
         &compressed_values,
         configuration,
     );
     try testing.expect(compress_result == 0);
 
     const decompress_result = decompress(
-        &compressed_values,
+        compressed_values,
         &decompressed_values,
         configuration,
     );
@@ -128,7 +125,7 @@ test "error for unknown compression method" {
     configuration.method = math.maxInt(@TypeOf(configuration.method));
 
     const result = compress(
-        &uncompressed_values,
+        uncompressed_values,
         &compressed_values,
         configuration,
     );
@@ -149,7 +146,7 @@ test "error for unknown decompression method" {
     configuration.method = math.maxInt(@TypeOf(configuration.method));
 
     const result = decompress(
-        &compressed_values,
+        compressed_values,
         &uncompressed_values,
         configuration,
     );
