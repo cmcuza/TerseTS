@@ -38,8 +38,10 @@ jobs:
       run: zig build -Doptimize=Debug
     - name: Zig Build ReleaseFast
       run: zig build -Doptimize=ReleaseFast
-    - name: Zig Build Test
-      run: zig build test
+    - name: Zig Build Test Debug
+      run: zig build test -Doptimize=Debug
+    - name: Zig Build Test ReleaseFast
+      run: zig build test -Doptimize=ReleaseFast
 
     - name: Install Package
       run: python3 -m pip install .
