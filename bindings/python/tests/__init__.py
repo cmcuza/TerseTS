@@ -12,13 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
+import sys
+import random
 import unittest
 
-from tersets import compress
+from tersets import compress, decompress
+
+# Number of values to generate for each test.
+TEST_VALUE_COUNT = 1000
 
 
 class TerseTSPythonTest(unittest.TestCase):
-    def test_compress(self):
-        values = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
-        self.assertEqual(compress(values), 0)
+    def test_compress_and_decompress(self):
+        uncompressed = [
+            random.uniform(sys.float_info.min, sys.float_info.max)
+            for _ in range(0, TEST_VALUE_COUNT)
+        ]
+        compressed = compress(uncompressed)
+        decompressed = decompress(compressed)
+        self.assertEqual(uncompressed, decompressed)

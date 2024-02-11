@@ -113,7 +113,7 @@ test "compress and decompress" {
 }
 
 test "error for unknown compression method" {
-    var uncompressed_values = UncompressedValues{
+    const uncompressed_values = UncompressedValues{
         .data = undefined,
         .len = undefined,
     };
@@ -134,7 +134,7 @@ test "error for unknown compression method" {
 }
 
 test "error for unknown decompression method" {
-    var compressed_values = CompressedValues{
+    const compressed_values = CompressedValues{
         .data = undefined,
         .len = undefined,
     };
