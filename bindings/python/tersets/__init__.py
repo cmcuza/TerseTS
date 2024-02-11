@@ -18,12 +18,12 @@
 import os
 import platform
 from typing import List
-from ctypes import cdll, Structure, c_byte, c_double, c_size_t, POINTER, pointer
+from ctypes import cdll, Structure, c_byte, c_float, c_double, c_size_t, POINTER, byref
 
 
 # Private Functions.
 def __load_library():
-    """ Locates the correct library for this system and loads it. """
+    """Locates the correct library for this system and loads it."""
 
     # Compute the path to the current working directory to locate the library.
     script_folder = os.path.dirname(os.path.abspath(__file__))
@@ -44,8 +44,7 @@ def __load_library():
     elif cpu_architecture == "x86_64" and operating_system == "Windows":
         library_path = script_folder + "\\..\\..\\..\\zig-out\\lib\\tersets.dll"
     else:
-        raise ValueError(
-            f"{operating_system} on {cpu_architecture} is not supported")
+        raise ValueError(f"{operating_system} on {cpu_architecture} is not supported")
 
     return cdll.LoadLibrary(library_path)
 
@@ -56,25 +55,56 @@ __library = __load_library()
 
 
 # Private Types.
-class __InputData(Structure):
-    _fields_ = [("values", POINTER(c_double)), ("len", c_size_t)]
+class __UncompressedValues(Structure):
+    _fields_ = [("data", POINTER(c_double)), ("len", c_size_t)]
 
-class __OutputData(Structure):
-    _fields_ = [("values", POINTER(c_byte)), ("len", c_size_t)]
+
+class __CompressedValues(Structure):
+    _fields_ = [("data", POINTER(c_byte)), ("len", c_size_t)]
+
+
+class __Configuration(Structure):
+    _fields_ = [("method", c_byte), ("error_bound", c_float)]
 
 
 # Public Functions.
 def compress(values: List[float]) -> bytes:
-    """ Compresses values. """
+    """Compresses values."""
 
-    input_data = __InputData()
-    input_data.values = (c_double * len(values))(*values)
-    input_data.len = len(values)
-    input_data_ptr = pointer(input_data)
+    uncompressed_values = __UncompressedValues()
+    uncompressed_values.data = (c_double * len(values))(*values)
+    uncompressed_values.len = len(values)
 
-    output_data = __OutputData()
-    output_data_ptr = pointer(output_data)
+    compressed_values = __CompressedValues()
 
-    error = __library.compress(input_data_ptr, output_data_ptr)
+    configuration = __Configuration(0, 0.0)
 
-    return error
+    error = __library.compress(
+        uncompressed_values, byref(compressed_values), configuration
+    )
+
+    if error == 1:
+        raise ValueError("Unknown compression method.")
+
+    return compressed_values.data[: compressed_values.len]
+
+
+def decompress(values: bytes) -> List[float]:
+    """Decompresses values."""
+
+    compressed_values = __CompressedValues()
+    compressed_values.data = (c_byte * len(values))(*values)
+    compressed_values.len = len(values)
+
+    decompressed_values = __UncompressedValues()
+
+    configuration = __Configuration(0, 0.0)
+
+    error = __library.decompress(
+        compressed_values, byref(decompressed_values), configuration
+    )
+
+    if error == 1:
+        raise ValueError("Unknown decompression method.")
+
+    return decompressed_values.data[: decompressed_values.len]
