@@ -18,7 +18,7 @@
 import os
 import platform
 from typing import List
-from ctypes import cdll, Structure, c_byte, c_double, c_size_t, POINTER, pointer
+from ctypes import cdll, Structure, c_byte, c_float, c_double, c_size_t, POINTER, byref
 
 
 # Private Functions.
@@ -56,25 +56,55 @@ __library = __load_library()
 
 
 # Private Types.
-class __InputData(Structure):
-    _fields_ = [("values", POINTER(c_double)), ("len", c_size_t)]
+class __UncompressedValues(Structure):
+    _fields_ = [("data", POINTER(c_double)), ("len", c_size_t)]
 
-class __OutputData(Structure):
-    _fields_ = [("values", POINTER(c_byte)), ("len", c_size_t)]
+class __CompressedValues(Structure):
+    _fields_ = [("data", POINTER(c_byte)), ("len", c_size_t)]
 
+class __Configuration(Structure):
+    _fields_ = [("method", c_byte), ("error_bound", c_float)]
 
 # Public Functions.
 def compress(values: List[float]) -> bytes:
     """ Compresses values. """
 
-    input_data = __InputData()
-    input_data.values = (c_double * len(values))(*values)
-    input_data.len = len(values)
-    input_data_ptr = pointer(input_data)
+    uncompressed_values = __UncompressedValues()
+    uncompressed_values.data = (c_double * len(values))(*values)
+    uncompressed_values.len = len(values)
+    uncompressed_values_ptr = byref(uncompressed_values)
 
-    output_data = __OutputData()
-    output_data_ptr = pointer(output_data)
+    compressed_values = __CompressedValues()
+    compressed_values_ptr = byref(compressed_values)
 
-    error = __library.compress(input_data_ptr, output_data_ptr)
+    configuration = __Configuration(0, 0.0)
 
-    return error
+    error = __library.compress(uncompressed_values_ptr, compressed_values_ptr, configuration)
+
+    match error:
+        case 1:
+            raise ValueError("Unknown compression method.")
+
+    return compressed_values.data[:compressed_values.len]
+
+
+def decompress(values: bytes) -> List[float]:
+    """ Decompresses values. """
+
+    compressed_values = __CompressedValues()
+    compressed_values.data = (c_byte * len(values))(*values)
+    compressed_values.len = len(values)
+    compressed_values_ptr = byref(compressed_values)
+
+    decompressed_values = __UncompressedValues()
+    decompressed_values_ptr = byref(decompressed_values)
+
+    configuration = __Configuration(0, 0.0)
+
+    error = __library.decompress(compressed_values_ptr, decompressed_values_ptr, configuration)
+
+    match error:
+        case 1:
+            raise ValueError("Unknown decompression method.")
+
+    return decompressed_values.data[:decompressed_values.len]
