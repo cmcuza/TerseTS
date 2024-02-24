@@ -19,3 +19,4 @@ zig-out
 __pycache__
 TerseTS.egg-info
 build
+*.gch

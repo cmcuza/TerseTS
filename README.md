@@ -20,11 +20,11 @@ TerseTS can be compiled and cross-compiled from source:
 TODO
 
 # Bindings
-TerseTS provides a C-API that is designed to be simple to wrap. Currently, TerseTS includes bindings for the current programming languages which can be used without installation of any dependencies:
-- [Zig](tersets/capi.zig)
-- [C](tersets/capi.zig)
-- [C++](tersets/capi.zig)
-- [Python](bindings/tersets.py) using [ctypes](https://docs.python.org/3/library/ctypes.html)
+TerseTS provides a C-API that is designed to be simple to wrap. Currently, TerseTS includes bindings for the following programming languages which can be used without installation of any dependencies:
+- [Zig](src/tersets.zig)
+- [C](bindings/c/tersets.h)
+- [C++](bindings/c/tersets.h)
+- [Python](bindings/python/tersets) using [ctypes](https://docs.python.org/3/library/ctypes.html)
 
 # License
 TerseTS is licensed under version 2.0 of the Apache License and a copy of the license is bundled with the program.

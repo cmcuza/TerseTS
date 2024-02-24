@@ -43,10 +43,17 @@ jobs:
     - name: Zig Build Test ReleaseFast
       run: zig build test -Doptimize=ReleaseFast
 
-    - name: Install Package
+    - name: Clang Compile Header
+      run: clang -Weverything tersets.h
+      working-directory: bindings/c
+    - name: GCC Compile Header
+      run: gcc -Wall -Wextra tersets.h
+      working-directory: bindings/c
+
+    - name: Python Install Package
       run: python3 -m pip install .
       working-directory: bindings/python
-    - name: Run unittest
+    - name: Python Run unittest
       run: python3 -m unittest --verbose
       working-directory: bindings/python
 

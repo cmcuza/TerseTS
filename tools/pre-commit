@@ -23,7 +23,7 @@ set -e
 profiles="Debug ReleaseFast"
 
 # Ensure that the following commands does not emit any errors or warnings.
-# - Compilers: zig build
+# - Compilers: zig build, clang, gcc
 # - Linters: zig fmt --check .
 # - Tests: zig build test and python3 -m unittest
 for profile in $profiles
@@ -37,6 +37,12 @@ do
     echo
     echo "Zig Fmt Check"
     zig fmt --check .
+    echo
+    echo "C Header Compile"
+    pushd bindings/c > /dev/null
+    clang -Weverything tersets.h
+    gcc -Wall -Wextra tersets.h
+    popd > /dev/null 
     echo
     echo "Python Test"
     pushd bindings/python > /dev/null
