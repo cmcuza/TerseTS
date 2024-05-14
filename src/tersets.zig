@@ -15,6 +15,7 @@
 //! Provides a C-API for TerseTS.
 
 const std = @import("std");
+const swing = @import("functional/swing.zig");
 const math = std.math;
 const testing = std.testing;
 
@@ -40,6 +41,12 @@ export fn compress(
             compressed_values.data = @ptrCast(uncompressed_values.data);
             compressed_values.len = uncompressed_values.len * 8;
         },
+        2 => {
+            swing.compress(uncompressed_values, compressed_values, configuration.error_bound) catch |err| {
+                std.debug.print("Caught error: {}\n", .{err});
+                return 1;
+            };
+        },
         else => return 1,
     }
 
@@ -58,6 +65,12 @@ export fn decompress(
         0 => {
             uncompressed_values.data = @alignCast(@ptrCast(compressed_values.data));
             uncompressed_values.len = compressed_values.len / 8;
+        },
+        2 => {
+            swing.decompress(compressed_values, uncompressed_values) catch |err| {
+                std.debug.print("Caught error: {}\n", .{err});
+                return 1;
+            };
         },
         else => return 1,
     }
