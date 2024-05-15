@@ -15,9 +15,16 @@
 //! Provides a C-API for TerseTS.
 
 const std = @import("std");
-const swing = @import("functional/swing.zig");
 const math = std.math;
+const ArrayList = std.ArrayList;
 const testing = std.testing;
+
+const pmc = @import("functional/poor_mans_compression.zig");
+const swing = @import("functional/swing.zig");
+
+/// Global memory allocator used by tersets.
+var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+const alloc = gpa.allocator();
 
 /// A pointer to uncompressed values and the number of values.
 pub const UncompressedValues = Array(f64);
@@ -36,20 +43,33 @@ export fn compress(
     compressed_values: *CompressedValues,
     configuration: Configuration,
 ) i32 {
+    // TODO: split compress into compress_zig with slice and ArrayList
+    // as input and compress_c so C->Zig and Zig-C is implemented once.
+    const uncompressed_values_slice = uncompressed_values.data[0..uncompressed_values.len];
+    var compressed_values_array_list = ArrayList(u8).init(alloc);
     switch (configuration.method) {
         0 => {
-            compressed_values.data = @ptrCast(uncompressed_values.data);
-            compressed_values.len = uncompressed_values.len * 8;
+            pmc.poorMansCompressionCompress(
+                uncompressed_values_slice,
+                &compressed_values_array_list,
+                configuration.error_bound,
+            ) catch {};
         },
-        2 => {
-            swing.compress(uncompressed_values, compressed_values, configuration.error_bound) catch |err| {
-                std.debug.print("Caught error: {}\n", .{err});
-                return 1;
-            };
+        1 => {
+            swing.compress(
+                uncompressed_values_slice,
+                &compressed_values_array_list,
+                configuration.error_bound,
+            ) catch {};
         },
+
         else => return 1,
     }
-
+    // TODO: remove export and return errors to C function
+    // https://github.com/Vexu/bog/blob/master/src/lib.zig
+    // https://github.com/Vexu/bog/blob/master/include/bog.h
+    compressed_values.data = compressed_values_array_list.items.ptr;
+    compressed_values.len = compressed_values_array_list.items.len;
     return 0;
 }
 
@@ -58,25 +78,32 @@ export fn compress(
 /// - 1) Unsupported decompression method.
 export fn decompress(
     compressed_values: CompressedValues,
-    uncompressed_values: *UncompressedValues,
+    decompressed_values: *UncompressedValues,
     configuration: Configuration,
 ) i32 {
     switch (configuration.method) {
         0 => {
-            uncompressed_values.data = @alignCast(@ptrCast(compressed_values.data));
-            uncompressed_values.len = compressed_values.len / 8;
-        },
-        2 => {
-            swing.decompress(compressed_values, uncompressed_values) catch |err| {
-                std.debug.print("Caught error: {}\n", .{err});
-                return 1;
-            };
+            // TODO: split compress into compress_zig with slice and ArrayList
+            // as input and compress_c so C->Zig and Zig-C is implemented once.
+            const compressed_values_slice = compressed_values.data[0..compressed_values.len];
+            var decompressed_values_array_list = ArrayList(f64).init(alloc);
+            pmc.poorMansCompressionDecompress(
+                compressed_values_slice,
+                &decompressed_values_array_list,
+            ) catch {}; // TODO: remove export and return errors to C function
+            // https://github.com/Vexu/bog/blob/master/src/lib.zig
+            // https://github.com/Vexu/bog/blob/master/include/bog.h
+            decompressed_values.data = decompressed_values_array_list.items.ptr;
+            decompressed_values.len = decompressed_values_array_list.items.len;
         },
         else => return 1,
     }
 
     return 0;
 }
+
+// TODO: Add deinit() function so bindings can deallocate returned array with
+// the compressed and decompressed data or assume they can reuse and deallocate?
 
 /// `Array` is a pointer to values of type `data_type` and the number of values.
 fn Array(comptime data_type: type) type {
