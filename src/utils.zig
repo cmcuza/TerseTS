@@ -33,7 +33,7 @@ pub fn isWithinErrorBound(
     error_bound: f32,
 ) bool {
     for (decompressed_values, 0..) |item, i| {
-        if (!((uncompressed_values[i] < item + error_bound) and (uncompressed_values[i] > item - error_bound))) return false;
+        if (@abs(uncompressed_values[i] - item) > error_bound + 1e-7) return false;
     }
     return true;
 }
@@ -44,10 +44,14 @@ pub fn getIntercept(slope: f64, x: usize, y: f64, line: *Line) !void {
 }
 
 pub fn getLine(segment: *Segment, line: *Line) !void {
-    std.debug.assert(segment.end_time != segment.start_time);
-    const duration = @as(f64, @floatFromInt(segment.end_time - segment.start_time));
-    line.slope = (segment.end_value - segment.start_value) / duration;
-    line.intercept = segment.start_value - line.slope * @as(f64, @floatFromInt(segment.start_time));
+    if (segment.end_time != segment.start_time) {
+        const duration = @as(f64, @floatFromInt(segment.end_time - segment.start_time));
+        line.slope = (segment.end_value - segment.start_value) / duration;
+        line.intercept = segment.start_value - line.slope * @as(f64, @floatFromInt(segment.start_time));
+    } else {
+        line.slope = 0;
+        line.intercept = segment.end_value;
+    }
 }
 
 pub fn getBoundLine(segment: *Segment, line: *Line, error_bound: f32) !void {

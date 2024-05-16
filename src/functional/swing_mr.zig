@@ -80,6 +80,7 @@ pub fn compress(
         if ((upper_y < (uncompressed_values[current_timestamp] - error_bound)) or
             (lower_y > (uncompressed_values[current_timestamp] + error_bound)))
         { // Recording mechanism
+
             upper_y = utils.evaluate(&upper_bound_line, current_timestamp - 1);
             lower_y = utils.evaluate(&lower_bound_line, current_timestamp - 1);
 
@@ -93,15 +94,24 @@ pub fn compress(
             first_timestamp = current_timestamp;
             current_segment.start_time = current_timestamp;
             current_segment.start_value = uncompressed_values[current_timestamp];
-            current_segment.end_time = current_timestamp + 1;
-            current_segment.end_value = uncompressed_values[current_timestamp + 1];
+            if (current_timestamp + 1 < uncompressed_values.len) { // (edge case) only one point left
+                // Update the current segment
+                current_segment.end_time = current_timestamp + 1;
+                current_segment.end_value = uncompressed_values[current_timestamp + 1];
 
-            // Recompute the upper and lower bounds
-            try utils.getBoundLine(&current_segment, &upper_bound_line, error_bound);
-            try utils.getBoundLine(&current_segment, &lower_bound_line, -error_bound);
+                // Recompute the upper and lower bounds
+                try utils.getBoundLine(&current_segment, &upper_bound_line, error_bound);
+                try utils.getBoundLine(&current_segment, &lower_bound_line, -error_bound);
 
-            current_timestamp += 1; // advance the current_timestamp
-
+                current_timestamp += 1; // advance the current_timestamp
+            } else {
+                current_segment.end_time = current_timestamp;
+                current_segment.end_value = uncompressed_values[current_timestamp];
+                upper_bound_line.slope = 0.0;
+                upper_bound_line.intercept = uncompressed_values[current_timestamp];
+                lower_bound_line.slope = 0.0;
+                lower_bound_line.intercept = uncompressed_values[current_timestamp];
+            }
         } else { //filtering mechanism
             // Update the current segment
             current_segment.end_time = current_timestamp;
@@ -118,15 +128,16 @@ pub fn compress(
             if (upper_y > new_upper_y) { // Swing down
                 upper_bound_line.slope = new_upper_bound_line.slope;
                 upper_bound_line.intercept = new_upper_bound_line.intercept;
-                upper_y = new_upper_y;
             }
             if (lower_y < new_lower_y) { //Swing up
                 lower_bound_line.slope = new_lower_bound_line.slope;
                 lower_bound_line.intercept = new_lower_bound_line.intercept;
-                lower_y = new_lower_y;
             }
         }
     }
+
+    upper_y = utils.evaluate(&upper_bound_line, current_timestamp - 1);
+    lower_y = utils.evaluate(&lower_bound_line, current_timestamp - 1);
 
     current_segment.end_value = (upper_y + lower_y) / 2;
 
@@ -180,6 +191,38 @@ test "swing-mr single line compress and decompress" {
     try testing.expect(mem.eql(f64, uncompressed_values[0..], decompressed_values.items));
 }
 
+test "swing-mr single line and single point (odd size) compress and decompress" {
+    const alloc = testing.allocator;
+    const uncompressed_values = [_]f64{ 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 1.5 };
+    var compressed_values = ArrayList(u8).init(alloc);
+    defer compressed_values.deinit();
+    var decompressed_values = ArrayList(f64).init(alloc);
+    defer decompressed_values.deinit();
+
+    const error_bound: f32 = 0.0;
+
+    try compress(uncompressed_values[0..], &compressed_values, error_bound);
+
+    try decompress(compressed_values.items, &decompressed_values);
+    try testing.expect(mem.eql(f64, uncompressed_values[0..], decompressed_values.items));
+}
+
+test "swing-mr single line and single point (even size) compress and decompress" {
+    const alloc = testing.allocator;
+    const uncompressed_values = [_]f64{ 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 1.5 };
+    var compressed_values = ArrayList(u8).init(alloc);
+    defer compressed_values.deinit();
+    var decompressed_values = ArrayList(f64).init(alloc);
+    defer decompressed_values.deinit();
+
+    const error_bound: f32 = 0.0;
+
+    try compress(uncompressed_values[0..], &compressed_values, error_bound);
+
+    try decompress(compressed_values.items, &decompressed_values);
+    try testing.expect(mem.eql(f64, uncompressed_values[0..], decompressed_values.items));
+}
+
 test "swing-mr two parallel lines compress and decompress" {
     const alloc = testing.allocator;
     const uncompressed_values = [_]f64{ 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5 };
@@ -227,4 +270,168 @@ test "swing-mr 4 v-shaped lines compress and decompress" {
     try decompress(compressed_values.items, &decompressed_values);
 
     try testing.expect(mem.eql(f64, uncompressed_values[0..], decompressed_values.items));
+}
+
+test "swing-mr noisy line with 0 error bound and (even size) compress and decompress" {
+    const alloc = testing.allocator;
+    var line = Line{ .slope = 1, .intercept = 0.0 };
+
+    var list_values = std.ArrayList(f64).init(alloc);
+    defer list_values.deinit();
+    var compressed_values = ArrayList(u8).init(alloc);
+    defer compressed_values.deinit();
+    var decompressed_values = ArrayList(f64).init(alloc);
+    defer decompressed_values.deinit();
+    const error_bound: f32 = 0.0;
+
+    var rnd = std.rand.DefaultPrng.init(0);
+
+    var i: usize = 0;
+    while (i < 10) : (i += 1) {
+        const noise = rnd.random().float(f64) * 0.1 - 0.05;
+        try list_values.append(utils.evaluate(&line, i) + noise);
+    }
+
+    const uncompressed_values = list_values.items;
+
+    try compress(uncompressed_values[0..], &compressed_values, error_bound);
+    try decompress(compressed_values.items, &decompressed_values);
+
+    try testing.expect(utils.isWithinErrorBound(uncompressed_values, decompressed_values.items, error_bound));
+}
+
+test "swing-mr noisy line with 0 error bound and (odd size) compress and decompress" {
+    const alloc = testing.allocator;
+
+    var line = Line{ .slope = 1, .intercept = 0.0 };
+
+    var list_values = std.ArrayList(f64).init(alloc);
+    defer list_values.deinit();
+    var compressed_values = ArrayList(u8).init(alloc);
+    defer compressed_values.deinit();
+    var decompressed_values = ArrayList(f64).init(alloc);
+    defer decompressed_values.deinit();
+    const error_bound: f32 = 0.0;
+
+    var rnd = std.rand.DefaultPrng.init(0);
+
+    var i: usize = 0;
+    while (i < 11) : (i += 1) {
+        const noise = rnd.random().float(f64) * 0.1 - 0.05;
+        try list_values.append(utils.evaluate(&line, i) + noise);
+    }
+
+    const uncompressed_values = list_values.items;
+
+    try compress(uncompressed_values[0..], &compressed_values, error_bound);
+    try decompress(compressed_values.items, &decompressed_values);
+
+    try testing.expect(utils.isWithinErrorBound(uncompressed_values, decompressed_values.items, error_bound));
+}
+
+test "swing-mr noisy lines with 0.1 error bound and (even size) compress and decompress" {
+    const alloc = testing.allocator;
+
+    var lines = [_]Line{
+        Line{ .slope = 1, .intercept = 0.0 },
+        Line{ .slope = -1, .intercept = 50 },
+        Line{ .slope = 1, .intercept = -50 },
+        Line{ .slope = -1, .intercept = 100 },
+    };
+
+    var list_values = std.ArrayList(f64).init(alloc);
+    defer list_values.deinit();
+    var compressed_values = ArrayList(u8).init(alloc);
+    defer compressed_values.deinit();
+    var decompressed_values = ArrayList(f64).init(alloc);
+    defer decompressed_values.deinit();
+    const error_bound: f32 = 0.1;
+
+    var rnd = std.rand.DefaultPrng.init(0);
+
+    var i: usize = 0;
+    var lineIndex: usize = 0;
+    while (i < 1000) : (i += 1) {
+        lineIndex = i / 250;
+        const noise = rnd.random().float(f64) * 0.2 - 0.05;
+        try list_values.append(utils.evaluate(&lines[lineIndex], i) + noise);
+    }
+
+    const uncompressed_values = list_values.items;
+
+    try compress(uncompressed_values[0..], &compressed_values, error_bound);
+    try decompress(compressed_values.items, &decompressed_values);
+
+    try testing.expect(utils.isWithinErrorBound(uncompressed_values, decompressed_values.items, error_bound));
+}
+
+test "swing-mr noisy lines with 0.2 error bound and (even size) compress and decompress" {
+    const alloc = testing.allocator;
+
+    var lines = [_]Line{
+        Line{ .slope = 1, .intercept = 0.0 },
+        Line{ .slope = -1, .intercept = 50 },
+        Line{ .slope = 1, .intercept = -50 },
+        Line{ .slope = -1, .intercept = 100 },
+    };
+
+    var list_values = std.ArrayList(f64).init(alloc);
+    defer list_values.deinit();
+    var compressed_values = ArrayList(u8).init(alloc);
+    defer compressed_values.deinit();
+    var decompressed_values = ArrayList(f64).init(alloc);
+    defer decompressed_values.deinit();
+    const error_bound: f32 = 0.2;
+
+    var rnd = std.rand.DefaultPrng.init(0);
+
+    var i: usize = 0;
+    var lineIndex: usize = 0;
+    while (i < 1000) : (i += 1) {
+        lineIndex = i / 250;
+        const noise = rnd.random().float(f64) * 0.2 - 0.05;
+        try list_values.append(utils.evaluate(&lines[lineIndex], i) + noise);
+    }
+
+    const uncompressed_values = list_values.items;
+
+    try compress(uncompressed_values[0..], &compressed_values, error_bound);
+    try decompress(compressed_values.items, &decompressed_values);
+
+    try testing.expect(utils.isWithinErrorBound(uncompressed_values, decompressed_values.items, error_bound));
+}
+
+test "swing-mr with noisy lines, and random error bound compress and decompress" {
+    const alloc = testing.allocator;
+    var rnd = std.rand.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
+
+    var lines = [_]Line{
+        Line{ .slope = 2 * (rnd.random().float(f64) - 0.5), .intercept = 2 * (rnd.random().float(f64) - 0.5) },
+        Line{ .slope = 2 * (rnd.random().float(f64) - 0.5), .intercept = 2 * (rnd.random().float(f64) - 0.5) },
+        Line{ .slope = 2 * (rnd.random().float(f64) - 0.5), .intercept = 2 * (rnd.random().float(f64) - 0.5) },
+        Line{ .slope = 2 * (rnd.random().float(f64) - 0.5), .intercept = 2 * (rnd.random().float(f64) - 0.5) },
+    };
+
+    var list_values = std.ArrayList(f64).init(alloc);
+    defer list_values.deinit();
+    var compressed_values = ArrayList(u8).init(alloc);
+    defer compressed_values.deinit();
+    var decompressed_values = ArrayList(f64).init(alloc);
+    defer decompressed_values.deinit();
+    const error_bound: f32 = rnd.random().float(f32) * 0.1;
+
+    var i: usize = 0;
+    var lineIndex: usize = 0;
+    while (i < 1000) : (i += 1) {
+        lineIndex = i / 250;
+        const noise = rnd.random().float(f64) * 0.1 - 0.05;
+        try list_values.append(utils.evaluate(&lines[lineIndex], i) + noise);
+    }
+
+    const uncompressed_values = list_values.items;
+
+    try compress(uncompressed_values[0..], &compressed_values, error_bound);
+    try decompress(compressed_values.items, &decompressed_values);
+
+    try testing.expect(utils.isWithinErrorBound(uncompressed_values, decompressed_values.items, error_bound));
 }

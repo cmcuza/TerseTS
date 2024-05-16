@@ -55,7 +55,6 @@ pub fn compress(
     var current_segment: Segment = Segment{ .start_time = first_timestamp, .start_value = uncompressed_values[first_timestamp], .end_time = current_timestamp, .end_value = uncompressed_values[current_timestamp] };
 
     var slope_derivate: f64 = utils.getDerivate(&current_segment); // Numerator of slope derivate to optimize Eq. (6)
-
     try utils.getBoundLine(&current_segment, &upper_bound_line, error_bound);
     try utils.getBoundLine(&current_segment, &lower_bound_line, -error_bound);
 
@@ -67,28 +66,36 @@ pub fn compress(
         if ((upper_y < (uncompressed_values[current_timestamp] - error_bound)) or
             (lower_y > (uncompressed_values[current_timestamp] + error_bound)))
         { // Recording mechanism
-            const n = current_timestamp - first_timestamp;
+            const n = current_timestamp - first_timestamp - 1;
             const den = n * (n + 1) * (2 * n + 1) / 6;
-            const slope: f64 = @max(@min(slope_derivate / utils.usizeToF64(den), lower_bound_line.slope), upper_bound_line.slope);
-
-            try utils.getIntercept(slope, current_timestamp - 1, uncompressed_values[current_timestamp - 1], &current_line);
+            const slope: f64 = @max(@min(slope_derivate / utils.usizeToF64(den), upper_bound_line.slope), lower_bound_line.slope);
+            try utils.getIntercept(slope, first_timestamp, uncompressed_values[first_timestamp], &current_line);
             try utils.appendLine(&current_line, compressed_values);
             try utils.appendIndex(current_timestamp, compressed_values);
-            // utils.printLine(&current_line);
 
             // Update the current segment
             first_timestamp = current_timestamp;
             current_segment.start_time = current_timestamp;
             current_segment.start_value = uncompressed_values[current_timestamp];
-            current_segment.end_time = current_timestamp + 1;
-            current_segment.end_value = uncompressed_values[current_timestamp + 1];
+            if (current_timestamp + 1 < uncompressed_values.len) { // (edge case) only one point left
+                // Update the current segment
+                current_segment.end_time = current_timestamp + 1;
+                current_segment.end_value = uncompressed_values[current_timestamp + 1];
 
-            // Recompute the upper and lower bounds
-            try utils.getBoundLine(&current_segment, &upper_bound_line, error_bound);
-            try utils.getBoundLine(&current_segment, &lower_bound_line, -error_bound);
+                // Recompute the upper and lower bounds
+                try utils.getBoundLine(&current_segment, &upper_bound_line, error_bound);
+                try utils.getBoundLine(&current_segment, &lower_bound_line, -error_bound);
 
-            current_timestamp += 1; // advance the current_timestamp
-            slope_derivate = utils.getDerivate(&current_segment);
+                current_timestamp += 1; // advance the current_timestamp
+                slope_derivate = utils.getDerivate(&current_segment);
+            } else {
+                current_segment.end_time = current_timestamp;
+                current_segment.end_value = uncompressed_values[current_timestamp];
+                upper_bound_line.slope = 0.0;
+                upper_bound_line.intercept = uncompressed_values[current_timestamp];
+                lower_bound_line.slope = 0.0;
+                lower_bound_line.intercept = uncompressed_values[current_timestamp];
+            }
         } else { //filtering mechanism
             // Update the current segment
             current_segment.end_time = current_timestamp;
@@ -118,11 +125,10 @@ pub fn compress(
         }
     }
 
-    const n = current_timestamp - first_timestamp;
+    const n = current_timestamp - first_timestamp - 1;
     const den = n * (n + 1) * (2 * n + 1) / 6;
-    const slope: f64 = @max(@min(slope_derivate / utils.usizeToF64(den), lower_bound_line.slope), upper_bound_line.slope);
-
-    try utils.getIntercept(slope, current_timestamp - 1, uncompressed_values[current_timestamp - 1], &current_line);
+    const slope: f64 = @max(@min(slope_derivate / utils.usizeToF64(den), upper_bound_line.slope), lower_bound_line.slope);
+    try utils.getIntercept(slope, first_timestamp, uncompressed_values[first_timestamp], &current_line);
 
     // utils.printLine(&current_line);
     try utils.appendLine(&current_line, compressed_values);
@@ -174,6 +180,38 @@ test "swing-filter single line compress and decompress" {
     try testing.expect(mem.eql(f64, uncompressed_values[0..], decompressed_values.items));
 }
 
+test "swing-filter single line and single point (odd size) compress and decompress" {
+    const alloc = testing.allocator;
+    const uncompressed_values = [_]f64{ 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 1.5 };
+    var compressed_values = ArrayList(u8).init(alloc);
+    defer compressed_values.deinit();
+    var decompressed_values = ArrayList(f64).init(alloc);
+    defer decompressed_values.deinit();
+
+    const error_bound: f32 = 0.0;
+
+    try compress(uncompressed_values[0..], &compressed_values, error_bound);
+
+    try decompress(compressed_values.items, &decompressed_values);
+    try testing.expect(mem.eql(f64, uncompressed_values[0..], decompressed_values.items));
+}
+
+test "swing-filter single line and single point (even size) compress and decompress" {
+    const alloc = testing.allocator;
+    const uncompressed_values = [_]f64{ 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 1.5 };
+    var compressed_values = ArrayList(u8).init(alloc);
+    defer compressed_values.deinit();
+    var decompressed_values = ArrayList(f64).init(alloc);
+    defer decompressed_values.deinit();
+
+    const error_bound: f32 = 0.0;
+
+    try compress(uncompressed_values[0..], &compressed_values, error_bound);
+
+    try decompress(compressed_values.items, &decompressed_values);
+    try testing.expect(mem.eql(f64, uncompressed_values[0..], decompressed_values.items));
+}
+
 test "swing-filter two parallel lines compress and decompress" {
     const alloc = testing.allocator;
     const uncompressed_values = [_]f64{ 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5 };
@@ -221,4 +259,132 @@ test "swing-filter 4 v-shaped lines compress and decompress" {
     try decompress(compressed_values.items, &decompressed_values);
 
     try testing.expect(mem.eql(f64, uncompressed_values[0..], decompressed_values.items));
+}
+
+test "swing-filter noisy line with 0 error bound and (even size) compress and decompress" {
+    const alloc = testing.allocator;
+    var line = Line{ .slope = 1, .intercept = 0.0 };
+
+    var list_values = std.ArrayList(f64).init(alloc);
+    defer list_values.deinit();
+    var compressed_values = ArrayList(u8).init(alloc);
+    defer compressed_values.deinit();
+    var decompressed_values = ArrayList(f64).init(alloc);
+    defer decompressed_values.deinit();
+    const error_bound: f32 = 0.0;
+
+    var rnd = std.rand.DefaultPrng.init(0);
+
+    var i: usize = 0;
+    while (i < 10) : (i += 1) {
+        const noise = rnd.random().float(f64) * 0.1 - 0.05;
+        try list_values.append(utils.evaluate(&line, i) + noise);
+    }
+
+    const uncompressed_values = list_values.items;
+
+    try compress(uncompressed_values[0..], &compressed_values, error_bound);
+    try decompress(compressed_values.items, &decompressed_values);
+
+    try testing.expect(utils.isWithinErrorBound(uncompressed_values, decompressed_values.items, error_bound));
+}
+
+test "swing-filter noisy line with 0 error bound and (odd size) compress and decompress" {
+    const alloc = testing.allocator;
+
+    var line = Line{ .slope = 1, .intercept = 0.0 };
+
+    var list_values = std.ArrayList(f64).init(alloc);
+    defer list_values.deinit();
+    var compressed_values = ArrayList(u8).init(alloc);
+    defer compressed_values.deinit();
+    var decompressed_values = ArrayList(f64).init(alloc);
+    defer decompressed_values.deinit();
+    const error_bound: f32 = 0.0;
+
+    var rnd = std.rand.DefaultPrng.init(0);
+
+    var i: usize = 0;
+    while (i < 11) : (i += 1) {
+        const noise = rnd.random().float(f64) * 0.1 - 0.05;
+        try list_values.append(utils.evaluate(&line, i) + noise);
+    }
+
+    const uncompressed_values = list_values.items;
+
+    try compress(uncompressed_values[0..], &compressed_values, error_bound);
+    try decompress(compressed_values.items, &decompressed_values);
+
+    try testing.expect(utils.isWithinErrorBound(uncompressed_values, decompressed_values.items, error_bound));
+}
+
+test "swing-filter noisy lines with 0.1 error bound and (even size) compress and decompress" {
+    const alloc = testing.allocator;
+
+    var lines = [_]Line{
+        Line{ .slope = 1, .intercept = 0.0 },
+        Line{ .slope = -1, .intercept = 50 },
+        Line{ .slope = 1, .intercept = -50 },
+        Line{ .slope = -1, .intercept = 100 },
+    };
+
+    var list_values = std.ArrayList(f64).init(alloc);
+    defer list_values.deinit();
+    var compressed_values = ArrayList(u8).init(alloc);
+    defer compressed_values.deinit();
+    var decompressed_values = ArrayList(f64).init(alloc);
+    defer decompressed_values.deinit();
+    const error_bound: f32 = 0.1;
+
+    var rnd = std.rand.DefaultPrng.init(0);
+
+    var i: usize = 0;
+    var lineIndex: usize = 0;
+    while (i < 100) : (i += 1) {
+        lineIndex = i / 25;
+        const noise = rnd.random().float(f64) * 0.1 - 0.05;
+        try list_values.append(utils.evaluate(&lines[lineIndex], i) + noise);
+    }
+
+    const uncompressed_values = list_values.items;
+
+    try compress(uncompressed_values[0..], &compressed_values, error_bound);
+    try decompress(compressed_values.items, &decompressed_values);
+
+    try testing.expect(utils.isWithinErrorBound(uncompressed_values, decompressed_values.items, error_bound));
+}
+
+test "swing-filter with noisy lines, and random error bound compress and decompress" {
+    const alloc = testing.allocator;
+    var rnd = std.rand.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
+
+    var lines = [_]Line{
+        Line{ .slope = 2 * (rnd.random().float(f64) - 0.5), .intercept = 2 * (rnd.random().float(f64) - 0.5) },
+        Line{ .slope = 2 * (rnd.random().float(f64) - 0.5), .intercept = 2 * (rnd.random().float(f64) - 0.5) },
+        Line{ .slope = 2 * (rnd.random().float(f64) - 0.5), .intercept = 2 * (rnd.random().float(f64) - 0.5) },
+        Line{ .slope = 2 * (rnd.random().float(f64) - 0.5), .intercept = 2 * (rnd.random().float(f64) - 0.5) },
+    };
+
+    var list_values = std.ArrayList(f64).init(alloc);
+    defer list_values.deinit();
+    var compressed_values = ArrayList(u8).init(alloc);
+    defer compressed_values.deinit();
+    var decompressed_values = ArrayList(f64).init(alloc);
+    defer decompressed_values.deinit();
+    const error_bound: f32 = rnd.random().float(f32) * 0.1;
+
+    var i: usize = 0;
+    var lineIndex: usize = 0;
+    while (i < 1000) : (i += 1) {
+        lineIndex = i / 250;
+        const noise = rnd.random().float(f64) * 0.1 - 0.05;
+        try list_values.append(utils.evaluate(&lines[lineIndex], i) + noise);
+    }
+
+    const uncompressed_values = list_values.items;
+
+    try compress(uncompressed_values[0..], &compressed_values, error_bound);
+    try decompress(compressed_values.items, &decompressed_values);
+
+    try testing.expect(utils.isWithinErrorBound(uncompressed_values, decompressed_values.items, error_bound));
 }
