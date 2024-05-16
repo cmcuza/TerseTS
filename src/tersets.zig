@@ -20,7 +20,8 @@ const ArrayList = std.ArrayList;
 const testing = std.testing;
 
 const pmc = @import("functional/poor_mans_compression.zig");
-const swing = @import("functional/swing.zig");
+const swing_mr = @import("functional/swing_mr.zig");
+const swing_filter = @import("functional/swing_filter.zig");
 
 /// Global memory allocator used by tersets.
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -56,7 +57,14 @@ export fn compress(
             ) catch {};
         },
         1 => {
-            swing.compress(
+            swing_mr.compress(
+                uncompressed_values_slice,
+                &compressed_values_array_list,
+                configuration.error_bound,
+            ) catch {};
+        },
+        2 => {
+            swing_filter.compress(
                 uncompressed_values_slice,
                 &compressed_values_array_list,
                 configuration.error_bound,
@@ -81,12 +89,12 @@ export fn decompress(
     decompressed_values: *UncompressedValues,
     configuration: Configuration,
 ) i32 {
+    // TODO: split compress into compress_zig with slice and ArrayList
+    // as input and compress_c so C->Zig and Zig-C is implemented once.
+    const compressed_values_slice = compressed_values.data[0..compressed_values.len];
+    var decompressed_values_array_list = ArrayList(f64).init(alloc);
     switch (configuration.method) {
         0 => {
-            // TODO: split compress into compress_zig with slice and ArrayList
-            // as input and compress_c so C->Zig and Zig-C is implemented once.
-            const compressed_values_slice = compressed_values.data[0..compressed_values.len];
-            var decompressed_values_array_list = ArrayList(f64).init(alloc);
             pmc.poorMansCompressionDecompress(
                 compressed_values_slice,
                 &decompressed_values_array_list,
@@ -96,8 +104,22 @@ export fn decompress(
             decompressed_values.data = decompressed_values_array_list.items.ptr;
             decompressed_values.len = decompressed_values_array_list.items.len;
         },
+        1 => {
+            swing_mr.decompress(
+                compressed_values_slice,
+                &decompressed_values_array_list,
+            ) catch {};
+        },
+        2 => {
+            swing_filter.decompress(
+                compressed_values_slice,
+                &decompressed_values_array_list,
+            ) catch {};
+        },
         else => return 1,
     }
+    decompressed_values.data = decompressed_values_array_list.items.ptr;
+    decompressed_values.len = decompressed_values_array_list.items.len;
 
     return 0;
 }

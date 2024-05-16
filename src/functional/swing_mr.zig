@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Implementation of Swing Filter algorithm from the paper:
+//! Implementation a variation of Swing Filter algorithm from the paper:
 //! Hazem Elmeleegy, Ahmed K. Elmagarmid, Emmanuel Cecchet, Walid G. Aref, and Willy Zwaenepoel.
 //! Online piece-wise linear approximation of numerical streams with precision guarantees.
 //! Proc. VLDB Endow. 2, 1, 2009.
 //! https://doi.org/10.14778/1687627.1687645.
+//! In the paper the approximation line minimizes the Square Error of the points in the segment.
+//! This implementation finds the Line that cross the Middle of the Upper and Lower Bounds.
 
 const std = @import("std");
 const ts = @import("../tersets.zig");
@@ -74,14 +76,14 @@ pub fn compress(
     while (current_timestamp < uncompressed_values.len) : (current_timestamp += 1) {
         upper_y = utils.evaluate(&upper_bound_line, current_timestamp);
         lower_y = utils.evaluate(&lower_bound_line, current_timestamp);
-        // The new point is outside the error bound
+        // Is the new point more than \epsilon above upper_y or bellow lower_y?
         if ((upper_y < (uncompressed_values[current_timestamp] - error_bound)) or
             (lower_y > (uncompressed_values[current_timestamp] + error_bound)))
-        {
+        { // Recording mechanism
             upper_y = utils.evaluate(&upper_bound_line, current_timestamp - 1);
             lower_y = utils.evaluate(&lower_bound_line, current_timestamp - 1);
 
-            current_segment.end_value = (upper_y + lower_y) / 2;
+            current_segment.end_value = (upper_y + lower_y) / 2; // Mid-Range of the upper and lower bound
 
             try utils.getLine(&current_segment, &current_line);
             try appendLine(&current_line, compressed_values);
@@ -98,9 +100,9 @@ pub fn compress(
             try utils.getBoundLine(&current_segment, &upper_bound_line, error_bound);
             try utils.getBoundLine(&current_segment, &lower_bound_line, -error_bound);
 
-            current_timestamp += 1;
-        } // The new point is still within the error bound
-        else {
+            current_timestamp += 1; // advance the current_timestamp
+
+        } else { //filtering mechanism
             // Update the current segment
             current_segment.end_time = current_timestamp;
             current_segment.end_value = uncompressed_values[current_timestamp];
@@ -109,19 +111,19 @@ pub fn compress(
             try utils.getBoundLine(&current_segment, &new_upper_bound_line, error_bound);
             try utils.getBoundLine(&current_segment, &new_lower_bound_line, -error_bound);
 
-            const tmp_upper_y: f64 = utils.evaluate(&new_upper_bound_line, current_timestamp);
-            const tmp_lower_y: f64 = utils.evaluate(&new_lower_bound_line, current_timestamp);
+            const new_upper_y: f64 = utils.evaluate(&new_upper_bound_line, current_timestamp);
+            const new_lower_y: f64 = utils.evaluate(&new_lower_bound_line, current_timestamp);
 
             // Outdate the upper and lower bounds if needed
-            if (upper_y > tmp_upper_y) {
+            if (upper_y > new_upper_y) { // Swing down
                 upper_bound_line.slope = new_upper_bound_line.slope;
                 upper_bound_line.intercept = new_upper_bound_line.intercept;
-                upper_y = tmp_upper_y;
+                upper_y = new_upper_y;
             }
-            if (lower_y < tmp_lower_y) {
+            if (lower_y < new_lower_y) { //Swing up
                 lower_bound_line.slope = new_lower_bound_line.slope;
                 lower_bound_line.intercept = new_lower_bound_line.intercept;
-                lower_y = tmp_lower_y;
+                lower_y = new_lower_y;
             }
         }
     }
@@ -161,7 +163,7 @@ pub fn decompress(
     }
 }
 
-test "swing single line compress and decompress" {
+test "swing-mr single line compress and decompress" {
     const alloc = testing.allocator;
     const uncompressed_values = [_]f64{ 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5 };
     var compressed_values = ArrayList(u8).init(alloc);
@@ -178,7 +180,7 @@ test "swing single line compress and decompress" {
     try testing.expect(mem.eql(f64, uncompressed_values[0..], decompressed_values.items));
 }
 
-test "swing two parallel lines compress and decompress" {
+test "swing-mr two parallel lines compress and decompress" {
     const alloc = testing.allocator;
     const uncompressed_values = [_]f64{ 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5 };
 
@@ -194,7 +196,7 @@ test "swing two parallel lines compress and decompress" {
     try testing.expect(mem.eql(f64, uncompressed_values[0..], decompressed_values.items));
 }
 
-test "swing 4 v-shaped lines compress and decompress" {
+test "swing-mr 4 v-shaped lines compress and decompress" {
     const alloc = testing.allocator;
 
     var lines = [_]Line{

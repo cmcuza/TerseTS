@@ -13,6 +13,7 @@
 // limitations under the License.
 
 const std = @import("std");
+const ArrayList = std.ArrayList;
 
 pub const Segment = struct {
     start_time: usize,
@@ -36,6 +37,12 @@ pub fn isWithinErrorBound(
     }
     return true;
 }
+
+pub fn getIntercept(slope: f64, x: usize, y: f64, line: *Line) !void {
+    line.slope = slope;
+    line.intercept = y - slope * usizeToF64(x);
+}
+
 pub fn getLine(segment: *Segment, line: *Line) !void {
     std.debug.assert(segment.end_time != segment.start_time);
     const duration = @as(f64, @floatFromInt(segment.end_time - segment.start_time));
@@ -54,8 +61,31 @@ pub fn evaluate(line: *Line, timestamp: usize) f64 {
     return line.slope * @as(f64, @floatFromInt(timestamp)) + line.intercept;
 }
 
+pub fn appendLine(
+    line: *Line,
+    compressed_values: *ArrayList(u8),
+) !void {
+    const valueAsBytes: [8]u8 = @bitCast(line.slope);
+    try compressed_values.appendSlice(valueAsBytes[0..]);
+    const indexAsBytes: [8]u8 = @bitCast(line.intercept);
+    try compressed_values.appendSlice(indexAsBytes[0..]);
+}
+
+pub fn appendIndex(index: usize, compressed_values: *ArrayList(u8)) !void {
+    const indexAsFloat: [8]u8 = @bitCast(@as(f64, @floatFromInt(index)));
+    try compressed_values.appendSlice(indexAsFloat[0..]);
+}
+
+pub fn usizeToF64(value: usize) f64 {
+    return @as(f64, @floatFromInt(value));
+}
+
+pub fn getDerivate(segment: *Segment) f64 {
+    return (segment.end_value - segment.start_value) * @as(f64, @floatFromInt(segment.end_time - segment.start_time));
+}
+
 pub fn printLine(line: *Line) void {
-    std.debug.print("Line: slope {} intercept {}\n", .{ line.slope, line.intercept });
+    std.debug.print("\nLine: slope {} intercept {}\n", .{ line.slope, line.intercept });
 }
 
 pub fn printSegment(segment: *Segment) void {
