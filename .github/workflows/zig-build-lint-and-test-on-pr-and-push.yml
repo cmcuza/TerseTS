@@ -26,6 +26,7 @@ jobs:
     name: Zig Build and Test
 
     runs-on: ${{ matrix.operating-system }}
+    timeout-minutes: 10
     strategy:
       matrix:
         operating-system: [ubuntu-latest, macos-latest, windows-latest]
@@ -36,7 +37,7 @@ jobs:
     - name: Setup Zig
       uses: goto-bus-stop/setup-zig@v2
       with:
-        version: 0.12.0  # Use a stable Zig version
+        version: 0.11.0  # Use a stable Zig version
         cache: true
 
     - name: Zig Build Debug
