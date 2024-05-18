@@ -24,7 +24,7 @@ const testing = std.testing;
 
 const ArrayList = std.ArrayList;
 
-pub fn poorMansCompressionCompress(
+pub fn compress(
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
     error_bound: f32,
@@ -62,7 +62,7 @@ fn appendValueAndIndexToArrayList(
     try compressed_values.appendSlice(indexAsBytes[0..]);
 }
 
-pub fn poorMansCompressionDecompress(
+pub fn decompress(
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
 ) error{OutOfMemory}!void {
@@ -92,8 +92,8 @@ test "PMC-MR" {
     var decompressed_values = ArrayList(f64).init(alloc);
     defer decompressed_values.deinit();
 
-    try poorMansCompressionCompress(uncompressed_values[0..], &compressed_values, 0);
-    try poorMansCompressionDecompress(compressed_values.items, &decompressed_values);
+    try compress(uncompressed_values[0..], &compressed_values, 0);
+    try decompress(compressed_values.items, &decompressed_values);
 
     try testing.expect(mem.eql(f64, uncompressed_values[0..], decompressed_values.items));
 }
