@@ -16,10 +16,11 @@
 
 const std = @import("std");
 const math = std.math;
-const ArrayList = std.ArrayList;
 const testing = std.testing;
+const ArrayList = std.ArrayList;
 
 const tersets = @import("tersets.zig");
+const Error = tersets.Error;
 
 /// Global memory allocator used by tersets.
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -37,8 +38,9 @@ pub const Configuration = extern struct { method: u8, error_bound: f32 };
 /// Compress `uncompressed_values` to `compressed_values` according to `configuration`.
 /// On success zero is returned, and the following non-zero values are returned on errors:
 /// - 1) Unsupported compression method.
-/// - 2) Error bound is negative.
-/// - 3) No memory for decompressed values.
+/// - 2) No uncompressed values.
+/// - 3) Error bound is negative.
+/// - 5) Out-of-memory for compression.
 export fn compress(
     uncompressed_values_array: UncompressedValues,
     compressed_values_array: *CompressedValues,
@@ -48,14 +50,13 @@ export fn compress(
     var compressed_values = ArrayList(u8).init(allocator);
     if (configuration.method > 0) return 1; // Check if larger than the largest int used by Method.
     const method: tersets.Method = @enumFromInt(configuration.method);
-    if (configuration.error_bound < 0) return 2;
 
     tersets.compress(
         uncompressed_values,
         &compressed_values,
         method,
         configuration.error_bound,
-    ) catch return 3;
+    ) catch |err| return errorToInt(err);
 
     compressed_values_array.data = compressed_values.items.ptr;
     compressed_values_array.len = compressed_values.items.len;
@@ -66,8 +67,9 @@ export fn compress(
 /// Decompress `compressed_values` to `uncompressed_values` according to `configuration`.
 /// On success zero is returned, and the following non-zero values are returned on errors:
 /// - 1) Unsupported decompression method.
-/// - 2) Error bound is negative.
-/// - 3) No memory for decompressed values.
+/// - 2) No compressed values.
+/// - 4) Incorrect compressed values.
+/// - 5) Out-of-memory for decompression.
 export fn decompress(
     compressed_values_array: CompressedValues,
     decompressed_values_array: *UncompressedValues,
@@ -77,9 +79,12 @@ export fn decompress(
     var decompressed_values = ArrayList(f64).init(allocator);
     if (configuration.method > 0) return 1; // Check if larger than the largest int used by Method.
     const method: tersets.Method = @enumFromInt(configuration.method);
-    if (configuration.error_bound < 0) return 2; // Check is included for consistency with compress.
 
-    tersets.decompress(compressed_values, &decompressed_values, method) catch return 3;
+    tersets.decompress(
+        compressed_values,
+        &decompressed_values,
+        method,
+    ) catch |err| return errorToInt(err);
 
     decompressed_values_array.data = decompressed_values.items.ptr;
     decompressed_values_array.len = decompressed_values.items.len;
@@ -90,6 +95,16 @@ export fn decompress(
 /// `Array` is a pointer to values of type `data_type` and the number of values.
 fn Array(comptime data_type: type) type {
     return extern struct { data: [*]const data_type, len: usize };
+}
+
+// Convert `err` to an `i32` as is not guaranteed to be stable `@intFromError`.
+fn errorToInt(err: Error) i32 {
+    switch (err) {
+        Error.EmptyInput => return 2,
+        Error.NegativeErrorBound => return 3,
+        Error.IncorrectInput => return 4,
+        Error.OutOfMemory => return 5,
+    }
 }
 
 test "method enum must match method constants" {
@@ -108,13 +123,13 @@ test "error for unknown compression method" {
     var configuration = Configuration{ .method = 0, .error_bound = 0 };
     configuration.method = math.maxInt(@TypeOf(configuration.method));
 
-    const result = compress(
+    const return_code = compress(
         uncompressed_values,
         &compressed_values,
         configuration,
     );
 
-    try testing.expectEqual(result, 1);
+    try testing.expectEqual(return_code, 1);
 }
 
 test "error for negative error bound when compressing" {
@@ -128,13 +143,13 @@ test "error for negative error bound when compressing" {
     };
     const configuration = Configuration{ .method = 0, .error_bound = -1 };
 
-    const result = compress(
+    const return_code = compress(
         uncompressed_values,
         &compressed_values,
         configuration,
     );
 
-    try testing.expectEqual(result, 2);
+    try testing.expectEqual(return_code, 2);
 }
 
 test "error for unknown decompression method" {
@@ -149,13 +164,13 @@ test "error for unknown decompression method" {
     var configuration = Configuration{ .method = 0, .error_bound = 0 };
     configuration.method = math.maxInt(@TypeOf(configuration.method));
 
-    const result = decompress(
+    const return_code = decompress(
         compressed_values,
         &decompressed_values,
         configuration,
     );
 
-    try testing.expectEqual(result, 1);
+    try testing.expectEqual(return_code, 1);
 }
 
 test "error for negative error bound when decompressing" {
@@ -169,13 +184,13 @@ test "error for negative error bound when decompressing" {
     };
     const configuration = Configuration{ .method = 0, .error_bound = -1 };
 
-    const result = decompress(
+    const return_code = decompress(
         compressed_values,
         &decompressed_values,
         configuration,
     );
 
-    try testing.expectEqual(result, 2);
+    try testing.expectEqual(return_code, 2);
 }
 
 test "can compress and decompress" {
@@ -199,14 +214,14 @@ test "can compress and decompress" {
         &compressed_values,
         configuration,
     );
-    try testing.expect(compress_code == 0);
+    try testing.expectEqual(compress_code, 0);
 
     const decompress_code = decompress(
         compressed_values,
         &decompressed_values,
         configuration,
     );
-    try testing.expect(decompress_code == 0);
+    try testing.expectEqual(decompress_code, 0);
 
     try testing.expectEqual(decompressed_values.len, uncompressed_values.len);
 

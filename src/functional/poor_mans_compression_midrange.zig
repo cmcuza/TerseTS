@@ -21,15 +21,18 @@ const std = @import("std");
 const math = std.math;
 const mem = std.mem;
 const testing = std.testing;
-
 const ArrayList = std.ArrayList;
 
+const tersets = @import("../tersets.zig");
+const Error = tersets.Error;
+
+/// Compress `uncompressed_values` within `error_bound` using "Poor Man’s Compression - Midrange"
+/// and write the result to `compressed_values`. If an error occurs it is returned.
 pub fn compress(
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
     error_bound: f32,
-) !void {
-    // TODO: check for the empty list or simplify algorithm using -INF/+INF.
+) Error!void {
     var index: usize = 0; // n.
     var minimum = uncompressed_values[0]; // m.
     var maximum = uncompressed_values[0]; // M.
@@ -62,15 +65,16 @@ fn appendValueAndIndexToArrayList(
     try compressed_values.appendSlice(indexAsBytes[0..]);
 }
 
+/// Decompress `compressed_values` using "Poor Man’s Compression - Midrange" and write the result
+/// to `decompressed_values`. If an error occurs it is returned.
 pub fn decompress(
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
-) error{OutOfMemory}!void {
-    // TODO: Check length of uncompressed_values is modulo 16.
-    const compressed_values_and_index = mem.bytesAsSlice(
-        f64,
-        compressed_values,
-    );
+) Error!void {
+    // The compressed representation is pairs containing a 64-bit float value and 64-bit end index.
+    if (compressed_values.len % 16 != 0) return Error.IncorrectInput;
+
+    const compressed_values_and_index = mem.bytesAsSlice(f64, compressed_values);
 
     var compressed_index: usize = 0;
     var uncompressed_index: usize = 0;

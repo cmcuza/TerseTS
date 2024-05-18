@@ -20,7 +20,15 @@ const ArrayList = std.ArrayList;
 
 const pmc_mr = @import("functional/poor_mans_compression_midrange.zig");
 
-/// The compression methods.
+/// The errors that can occur in TerseTS.
+pub const Error = error{
+    EmptyInput,
+    IncorrectInput,
+    NegativeErrorBound,
+    OutOfMemory,
+};
+
+/// The compression methods in TerseTS.
 pub const Method = enum {
     PoorMansCompressionMidrange,
 };
@@ -32,7 +40,10 @@ pub fn compress(
     compressed_values: *ArrayList(u8),
     method: Method,
     error_bound: f32,
-) !void {
+) Error!void {
+    if (uncompressed_values.len == 0) return Error.EmptyInput;
+    if (error_bound < 0) return Error.NegativeErrorBound;
+
     switch (method) {
         .PoorMansCompressionMidrange => {
             try pmc_mr.compress(uncompressed_values, compressed_values, error_bound);
@@ -46,7 +57,9 @@ pub fn decompress(
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
     method: Method,
-) !void {
+) Error!void {
+    if (compressed_values.len == 0) return Error.EmptyInput;
+
     switch (method) {
         .PoorMansCompressionMidrange => {
             try pmc_mr.decompress(compressed_values, decompressed_values);
