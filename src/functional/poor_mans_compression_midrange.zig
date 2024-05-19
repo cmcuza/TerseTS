@@ -34,8 +34,8 @@ pub fn compress(
     error_bound: f32,
 ) Error!void {
     var index: usize = 0; // n.
-    var minimum = uncompressed_values[0]; // m.
-    var maximum = uncompressed_values[0]; // M.
+    var minimum: f80 = uncompressed_values[0]; // m.
+    var maximum: f80 = uncompressed_values[0]; // M.
 
     for (uncompressed_values) |value| {
         if ((@max(value, maximum) - @min(value, minimum)) > 2 * error_bound) {
@@ -55,10 +55,11 @@ pub fn compress(
 }
 
 fn appendValueAndIndexToArrayList(
-    value: f64,
+    compressed_value: f80,
     index: usize,
     compressed_values: *ArrayList(u8),
 ) !void {
+    const value: f64 = @floatCast(compressed_value);
     const valueAsBytes: [8]u8 = @bitCast(value);
     try compressed_values.appendSlice(valueAsBytes[0..]);
     const indexAsBytes: [8]u8 = @bitCast(index); // No -1 due to 0 indexing.
