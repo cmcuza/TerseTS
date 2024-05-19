@@ -133,10 +133,30 @@ test "error for unknown compression method" {
     try testing.expectEqual(return_code, 1);
 }
 
+test "error for empty input when compressing" {
+    const uncompressed_values = UncompressedValues{
+        .data = undefined,
+        .len = 0,
+    };
+    var compressed_values = CompressedValues{
+        .data = undefined,
+        .len = undefined,
+    };
+    const configuration = Configuration{ .method = 0, .error_bound = 0 };
+
+    const return_code = compress(
+        uncompressed_values,
+        &compressed_values,
+        configuration,
+    );
+
+    try testing.expectEqual(return_code, 2);
+}
+
 test "error for negative error bound when compressing" {
     const uncompressed_values = UncompressedValues{
         .data = undefined,
-        .len = undefined,
+        .len = 1, // If undefined an empty input error is returned.
     };
     var compressed_values = CompressedValues{
         .data = undefined,
@@ -150,7 +170,7 @@ test "error for negative error bound when compressing" {
         configuration,
     );
 
-    try testing.expectEqual(return_code, 2);
+    try testing.expectEqual(return_code, 3);
 }
 
 test "error for unknown decompression method" {
@@ -174,16 +194,16 @@ test "error for unknown decompression method" {
     try testing.expectEqual(return_code, 1);
 }
 
-test "error for negative error bound when decompressing" {
+test "error for empty input when decompressing" {
     const compressed_values = CompressedValues{
         .data = undefined,
-        .len = undefined,
+        .len = 0,
     };
     var decompressed_values = UncompressedValues{
         .data = undefined,
         .len = undefined,
     };
-    const configuration = Configuration{ .method = 0, .error_bound = -1 };
+    const configuration = Configuration{ .method = 0, .error_bound = 0 };
 
     const return_code = decompress(
         compressed_values,
