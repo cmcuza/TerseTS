@@ -48,7 +48,7 @@ export fn compress(
 ) i32 {
     const uncompressed_values = uncompressed_values_array.data[0..uncompressed_values_array.len];
     var compressed_values = ArrayList(u8).init(allocator);
-    if (configuration.method > 0) return 1; // Check if larger than the largest int used by Method.
+    if (configuration.method > 1) return 1; // Check if larger than the largest int used by Method.
     const method: tersets.Method = @enumFromInt(configuration.method);
 
     tersets.compress(
@@ -77,7 +77,7 @@ export fn decompress(
 ) i32 {
     const compressed_values = compressed_values_array.data[0..compressed_values_array.len];
     var decompressed_values = ArrayList(f64).init(allocator);
-    if (configuration.method > 0) return 1; // Check if larger than the largest int used by Method.
+    if (configuration.method > 1) return 1; // Check if larger than the largest int used by Method.
     const method: tersets.Method = @enumFromInt(configuration.method);
 
     tersets.decompress(
