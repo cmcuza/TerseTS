@@ -109,6 +109,7 @@ fn errorToInt(err: Error) i32 {
 
 test "method enum must match method constants" {
     try testing.expectEqual(@intFromEnum(tersets.Method.PoorMansCompressionMidrange), 0);
+    try testing.expectEqual(@intFromEnum(tersets.Method.PoorMansCompressionMean), 1);
 }
 
 test "error for unknown compression method" {
