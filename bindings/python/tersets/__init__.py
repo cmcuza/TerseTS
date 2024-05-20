@@ -77,7 +77,7 @@ def compress(values: List[float]) -> bytes:
 
     compressed_values = __CompressedValues()
 
-    configuration = __Configuration(0, 0.0)
+    configuration = __Configuration(2, 0.0)
 
     error = __library.compress(
         uncompressed_values, byref(compressed_values), configuration
@@ -98,7 +98,7 @@ def decompress(values: bytes) -> List[float]:
 
     decompressed_values = __UncompressedValues()
 
-    configuration = __Configuration(0, 0.0)
+    configuration = __Configuration(2, 0.0)
 
     error = __library.decompress(
         compressed_values, byref(decompressed_values), configuration
