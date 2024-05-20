@@ -17,7 +17,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
 
     // Configuration.
-    const path = "src/tersets.zig";
+    const path = "src/capi.zig";
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const options = .{
