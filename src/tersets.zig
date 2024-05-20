@@ -46,8 +46,11 @@ pub fn compress(
     if (error_bound < 0) return Error.NegativeErrorBound;
 
     switch (method) {
-        .PoorMansCompressionMidrange, .PoorMansCompressionMean => {
+        .PoorMansCompressionMidrange => {
             try pmc.compress_midrange(uncompressed_values, compressed_values, error_bound);
+        },
+        .PoorMansCompressionMean => {
+            try pmc.compress_mean(uncompressed_values, compressed_values, error_bound);
         },
     }
 }
@@ -62,10 +65,7 @@ pub fn decompress(
     if (compressed_values.len == 0) return Error.EmptyInput;
 
     switch (method) {
-        .PoorMansCompressionMidrange => {
-            try pmc.decompress(compressed_values, decompressed_values);
-        },
-        .PoorMansCompressionMean => {
+        .PoorMansCompressionMidrange, .PoorMansCompressionMean => {
             try pmc.decompress(compressed_values, decompressed_values);
         },
     }
