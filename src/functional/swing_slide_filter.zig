@@ -20,8 +20,6 @@
 
 const std = @import("std");
 const ts = @import("../tersets.zig");
-// const utils = @import("../utils.zig");
-const print = std.debug.print;
 
 const mem = std.mem;
 const testing = std.testing;
@@ -35,9 +33,10 @@ const Segment = struct {
     end_value: f64,
 };
 
+/// Line structure uses f80 to avoid overflows with f64
 const Line = struct {
-    slope: f64,
-    intercept: f64,
+    slope: f80,
+    intercept: f80,
 };
 
 pub fn isWithinErrorBound(
@@ -55,30 +54,72 @@ fn usizeToF64(value: usize) f64 {
     return @as(f64, @floatFromInt(value));
 }
 
-fn getIntercept(slope: f64, x: usize, y: f64, line: *Line) !void {
+fn f64ToUsize(value: f64) usize {
+    return @as(usize, @intFromFloat(value));
+}
+
+fn usizeToF80(value: usize) f80 {
+    return @as(f80, @floatFromInt(value));
+}
+
+fn f80Tof64(value: f80) f64 {
+    return @as(f64, @floatCast(value));
+}
+
+fn f64Tof80(value: f64) f80 {
+    return @as(f80, @floatCast(value));
+}
+
+fn getIntercept(slope: f80, x: usize, y: f64, line: *Line) !void {
     line.slope = slope;
     line.intercept = y - slope * usizeToF64(x);
 }
 
 fn getSwingLine(segment: *Segment, line: *Line, error_bound: f32) !void {
-    std.debug.assert(segment.end_time != segment.start_time);
-    const duration = usizeToF64(segment.end_time - segment.start_time);
-    line.slope = (segment.end_value + error_bound - segment.start_value) / duration;
-    line.intercept = segment.start_value - line.slope * usizeToF64(segment.start_time);
+    if (segment.end_time != segment.start_time) {
+        const duration = usizeToF80(segment.end_time - segment.start_time);
+        line.slope = (segment.end_value + error_bound - segment.start_value) / duration;
+        line.intercept = segment.start_value - line.slope * usizeToF80(segment.start_time);
+    } else {
+        line.slope = 0.0;
+        line.intercept = segment.start_value;
+    }
 }
 
-fn evaluate(line: *Line, timestamp: usize) f64 {
-    return line.slope * usizeToF64(timestamp) + line.intercept;
+fn evaluate(line: *Line, timestamp: usize) f80 {
+    return line.slope * usizeToF80(timestamp) + line.intercept;
 }
 
 fn appendLine(
     line: *Line,
     compressed_values: *ArrayList(u8),
 ) !void {
-    const valueAsBytes: [8]u8 = @bitCast(line.slope);
+    const slopeAsBytes: [8]u8 = @bitCast(f80Tof64(line.slope));
+    try compressed_values.appendSlice(slopeAsBytes[0..]);
+    const interceptAsBytes: [8]u8 = @bitCast(f80Tof64(line.intercept));
+    try compressed_values.appendSlice(interceptAsBytes[0..]);
+}
+
+fn appendValue(
+    value: f64,
+    compressed_values: *ArrayList(u8),
+) !void {
+    const valueAsBytes: [8]u8 = @bitCast(value);
     try compressed_values.appendSlice(valueAsBytes[0..]);
-    const indexAsBytes: [8]u8 = @bitCast(line.intercept);
-    try compressed_values.appendSlice(indexAsBytes[0..]);
+}
+
+fn appendSegment(
+    segment: *Segment,
+    compressed_values: *ArrayList(u8),
+) !void {
+    // const stAsBytes: [8]u8 = @bitCast(usizeToF64(segment.start_time));
+    // try compressed_values.appendSlice(stAsBytes[0..]);
+    const svAsBytes: [8]u8 = @bitCast(segment.start_value);
+    try compressed_values.appendSlice(svAsBytes[0..]);
+    const evAsBytes: [8]u8 = @bitCast(segment.end_value);
+    try compressed_values.appendSlice(evAsBytes[0..]);
+    const etAsBytes: [8]u8 = @bitCast(usizeToF64(segment.end_time + 1));
+    try compressed_values.appendSlice(etAsBytes[0..]);
 }
 
 fn appendIndex(index: usize, compressed_values: *ArrayList(u8)) !void {
@@ -86,8 +127,8 @@ fn appendIndex(index: usize, compressed_values: *ArrayList(u8)) !void {
     try compressed_values.appendSlice(indexAsFloat[0..]);
 }
 
-fn getDerivate(segment: *Segment) f64 {
-    return (segment.end_value - segment.start_value) * usizeToF64(segment.end_time - segment.start_time);
+fn getDerivate(segment: *Segment) f80 {
+    return (segment.end_value - segment.start_value) * usizeToF80(segment.end_time - segment.start_time);
 }
 
 /// @param uncompressed_values: the input time series and length
@@ -99,8 +140,8 @@ pub fn compress_swing(
     error_bound: f32,
 ) !void {
     // Initiallization
-    var upper_y: f64 = 0;
-    var lower_y: f64 = 0;
+    var upper_y: f80 = 0;
+    var lower_y: f80 = 0;
 
     var upper_bound_line: Line = Line{ .slope = 0, .intercept = 0 };
     var lower_bound_line: Line = Line{ .slope = 0, .intercept = 0 };
@@ -118,7 +159,7 @@ pub fn compress_swing(
         .end_value = uncompressed_values[current_timestamp],
     };
 
-    var slope_derivate: f64 = getDerivate(&current_segment); // Numerator of slope derivate to optimize Eq. (6)
+    var slope_derivate: f80 = getDerivate(&current_segment); // Numerator of slope derivate to optimize Eq. (6)
 
     // Get the upper and lower bounds
     try getSwingLine(&current_segment, &upper_bound_line, error_bound);
@@ -135,14 +176,21 @@ pub fn compress_swing(
         { // Recording mechanism
             const n = current_timestamp - first_timestamp - 1;
             const den = n * (n + 1) * (2 * n + 1) / 6; // Denominator of Eq. 6
-            const slope: f64 = @max(
-                @min(slope_derivate / usizeToF64(den), upper_bound_line.slope),
+            const slope: f80 = @max(
+                @min(
+                    slope_derivate / usizeToF80(den),
+                    upper_bound_line.slope,
+                ),
                 lower_bound_line.slope,
             ); // Get optimal slope that minimizes the squared error
 
             try getIntercept(slope, first_timestamp, uncompressed_values[first_timestamp], &current_line);
 
-            try appendLine(&current_line, compressed_values);
+            const end_value: f64 = f80Tof64(evaluate(&current_line, current_timestamp - 1));
+
+            // Record the current segment
+            try appendValue(current_segment.start_value, compressed_values);
+            try appendValue(end_value, compressed_values);
             try appendIndex(current_timestamp, compressed_values);
 
             // Update the current segment
@@ -177,8 +225,8 @@ pub fn compress_swing(
             try getSwingLine(&current_segment, &new_upper_bound_line, error_bound);
             try getSwingLine(&current_segment, &new_lower_bound_line, -error_bound);
 
-            const new_upper_y: f64 = evaluate(&new_upper_bound_line, current_timestamp);
-            const new_lower_y: f64 = evaluate(&new_lower_bound_line, current_timestamp);
+            const new_upper_y: f80 = evaluate(&new_upper_bound_line, current_timestamp);
+            const new_lower_y: f80 = evaluate(&new_lower_bound_line, current_timestamp);
 
             // Outdate the upper and lower bounds if needed
             if (upper_y > new_upper_y) { // Swing down
@@ -199,14 +247,23 @@ pub fn compress_swing(
 
     const n = current_timestamp - first_timestamp - 1;
     const den = n * (n + 1) * (2 * n + 1) / 6; // Denominator of Eq. 6
-    const slope: f64 = @max(
-        @min(slope_derivate / usizeToF64(den), upper_bound_line.slope),
+    const slope: f80 = @max(
+        @min(slope_derivate / usizeToF80(den), upper_bound_line.slope),
         lower_bound_line.slope,
     ); // Get optimal slope that minimizes the squared error
 
-    try getIntercept(slope, first_timestamp, uncompressed_values[first_timestamp], &current_line);
+    try getIntercept(
+        slope,
+        first_timestamp,
+        uncompressed_values[first_timestamp],
+        &current_line,
+    );
 
-    try appendLine(&current_line, compressed_values);
+    const end_value: f64 = f80Tof64(evaluate(&current_line, current_timestamp - 1));
+
+    // Record the current segment
+    try appendValue(current_segment.start_value, compressed_values);
+    try appendValue(end_value, compressed_values);
     try appendIndex(current_timestamp, compressed_values);
 }
 
@@ -214,27 +271,36 @@ pub fn decompress(
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
 ) error{OutOfMemory}!void {
-    // TODO: Check length of uncompressed_values is modulo 24.
+    // TODO: Check length of uncompressed_values is modulo 32.
 
     const compressed_lines_and_index = mem.bytesAsSlice(
         f64,
         compressed_values,
     );
 
-    var previous_timestamp: usize = 0;
     var current_line: Line = Line{ .slope = 0, .intercept = 0 };
+    var current_segment: Segment = Segment{
+        .start_time = 0,
+        .start_value = 0,
+        .end_time = 0,
+        .end_value = 0,
+    };
 
+    var first_timestamp: usize = 0;
     var index: usize = 0;
     while (index < compressed_lines_and_index.len) : (index += 3) {
-        const next_timestamp = @as(usize, @intFromFloat(compressed_lines_and_index[index + 2]));
-        var current_timestamp = previous_timestamp;
-        current_line.slope = compressed_lines_and_index[index];
-        current_line.intercept = compressed_lines_and_index[index + 1];
-        while (current_timestamp < next_timestamp) : (current_timestamp += 1) {
-            const y: f64 = evaluate(&current_line, current_timestamp);
+        current_segment.start_time = first_timestamp;
+        current_segment.start_value = compressed_lines_and_index[index];
+        current_segment.end_value = compressed_lines_and_index[index + 1];
+        current_segment.end_time = f64ToUsize(compressed_lines_and_index[index + 2] - 1);
+
+        try getSwingLine(&current_segment, &current_line, 0.0);
+        var current_timestamp: usize = current_segment.start_time;
+        while (current_timestamp < current_segment.end_time + 1) : (current_timestamp += 1) {
+            const y: f64 = f80Tof64(evaluate(&current_line, current_timestamp));
             try decompressed_values.append(y);
         }
-        previous_timestamp = current_timestamp;
+        first_timestamp = current_timestamp;
     }
 }
 
@@ -251,7 +317,6 @@ test "swing-filter single line compress and decompress" {
     try compress_swing(uncompressed_values[0..], &compressed_values, error_bound);
 
     try decompress(compressed_values.items, &decompressed_values);
-
     try testing.expect(mem.eql(f64, uncompressed_values[0..], decompressed_values.items));
 }
 
@@ -325,7 +390,7 @@ test "swing-filter 4 v-shaped lines compress and decompress" {
     var lineIndex: usize = 0;
     while (i < 100) : (i += 1) {
         lineIndex = i / 25;
-        try list_values.append(evaluate(&lines[lineIndex], i));
+        try list_values.append(f80Tof64(evaluate(&lines[lineIndex], i)));
     }
 
     const uncompressed_values = list_values.items;
@@ -353,7 +418,7 @@ test "swing-filter noisy line with 0 error bound and (even size) compress and de
     var i: usize = 0;
     while (i < 10) : (i += 1) {
         const noise = rnd.random().float(f64) * 0.1 - 0.05;
-        try list_values.append(evaluate(&line, i) + noise);
+        try list_values.append(f80Tof64(evaluate(&line, i) + noise));
     }
 
     const uncompressed_values = list_values.items;
@@ -382,7 +447,7 @@ test "swing-filter noisy line with 0 error bound and (odd size) compress and dec
     var i: usize = 0;
     while (i < 11) : (i += 1) {
         const noise = rnd.random().float(f64) * 0.1 - 0.05;
-        try list_values.append(evaluate(&line, i) + noise);
+        try list_values.append(f80Tof64(evaluate(&line, i) + noise));
     }
 
     const uncompressed_values = list_values.items;
@@ -418,7 +483,7 @@ test "swing-filter noisy lines with 0.1 error bound and (even size) compress and
     while (i < 100) : (i += 1) {
         lineIndex = i / 25;
         const noise = rnd.random().float(f64) * 0.1 - 0.05;
-        try list_values.append(evaluate(&lines[lineIndex], i) + noise);
+        try list_values.append(f80Tof64(evaluate(&lines[lineIndex], i) + noise));
     }
 
     const uncompressed_values = list_values.items;
@@ -453,7 +518,7 @@ test "swing-filter with noisy lines, and random error bound compress and decompr
     while (i < 1000) : (i += 1) {
         lineIndex = i / 250;
         const noise = rnd.random().float(f64) * 0.1 - 0.05;
-        try list_values.append(evaluate(&lines[lineIndex], i) + noise);
+        try list_values.append(f80Tof64(evaluate(&lines[lineIndex], i) + noise));
     }
 
     const uncompressed_values = list_values.items;

@@ -68,7 +68,7 @@ class __Configuration(Structure):
 
 
 # Public Functions.
-def compress(values: List[float]) -> bytes:
+def compress(values: List[float], error_bound: float) -> bytes:
     """Compresses values."""
 
     uncompressed_values = __UncompressedValues()
@@ -77,7 +77,7 @@ def compress(values: List[float]) -> bytes:
 
     compressed_values = __CompressedValues()
 
-    configuration = __Configuration(2, 0.0)
+    configuration = __Configuration(2, error_bound)
 
     error = __library.compress(
         uncompressed_values, byref(compressed_values), configuration
