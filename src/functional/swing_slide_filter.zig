@@ -19,13 +19,13 @@
 //! https://doi.org/10.14778/1687627.1687645".
 
 const std = @import("std");
-const ts = @import("../tersets.zig");
+const tersets = @import("../tersets.zig");
 
 const mem = std.mem;
 const testing = std.testing;
 
 const ArrayList = std.ArrayList;
-const Error = ts.Error;
+const Error = tersets.Error;
 
 /// Segment represented by the points: (start_time, start_value) and (end_time, end_value).
 const Segment = struct {
@@ -35,12 +35,14 @@ const Segment = struct {
     end_value: f64,
 };
 
-/// Line structure uses f80 to avoid overflows with f64.
+/// LinearFunction represented by the function y = slope*x+intercept.
+/// It uses f80 to improve numerical stability.
 const LinearFunction = struct {
     slope: f80,
     intercept: f80,
 };
 
+/// Converts `value`:usize to f80
 fn usizeToF80(value: usize) f80 {
     return @as(f80, @floatFromInt(value));
 }
@@ -51,8 +53,9 @@ fn computeInterceptCoefficient(slope: f80, x_time: usize, y_value: f64) f80 {
     return y_value - slope * usizeToF80(x_time);
 }
 
-/// Computes the line's coeficients that passes throught the two points
-/// of the segment and "swings" down or up depending of the error bound.
+/// Updates the linear function coeficients in `line` that passes throught the two points
+/// of the `segment`. The line is swinged down or up based on the `error_bound`.
+/// If `error_bound` is negative, `line` is swing down. It is swing up otherwise.
 fn updateSwingLine(segment: Segment, line: *LinearFunction, error_bound: f32) void {
     if (segment.end_time != segment.start_time) {
         const duration: f80 = @floatFromInt(segment.end_time - segment.start_time);
@@ -64,15 +67,18 @@ fn updateSwingLine(segment: Segment, line: *LinearFunction, error_bound: f32) vo
     }
 }
 
+/// Evaluate the linear function `line` at `x_time`.
 fn evaluateLineAtTime(line: LinearFunction, x_time: usize) f64 {
     return @floatCast(line.slope * usizeToF80(x_time) + line.intercept);
 }
 
+/// Append `value` to `compressed_values`.
 fn appendValue(value: f64, compressed_values: *ArrayList(u8)) !void {
     const valueAsBytes: [8]u8 = @bitCast(value);
     try compressed_values.appendSlice(valueAsBytes[0..]);
 }
 
+/// Append `index` to `compressed_values`.
 fn appendIndex(index: usize, compressed_values: *ArrayList(u8)) !void {
     const indexAsFloat: [8]u8 = @bitCast(@as(f64, @floatFromInt(index)));
     try compressed_values.appendSlice(indexAsFloat[0..]);
@@ -83,18 +89,18 @@ fn computeSlopeDerivate(segment: Segment) f80 {
     return (segment.end_value - segment.start_value) * usizeToF80(segment.end_time - segment.start_time);
 }
 
-/// Compress `uncompressed_values` within `error_bound` using "Swing-Filter"
+/// Compress `uncompressed_values` within `error_bound` using "Swing Filter"
 /// and write the result to `compressed_values`. If an error occurs it is returned.
 pub fn compress_swing(
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
     error_bound: f32,
 ) Error!void {
-    // Initiallization.
-    var upper_limit: f80 = 0;
-    var lower_limit: f80 = 0;
-
-    const adjusted_error_bound = if (error_bound > 0) error_bound - ts.ErrorBoundMargin else error_bound;
+    // Create adjusted error bound to avoid reaching the error bound during decompression.
+    const adjusted_error_bound = if (error_bound > 0)
+        error_bound - tersets.ErrorBoundMargin
+    else
+        error_bound;
 
     var upper_bound_line: LinearFunction = LinearFunction{ .slope = 0, .intercept = 0 };
     var lower_bound_line: LinearFunction = LinearFunction{ .slope = 0, .intercept = 0 };
@@ -112,20 +118,24 @@ pub fn compress_swing(
         .end_time = first_timestamp + 1,
         .end_value = uncompressed_values[first_timestamp + 1],
     };
+
     var slope_derivate: f80 = computeSlopeDerivate(current_segment);
 
     // Get the upper and lower bounds.
     updateSwingLine(current_segment, &upper_bound_line, adjusted_error_bound);
     updateSwingLine(current_segment, &lower_bound_line, -adjusted_error_bound);
 
+    // First two points already part of `current_segment`, next point is at index 2.
     var current_timestamp: usize = 2;
     while (current_timestamp < uncompressed_values.len) : (current_timestamp += 1) {
-        upper_limit = evaluateLineAtTime(upper_bound_line, current_timestamp);
-        lower_limit = evaluateLineAtTime(lower_bound_line, current_timestamp);
+        // Evaluate the upper and lower bound lines at current timestamp
+        // to obtain the upper and lower limits of the current point.
+        const upper_limit = evaluateLineAtTime(upper_bound_line, current_timestamp);
+        const lower_limit = evaluateLineAtTime(lower_bound_line, current_timestamp);
 
         if ((upper_limit < (uncompressed_values[current_timestamp] - adjusted_error_bound)) or
             (lower_limit > (uncompressed_values[current_timestamp] + adjusted_error_bound)))
-        { // Recording mechanism.
+        { // Recording mechanism (the current points is outside the limits).
 
             try appendValue(current_segment.start_value, compressed_values);
             const segment_size = current_timestamp - first_timestamp - 1;
@@ -158,7 +168,7 @@ pub fn compress_swing(
             current_segment.start_value = uncompressed_values[current_timestamp];
             // Catch edge case (only one point left).
             // If `current_timestamp+1 >= uncompressed_values.len`
-            // then `uncompressed_values[current_timestamp + 1]` will return index out of bound error
+            // then `uncompressed_values[current_timestamp + 1]` will return index out of bound error.
             if (current_timestamp + 1 < uncompressed_values.len) {
                 current_segment.end_time = current_timestamp + 1;
                 current_segment.end_value = uncompressed_values[current_timestamp + 1];
@@ -168,7 +178,7 @@ pub fn compress_swing(
 
                 current_timestamp += 1;
                 slope_derivate = computeSlopeDerivate(current_segment);
-            } else { // Create line with slope 0 and intercept current value
+            } else { // Create line with slope 0 and intercept equal to the current value.
                 current_segment.end_time = current_timestamp;
                 current_segment.end_value = uncompressed_values[current_timestamp];
                 upper_bound_line.slope = 0.0;
@@ -176,7 +186,7 @@ pub fn compress_swing(
                 lower_bound_line.slope = 0.0;
                 lower_bound_line.intercept = uncompressed_values[current_timestamp];
             }
-        } else { //filtering mechanism
+        } else { //Filtering mechanism (the current point is still inside the limits).
 
             current_segment.end_time = current_timestamp;
             current_segment.end_value = uncompressed_values[current_timestamp];
@@ -192,12 +202,10 @@ pub fn compress_swing(
             if (upper_limit > new_upper_limit) { // Swing down
                 upper_bound_line.slope = new_upper_bound_line.slope;
                 upper_bound_line.intercept = new_upper_bound_line.intercept;
-                upper_limit = new_upper_limit;
             }
             if (lower_limit < new_lower_limit) { //Swing up
                 lower_bound_line.slope = new_lower_bound_line.slope;
                 lower_bound_line.intercept = new_lower_bound_line.intercept;
-                lower_limit = new_lower_limit;
             }
 
             // Update slope derivate
@@ -210,7 +218,9 @@ pub fn compress_swing(
     try appendValue(current_segment.start_value, compressed_values);
     if (segment_size > 1) {
         // Denominator of Eq. 6.
-        const sum_square: f80 = @floatFromInt(segment_size * (segment_size + 1) * (2 * segment_size + 1) / 6);
+        const sum_square: f80 = @floatFromInt(
+            segment_size * (segment_size + 1) * (2 * segment_size + 1) / 6,
+        );
 
         const slope: f80 = @max(
             @min(slope_derivate / sum_square, upper_bound_line.slope),
@@ -233,10 +243,13 @@ pub fn compress_swing(
     try appendIndex(current_timestamp, compressed_values);
 }
 
-/// Decompress `compressed_values` produced by "Swing-Filter" and
-/// "Slide-Filter" and write the result to `decompressed_values`. If an error
+/// Decompress `compressed_values` produced by "Swing Filter" and
+/// "Slide Filter" and write the result to `decompressed_values`. If an error
 /// occurs it is returned.
-pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList(f64)) Error!void {
+pub fn decompress(
+    compressed_values: []const u8,
+    decompressed_values: *ArrayList(f64),
+) Error!void {
     // The compressed representation is composed of three values:
     // (start_value, end_value, end_time) all of type 64-bit float.
     if (compressed_values.len % 24 != 0) return Error.IncorrectInput;
@@ -304,7 +317,7 @@ test "swing filter 0 error bound, even size compress and decompress" {
     try compress_swing(uncompressed_values[0..], &compressed_values, error_bound);
     try decompress(compressed_values.items, &decompressed_values);
 
-    try testing.expect(ts.isWithinErrorBound(
+    try testing.expect(tersets.isWithinErrorBound(
         uncompressed_values,
         decompressed_values.items,
         error_bound,
@@ -337,7 +350,7 @@ test "swing filter 0 error bound, odd size compress and decompress" {
     try compress_swing(uncompressed_values[0..], &compressed_values, error_bound);
     try decompress(compressed_values.items, &decompressed_values);
 
-    try testing.expect(ts.isWithinErrorBound(
+    try testing.expect(tersets.isWithinErrorBound(
         uncompressed_values,
         decompressed_values.items,
         error_bound,
@@ -388,7 +401,7 @@ test "swing filter 4 random lines, random error bound compress and decompress" {
     try compress_swing(uncompressed_values[0..], &compressed_values, error_bound);
     try decompress(compressed_values.items, &decompressed_values);
 
-    try testing.expect(ts.isWithinErrorBound(
+    try testing.expect(tersets.isWithinErrorBound(
         uncompressed_values,
         decompressed_values.items,
         error_bound,

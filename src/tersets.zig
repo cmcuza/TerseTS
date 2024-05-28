@@ -38,7 +38,7 @@ pub const Method = enum {
 
 /// Margin to adjust the error bound for numerical stability.
 /// Reducing the error bound by this margin ensures that all the elements
-/// of the decompressed time series is within the error bound of the uncompressed.
+/// of the decompressed time series is within the error bound on the uncompressed.
 pub const ErrorBoundMargin: f32 = 1e-7;
 
 /// Compress `uncompressed_values` within `error_bound` using `method` and write the result to
