@@ -14,7 +14,8 @@
 
 //! Implementation of "Poor Man’s Compression - Midrange" and "Poor Man’s Compression - Mean" from
 //! the paper "Iosif Lazaridis, Sharad Mehrotra: Capturing Sensor-Generated Time Series with Quality
-//! Guarantees. ICDE 2003: 429-440".
+//! Guarantees. ICDE 2003: 429-440
+//! https://doi.org/10.1109/ICDE.2003.1260811".
 
 const std = @import("std");
 const math = std.math;

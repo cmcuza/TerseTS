@@ -21,7 +21,7 @@ const ArrayList = std.ArrayList;
 
 const tersets = @import("tersets.zig");
 const Error = tersets.Error;
-const Method = tersets.Method;
+// const Method = tersets.Method;
 
 /// Global memory allocator used by tersets.
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -36,16 +36,16 @@ pub const CompressedValues = Array(u8);
 /// Configuration to use for compression and/or decompression.
 pub const Configuration = extern struct { method: u8, error_bound: f32 };
 
-/// Get the maximun index of the available methods in tersets.
-fn getMaxMethod(comptime E: type) usize {
-    const type_info = @typeInfo(E);
-    const enum_info = switch (type_info) {
-        .Enum => |enum_info| enum_info,
-        else => @compileError("Expected an enum type"),
+/// Get the maximun index of the available methods in TerseTS.
+fn getMaxMethodIndex(comptime tersets_method: type) usize {
+    const type_info = @typeInfo(tersets_method);
+    const method_info = switch (type_info) {
+        .Enum => |method_info| method_info,
+        else => @compileError("Expected a Method enum type"),
     };
 
     var max_index: usize = 0;
-    for (enum_info.fields, 0..) |_, i| {
+    for (method_info.fields, 0..) |_, i| {
         max_index = if (i > max_index) i else max_index;
     }
 
@@ -65,7 +65,8 @@ export fn compress(
 ) i32 {
     const uncompressed_values = uncompressed_values_array.data[0..uncompressed_values_array.len];
     var compressed_values = ArrayList(u8).init(allocator);
-    if (configuration.method > getMaxMethod(Method)) return 1; // Check if larger than the largest int used by Method.
+    // Check if larger than the largest int used by Method.
+    if (configuration.method > getMaxMethodIndex(tersets.Method)) return 1;
     const method: tersets.Method = @enumFromInt(configuration.method);
 
     tersets.compress(
@@ -90,12 +91,13 @@ export fn compress(
 export fn decompress(
     compressed_values_array: CompressedValues,
     decompressed_values_array: *UncompressedValues,
-    configuration: Configuration,
+    method_index: u8,
 ) i32 {
     const compressed_values = compressed_values_array.data[0..compressed_values_array.len];
     var decompressed_values = ArrayList(f64).init(allocator);
-    if (configuration.method > getMaxMethod(Method)) return 1; // Check if larger than the largest int used by Method.
-    const method: tersets.Method = @enumFromInt(configuration.method);
+    // Check if larger than the largest int used by Method.
+    if (method_index > getMaxMethodIndex(tersets.Method)) return 1;
+    const method: tersets.Method = @enumFromInt(method_index);
 
     tersets.decompress(
         compressed_values,
@@ -206,7 +208,7 @@ test "error for unknown decompression method" {
     const return_code = decompress(
         compressed_values,
         &decompressed_values,
-        configuration,
+        configuration.method,
     );
 
     try testing.expectEqual(return_code, 1);
@@ -226,7 +228,7 @@ test "error for empty input when decompressing" {
     const return_code = decompress(
         compressed_values,
         &decompressed_values,
-        configuration,
+        configuration.method,
     );
 
     try testing.expectEqual(return_code, 2);
@@ -258,7 +260,7 @@ test "can compress and decompress" {
     const decompress_code = decompress(
         compressed_values,
         &decompressed_values,
-        configuration,
+        configuration.method,
     );
     try testing.expectEqual(decompress_code, 0);
 
