@@ -21,7 +21,6 @@ const ArrayList = std.ArrayList;
 
 const tersets = @import("tersets.zig");
 const Error = tersets.Error;
-// const Method = tersets.Method;
 
 /// Global memory allocator used by tersets.
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
