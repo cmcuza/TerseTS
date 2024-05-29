@@ -18,6 +18,7 @@
 import os
 import platform
 from typing import List
+from enum import Enum, unique
 from ctypes import cdll, Structure, c_byte, c_float, c_double, c_size_t, POINTER, byref
 
 
@@ -67,8 +68,16 @@ class __Configuration(Structure):
     _fields_ = [("method", c_byte), ("error_bound", c_float)]
 
 
+# Mirror TerseTS Method Enum.    
+@unique
+class Method(Enum):
+    PoorMansCompressionMidrange = 0
+    PoorMansCompressionMean = 1
+    SwingFilter = 2
+
+
 # Public Functions.
-def compress(values: List[float]) -> bytes:
+def compress(values: List[float], error_bound: float, method: Method) -> bytes:
     """Compresses values."""
 
     uncompressed_values = __UncompressedValues()
@@ -77,19 +86,26 @@ def compress(values: List[float]) -> bytes:
 
     compressed_values = __CompressedValues()
 
-    configuration = __Configuration(0, 0.0)
-
+    if (type(method) != Method):
+        # Method does not exists, raise error, and show available options.
+        available_methods = ", ".join([member.name for member in Method])
+        raise TypeError(f"'{method}' is not a valid TerseTS Method. Available method names are: {available_methods}")
+    
+    configuration = __Configuration(method.value, error_bound)
+    
     error = __library.compress(
         uncompressed_values, byref(compressed_values), configuration
     )
 
     if error == 1:
-        raise ValueError("Unknown compression method.")
+        # TODO: Handle different errors from TerseTS. 
+        raise ValueError("Unknown error.") 
+    
 
     return compressed_values.data[: compressed_values.len]
 
 
-def decompress(values: bytes) -> List[float]:
+def decompress(values: bytes, method: Method) -> List[float]:
     """Decompresses values."""
 
     compressed_values = __CompressedValues()
@@ -98,10 +114,13 @@ def decompress(values: bytes) -> List[float]:
 
     decompressed_values = __UncompressedValues()
 
-    configuration = __Configuration(0, 0.0)
+    if (type(method) != Method):
+        # Method does not exists, raise error, and show available options.
+        available_methods = ", ".join([member.name for member in Method])
+        raise TypeError(f"'{method}' is not a valid TerseTS Method. Available method names are: {available_methods}")
 
     error = __library.decompress(
-        compressed_values, byref(decompressed_values), configuration
+        compressed_values, byref(decompressed_values), method.value
     )
 
     if error == 1:

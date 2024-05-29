@@ -14,7 +14,8 @@
 
 //! Implementation of "Poor Man’s Compression - Midrange" and "Poor Man’s Compression - Mean" from
 //! the paper "Iosif Lazaridis, Sharad Mehrotra: Capturing Sensor-Generated Time Series with Quality
-//! Guarantees. ICDE 2003: 429-440".
+//! Guarantees. ICDE 2003: 429-440
+//! https://doi.org/10.1109/ICDE.2003.1260811".
 
 const std = @import("std");
 const math = std.math;
@@ -88,19 +89,6 @@ pub fn compress_mean(
     try appendValueAndIndexToArrayList(compressed_value, index, compressed_values);
 }
 
-/// Append `compressed_value` and `index` to `compressed_values`.
-pub fn appendValueAndIndexToArrayList(
-    compressed_value: f80,
-    index: usize,
-    compressed_values: *ArrayList(u8),
-) !void {
-    const value: f64 = @floatCast(compressed_value);
-    const valueAsBytes: [8]u8 = @bitCast(value);
-    try compressed_values.appendSlice(valueAsBytes[0..]);
-    const indexAsBytes: [8]u8 = @bitCast(index); // No -1 due to 0 indexing.
-    try compressed_values.appendSlice(indexAsBytes[0..]);
-}
-
 /// Decompress `compressed_values` produced by "Poor Man’s Compression - Midrange" and
 /// "Poor Man’s Compression - Mean" and write the result to `decompressed_values`. If an error
 /// occurs it is returned.
@@ -123,6 +111,19 @@ pub fn decompress(
         }
         uncompressed_index = index;
     }
+}
+
+/// Append `compressed_value` and `index` to `compressed_values`.
+fn appendValueAndIndexToArrayList(
+    compressed_value: f80,
+    index: usize,
+    compressed_values: *ArrayList(u8),
+) !void {
+    const value: f64 = @floatCast(compressed_value);
+    const valueAsBytes: [8]u8 = @bitCast(value);
+    try compressed_values.appendSlice(valueAsBytes[0..]);
+    const indexAsBytes: [8]u8 = @bitCast(index); // No -1 due to 0 indexing.
+    try compressed_values.appendSlice(indexAsBytes[0..]);
 }
 
 test "midrange can compress and decompress" {
