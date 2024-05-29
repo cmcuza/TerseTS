@@ -36,21 +36,20 @@ const Segment = struct {
     end_value: f64,
 };
 
-/// LinearFunction represented by the function y = slope*x+intercept.
-/// It uses f80 to improve numerical stability.
+/// Linear function of the form y = slope*x+intercept. It uses f80 for numerical stability.
 const LinearFunction = struct {
     slope: f80,
     intercept: f80,
 };
 
-/// Compress `uncompressed_values` within `error_bound` using "Swing Filter"
-/// and write the result to `compressed_values`. If an error occurs it is returned.
+/// Compress `uncompressed_values` within `error_bound` using "Swing Filter" and write the
+/// result to `compressed_values`. If an error occurs it is returned.
 pub fn compress_swing(
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
     error_bound: f32,
 ) Error!void {
-    // Create adjusted error bound to avoid reaching the error bound during decompression.
+    // Adjust the error bound to avoid exceeding it during decompression.
     const adjusted_error_bound = if (error_bound > 0)
         error_bound - tersets.ErrorBoundMargin
     else
@@ -76,18 +75,17 @@ pub fn compress_swing(
     updateSwingLinearFunction(current_segment, &upper_bound_linear_function, adjusted_error_bound);
     updateSwingLinearFunction(current_segment, &lower_bound_linear_function, -adjusted_error_bound);
 
-    // First two points already part of `current_segment`, next point is at index 2.
+    // First two points already part of `current_segment`, next point is at index two.
     var current_timestamp: usize = 2;
     while (current_timestamp < uncompressed_values.len) : (current_timestamp += 1) {
-        // Evaluate the upper and lower bound lines at current timestamp
-        // to obtain the upper and lower limits of the current point.
+        // Evaluate the upper and lower bound linear functions at current timestamp.
         const upper_limit = evaluateLinearFunctionAtTime(upper_bound_linear_function, current_timestamp);
         const lower_limit = evaluateLinearFunctionAtTime(lower_bound_linear_function, current_timestamp);
 
         if ((upper_limit < (uncompressed_values[current_timestamp] - adjusted_error_bound)) or
             (lower_limit > (uncompressed_values[current_timestamp] + adjusted_error_bound)))
-        { // Recording mechanism (the current points is outside the limits).
-
+        {
+            // Recording mechanism (the current points is outside the limits).
             try appendValue(f64, current_segment.start_value, compressed_values);
             const segment_size = current_timestamp - current_segment.start_time - 1;
             if (segment_size > 1) {
@@ -120,9 +118,8 @@ pub fn compress_swing(
             current_segment.start_time = current_timestamp;
             current_segment.start_value = uncompressed_values[current_timestamp];
 
-            // Catch edge case (only one point left).
-            // If `current_timestamp+1 >= uncompressed_values.len`
-            // then `uncompressed_values[current_timestamp + 1]` will return index out of bound error.
+            // Catch edge case (only one point left). If `current_timestamp+1 >= uncompressed_values.len` then
+            // `uncompressed_values[current_timestamp + 1]` will return index out of bound error.
             if (current_timestamp + 1 < uncompressed_values.len) {
                 current_segment.end_time = current_timestamp + 1;
                 current_segment.end_value = uncompressed_values[current_timestamp + 1];
@@ -132,7 +129,8 @@ pub fn compress_swing(
 
                 current_timestamp += 1;
                 slope_derivate = computeSlopeDerivate(current_segment);
-            } else { // Create line with slope 0 and intercept equal to the current value.
+            } else {
+                // Create linear function with slope zero and intercept equal to the current value.
                 current_segment.end_time = current_timestamp;
                 current_segment.end_value = uncompressed_values[current_timestamp];
                 upper_bound_linear_function.slope = 0.0;
@@ -140,8 +138,8 @@ pub fn compress_swing(
                 lower_bound_linear_function.slope = 0.0;
                 lower_bound_linear_function.intercept = uncompressed_values[current_timestamp];
             }
-        } else { //Filtering mechanism (the current point is still inside the limits).
-
+        } else {
+            //Filtering mechanism (the current point is still inside the limits).
             current_segment.end_time = current_timestamp;
             current_segment.end_value = uncompressed_values[current_timestamp];
 
@@ -159,11 +157,13 @@ pub fn compress_swing(
             );
 
             // Update the upper and lower bounds if needed.
-            if (upper_limit > new_upper_limit) { // Swing down.
+            if (upper_limit > new_upper_limit) {
+                // Swing down.
                 upper_bound_linear_function.slope = new_upper_bound_linear_function.slope;
                 upper_bound_linear_function.intercept = new_upper_bound_linear_function.intercept;
             }
-            if (lower_limit < new_lower_limit) { //Swing up.
+            if (lower_limit < new_lower_limit) {
+                //Swing up.
                 lower_bound_linear_function.slope = new_lower_bound_linear_function.slope;
                 lower_bound_linear_function.intercept = new_lower_bound_linear_function.intercept;
             }
@@ -204,15 +204,14 @@ pub fn compress_swing(
     try appendValue(usize, current_timestamp, compressed_values);
 }
 
-/// Decompress `compressed_values` produced by "Swing Filter" and
-/// "Slide Filter" and write the result to `decompressed_values`. If an error
-/// occurs it is returned.
+/// Decompress `compressed_values` produced by "Swing Filter" and "Slide Filter" and write the
+/// result to `decompressed_values`. If an error occurs it is returned.
 pub fn decompress(
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
 ) Error!void {
-    // The compressed representation is composed of three values:
-    // (start_value, end_value, end_time) all of type 64-bit float.
+    // The compressed representation is composed of three values: (start_value, end_value, end_time)
+    // all of type 64-bit float.
     if (compressed_values.len % 24 != 0) return Error.IncorrectInput;
 
     const compressed_lines_and_index = mem.bytesAsSlice(f64, compressed_values);
@@ -250,20 +249,15 @@ pub fn decompress(
     }
 }
 
-/// Converts `value`:usize to f80
-fn usizeToF80(value: usize) f80 {
-    return @as(f80, @floatFromInt(value));
+/// Computes the numerator of the slope derivate as in Eq. (6).
+fn computeSlopeDerivate(segment: Segment) f80 {
+    return (segment.end_value - segment.start_value) *
+        usizeToF80(segment.end_time - segment.start_time);
 }
 
-/// Computes the intercept coefficient of a line that passes through the point
-/// (time, value) and with the given slope coefficient.
-fn computeInterceptCoefficient(slope: f80, time: usize, value: f64) f80 {
-    return value - slope * usizeToF80(time);
-}
-
-/// Updates the linear function coeficients in `line` that passes throught the two points
-/// of the `segment`. The line is swinged down or up based on the `error_bound`.
-/// If `error_bound` is negative, `line` is swing down. It is swing up otherwise.
+/// Updates the linear function coeficients in `linear_function` that passes throught the two
+/// points of the `segment`. The linear function is swinged down or up based on the `error_bound`.
+/// If `error_bound` is negative, `linear_function` is swing down. It is swing up otherwise.
 fn updateSwingLinearFunction(
     segment: Segment,
     linear_function: *LinearFunction,
@@ -279,7 +273,7 @@ fn updateSwingLinearFunction(
     }
 }
 
-/// Evaluate the linear function `line` at `time`.
+/// Evaluate `linear_function` at `time`.
 fn evaluateLinearFunctionAtTime(linear_function: LinearFunction, time: usize) f64 {
     return @floatCast(linear_function.slope * usizeToF80(time) + linear_function.intercept);
 }
@@ -288,24 +282,26 @@ fn evaluateLinearFunctionAtTime(linear_function: LinearFunction, time: usize) f6
 fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)) !void {
     // Compile-time type check
     switch (@TypeOf(value)) {
-        f64 => {
+        f64, usize => {
             const value_as_bytes: [8]u8 = @bitCast(value);
-            try compressed_values.appendSlice(value_as_bytes[0..]);
-        },
-        usize => {
-            const value_as_bytes: [8]u8 = @bitCast(@as(f64, @floatFromInt(value)));
             try compressed_values.appendSlice(value_as_bytes[0..]);
         },
         else => @compileError("Unsupported type for append value function"),
     }
 }
 
-/// Computes the numerator of the slope derivate as in Eq. 6.
-fn computeSlopeDerivate(segment: Segment) f80 {
-    return (segment.end_value - segment.start_value) * usizeToF80(segment.end_time - segment.start_time);
+/// Computes the intercept coefficient of a linear function that passes through the point
+/// (time, value) and with the given slope coefficient.
+fn computeInterceptCoefficient(slope: f80, time: usize, value: f64) f80 {
+    return value - slope * usizeToF80(time);
 }
 
-test "swing filter zero error bound, even size compress and decompress" {
+/// Converts `value` of `usize` to `f80`.
+fn usizeToF80(value: usize) f80 {
+    return @as(f80, @floatFromInt(value));
+}
+
+test "swing filter zero error bound and even size compress and decompress" {
     const allocator = testing.allocator;
     const linear_function = LinearFunction{ .slope = 1, .intercept = 0.0 };
 
@@ -337,7 +333,7 @@ test "swing filter zero error bound, even size compress and decompress" {
     ));
 }
 
-test "swing filter zero error bound, odd size compress and decompress" {
+test "swing filter zero error bound and odd size compress and decompress" {
     const allocator = testing.allocator;
 
     const linear_function = LinearFunction{ .slope = 1, .intercept = 0.0 };
@@ -370,7 +366,7 @@ test "swing filter zero error bound, odd size compress and decompress" {
     ));
 }
 
-test "swing filter four random lines with random error bound compress and decompress" {
+test "swing filter four random lines and random error bound compress and decompress" {
     const allocator = testing.allocator;
     var rnd = std.rand.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
 

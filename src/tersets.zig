@@ -49,6 +49,7 @@ pub fn compress(
     method: Method,
     error_bound: f32,
 ) Error!void {
+    //TODO: Specify that TerseTS's timestamps are the values indices.
     if (uncompressed_values.len == 0) return Error.EmptyInput;
     if (error_bound < 0) return Error.NegativeErrorBound;
 
@@ -60,7 +61,11 @@ pub fn compress(
             try pmc.compress_mean(uncompressed_values, compressed_values, error_bound);
         },
         .SwingFilter => {
-            try swing_slide_filter.compress_swing(uncompressed_values, compressed_values, error_bound);
+            try swing_slide_filter.compress_swing(
+                uncompressed_values,
+                compressed_values,
+                error_bound,
+            );
         },
     }
 }
