@@ -230,7 +230,7 @@ pub fn decompress(
         current_segment.start_time = first_timestamp;
         current_segment.start_value = compressed_lines_and_index[index];
         current_segment.end_value = compressed_lines_and_index[index + 1];
-        current_segment.end_time = @intFromFloat(compressed_lines_and_index[index + 2] - 1);
+        current_segment.end_time = @as(usize, @bitCast(compressed_lines_and_index[index + 2])) - 1;
 
         if (current_segment.start_time < current_segment.end_time) {
             updateSwingLinearFunction(current_segment, &current_linear_function, 0.0);
