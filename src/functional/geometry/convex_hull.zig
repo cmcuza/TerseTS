@@ -1,0 +1,259 @@
+// Copyright 2024 TerseTS Contributors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! This file contains the Graham algorithm to incrementally create or maintain a convex hull
+//! as well as the necessary structures, enums, and auxiliary functions from the book.
+//! "Mark De Berg, and Marc van Kreveld. Computational geometry: algorithms
+//!  and applications. Third Edition. Springer Science & Business Media, 2000.
+//! https://doi.org//10.1007/978-3-540-77974-2".
+//! This algorithm is necessary for the compression algorithms described in
+//! [1] https://doi.org/10.14778/1687627.1687645 (Slide Filter).
+//! [2] https://doi.org/10.1109/TSP.2006.875394 (Optimal PLA).
+
+const std = @import("std");
+const mem = std.mem;
+const testing = std.testing;
+const ArrayList = std.ArrayList;
+
+pub const Error = error{
+    EmptyInput,
+    IncorrectInput,
+    NegativeErrorBound,
+    OutOfMemory,
+    IntergerOverflow,
+    EmptySet,
+};
+
+/// Enum for the angle's `Turn` of three consecutive points. The angle can represent a `right` or
+/// `left` turn. If there is no turn, then the points are `colinear`.
+const Turn = enum(i8) { right, left, colinear };
+
+/// Point structure to represent a point by `time` and `value`.
+const Point = struct { time: usize, value: f64 };
+
+/// Set of points used to store the upper and lower hull of the convex hull. `points` are memory
+/// slide that it's dynamically increased as `len` exceeds `max_len`.A good estimation of `max_len`
+/// can improve both execution time and memory consumption.
+pub const PointSet = struct {
+    points: []Point,
+    len: usize,
+    max_len: usize,
+    allocator: *const std.mem.Allocator,
+
+    // Initialize the container with a given `allocator` and max number of points `num_points`.
+    // The max number of points it is not fixed. The max number of points will increase as more
+    // elements are added.
+    pub fn init(allocator: *const std.mem.Allocator, num_points: usize) !PointSet {
+        return PointSet{
+            .points = try allocator.alloc(Point, num_points),
+            .len = 0,
+            .max_len = num_points,
+            .allocator = allocator,
+        };
+    }
+
+    // Deinitialize the container and free the allocated memory.
+    pub fn deinit(self: *PointSet) void {
+        self.allocator.free(self.points);
+    }
+
+    // Add `point` to the `PointSet`.
+    pub fn add(self: *PointSet, point: Point) !void {
+        if (self.len >= self.max_len) {
+            // Resize the array if necessary.
+            const new_max_len = self.max_len * 2;
+            self.points = try self.allocator.realloc(self.points, new_max_len);
+            self.max_len = new_max_len;
+        }
+        self.points[self.len] = point;
+        self.len += 1;
+    }
+
+    // Insert `point` to the `PointSet` at the given `index`.
+    pub fn insert(self: *PointSet, point: Point, index: usize) !void {
+        if (index >= self.max_len) {
+            // Resize the array if necessary.
+            return Error.OutOfMemory;
+        }
+        self.points[index] = point;
+        self.len += 1;
+    }
+
+    // Remove the last point from the set.
+    pub fn pop(self: *PointSet) !void {
+        if (self.len == 0) return Error.EmptySet;
+        self.len -= 1;
+    }
+};
+
+/// Graham algorithm to incrementally update the `upperHull` and `lowerHull` given a new `point`.
+pub fn addPointToConvexHull(upperHull: *PointSet, lowerHull: *PointSet, point: Point) !void {
+    if (upperHull.len < 2) {
+        try upperHull.add(point);
+    } else {
+        // Update upper hull
+        var top: usize = upperHull.len - 1;
+        while ((top > 0) and (try getTurn(
+            upperHull.points[top - 1],
+            upperHull.points[top],
+            point,
+        ) != Turn.right)) : (top -= 1) {
+            try upperHull.pop();
+        }
+        top += 1;
+        try upperHull.add(point);
+    }
+
+    if (lowerHull.len < 2) {
+        try lowerHull.add(point);
+    } else {
+        // Update lower hull
+        var top: usize = lowerHull.len - 1;
+        while ((top > 0) and (try getTurn(
+            lowerHull.points[top - 1],
+            lowerHull.points[top],
+            point,
+        ) != Turn.left)) : (top -= 1) {
+            try lowerHull.pop();
+        }
+        top += 1;
+        try lowerHull.add(point);
+    }
+}
+
+/// Return the type of turn created by the `first_point`, the `middle_point and the `last_point`.
+fn getTurn(first_point: Point, middle_point: Point, last_point: Point) Turn {
+    const distance_last_middle: f64 = @floatFromInt(last_point.time - middle_point.time);
+    const distance_middle_first: f64 = @floatFromInt(middle_point.time - first_point.time);
+
+    const value = (middle_point.value - first_point.value) * distance_last_middle -
+        (last_point.value - middle_point.value) * distance_middle_first;
+
+    if (value == 0) return Turn.colinear;
+
+    return if (value > 0) Turn.right else Turn.left;
+}
+
+test "incremental convex hull with elements degeneracy" {
+    const allocator = testing.allocator;
+
+    var upperHull = try PointSet.init(&allocator, 20);
+    defer upperHull.deinit();
+    var lowerHull = try PointSet.init(&allocator, 20);
+    defer lowerHull.deinit();
+
+    var point: Point = Point{ .time = 0, .value = 3 };
+    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    point.time = 1;
+    point.value = 2;
+    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    point.time = 2;
+    point.value = 3.5;
+    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    point.time = 3;
+    point.value = 5;
+    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    point.time = 4;
+    point.value = 3;
+    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    point.time = 5;
+    point.value = 4;
+    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    point.time = 6;
+    point.value = 4;
+    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    point.time = 7;
+    point.value = 3;
+    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    point.time = 8;
+    point.value = 4.5;
+    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    point.time = 9;
+    point.value = 3.5;
+    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    point.time = 10;
+    point.value = 2.5;
+    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    point.time = 11;
+    point.value = 2.5;
+    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    point.time = 12;
+    point.value = 3.5;
+    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    point.time = 13;
+    point.value = 2.5;
+    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    point.time = 14;
+    point.value = 2.5;
+    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    point.time = 15;
+    point.value = 2.5;
+    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    point.time = 16;
+    point.value = 3;
+    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    point.time = 17;
+    point.value = 3;
+    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    point.time = 18;
+    point.value = 3;
+    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    point.time = 19;
+    point.value = 3;
+    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    point.time = 20;
+    point.value = 2.8;
+    try addPointToConvexHull(&upperHull, &lowerHull, point);
+
+    try testing.expectEqual(5, upperHull.len);
+    try testing.expectEqual(4, lowerHull.len);
+
+    try testing.expectEqual(0, upperHull.points[0].time);
+    try testing.expectEqual(3, upperHull.points[1].time);
+    try testing.expectEqual(8, upperHull.points[2].time);
+    try testing.expectEqual(19, upperHull.points[3].time);
+    try testing.expectEqual(20, upperHull.points[4].time);
+
+    try testing.expectEqual(0, lowerHull.points[0].time);
+    try testing.expectEqual(1, lowerHull.points[1].time);
+    try testing.expectEqual(15, lowerHull.points[2].time);
+    try testing.expectEqual(20, lowerHull.points[3].time);
+}
+
+test "incremental convex hull random elements" {
+    const num_points: usize = 1000;
+    const allocator = testing.allocator;
+    var rnd = std.rand.DefaultPrng.init(0);
+    var upperHull = try PointSet.init(&allocator, num_points);
+    defer upperHull.deinit();
+    var lowerHull = try PointSet.init(&allocator, num_points);
+    defer lowerHull.deinit();
+
+    var point: Point = Point{ .time = 0, .value = rnd.random().float(f64) };
+    for (1..num_points) |i| {
+        try addPointToConvexHull(&upperHull, &lowerHull, point);
+        point.time = i;
+        point.value = rnd.random().float(f64);
+    }
+
+    for (1..upperHull.len - 1) |i| {
+        const turn = getTurn(upperHull.points[i - 1], upperHull.points[i], upperHull.points[i + 1]);
+        try testing.expectEqual(turn, Turn.right);
+    }
+
+    for (1..lowerHull.len - 1) |i| {
+        const turn = getTurn(lowerHull.points[i - 1], lowerHull.points[i], lowerHull.points[i + 1]);
+        try testing.expectEqual(turn, Turn.left);
+    }
+}
