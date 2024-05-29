@@ -215,10 +215,7 @@ pub fn decompress(
     // (start_value, end_value, end_time) all of type 64-bit float.
     if (compressed_values.len % 24 != 0) return Error.IncorrectInput;
 
-    const compressed_lines_and_index = mem.bytesAsSlice(
-        f64,
-        compressed_values,
-    );
+    const compressed_lines_and_index = mem.bytesAsSlice(f64, compressed_values);
 
     var current_linear_function: LinearFunction = LinearFunction{ .slope = 0, .intercept = 0 };
     var current_segment: Segment = Segment{
