@@ -77,7 +77,7 @@ class Method(Enum):
 
 
 # Public Functions.
-def compress(values: List[float], error_bound: float, method_name: str) -> bytes:
+def compress(values: List[float], error_bound: float, method: Method) -> bytes:
     """Compresses values."""
 
     uncompressed_values = __UncompressedValues()
@@ -86,15 +86,12 @@ def compress(values: List[float], error_bound: float, method_name: str) -> bytes
 
     compressed_values = __CompressedValues()
 
-    try:
-        # Try to access the Enum value using the user's method_name
-        method_index = Method[method_name].value
-    except KeyError:
+    if (type(method) != Method):
         # Method does not exists, raise error, and show available options
         available_methods = ", ".join([member.name for member in Method])
-        raise ValueError(f"'{method_name}' is not a valid TerseTS method name. Available method names are: {available_methods}")
+        raise TypeError(f"'{method}' is not a valid TerseTS Method. Available method names are: {available_methods}")
     
-    configuration = __Configuration(method_index, error_bound)
+    configuration = __Configuration(method.value, error_bound)
     
     error = __library.compress(
         uncompressed_values, byref(compressed_values), configuration
@@ -106,7 +103,7 @@ def compress(values: List[float], error_bound: float, method_name: str) -> bytes
     return compressed_values.data[: compressed_values.len]
 
 
-def decompress(values: bytes, method_name: str) -> List[float]:
+def decompress(values: bytes, method: Method) -> List[float]:
     """Decompresses values."""
 
     compressed_values = __CompressedValues()
@@ -115,16 +112,13 @@ def decompress(values: bytes, method_name: str) -> List[float]:
 
     decompressed_values = __UncompressedValues()
 
-    try:
-        # Try to access the Enum value using the user's method_name
-        method_index = Method[method_name].value
-    except KeyError:
+    if (type(method) != Method):
         # Method does not exists, raise error, and show available options
         available_methods = ", ".join([member.name for member in Method])
-        raise ValueError(f"'{method_name}' is not a valid TerseTS method name. Available method names are: {available_methods}")
+        raise TypeError(f"'{method}' is not a valid TerseTS Method. Available method names are: {available_methods}")
 
     error = __library.decompress(
-        compressed_values, byref(decompressed_values), method_index
+        compressed_values, byref(decompressed_values), method.value
     )
 
     if error == 1:

@@ -36,9 +36,9 @@ pub const Method = enum {
     SwingFilter,
 };
 
-/// Margin to adjust the error bound for numerical stability.
-/// Reducing the error bound by this margin ensures that all the elements
-/// of the decompressed time series is within the error bound on the uncompressed.
+/// Margin to adjust the error bound for numerical stability. Reducing the error bound by this
+/// margin ensures that all the elements of the decompressed time series are within the error bound
+/// with respect to the uncompressed time series.
 pub const ErrorBoundMargin: f32 = 1e-7;
 
 /// Compress `uncompressed_values` within `error_bound` using `method` and write the result to
@@ -84,9 +84,9 @@ pub fn decompress(
     }
 }
 
-/// Auxiliary function to validate of the decompressed time series
-/// is within the error bound of the uncompressed time series.
-/// The function returns true if all elements are within the error bound, false otherwise.
+/// Auxiliary function to validate of the decompressed time series is within the error bound of the
+/// uncompressed time series. The function returns true if all elements are within the error bound,
+/// false otherwise.
 pub fn isWithinErrorBound(
     uncompressed_values: []f64,
     decompressed_values: []f64,

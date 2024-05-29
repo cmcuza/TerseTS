@@ -16,7 +16,7 @@ import sys
 import random
 import unittest
 
-from tersets import compress, decompress
+from tersets import compress, decompress, Method
 
 # Number of values to generate for each test.
 TEST_VALUE_COUNT = 1000
@@ -28,6 +28,6 @@ class TerseTSPythonTest(unittest.TestCase):
             random.uniform(sys.float_info.min, sys.float_info.max)
             for _ in range(0, TEST_VALUE_COUNT)
         ]
-        compressed = compress(uncompressed, 0.0, "SwingFilter")
-        decompressed = decompress(compressed, "SwingFilter")
+        compressed = compress(uncompressed, 0.0, Method.SwingFilter)
+        decompressed = decompress(compressed, Method.SwingFilter)
         self.assertEqual(uncompressed, decompressed)

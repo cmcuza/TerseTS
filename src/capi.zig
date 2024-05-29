@@ -36,8 +36,8 @@ pub const CompressedValues = Array(u8);
 pub const Configuration = extern struct { method: u8, error_bound: f32 };
 
 /// Get the maximun index of the available methods in TerseTS.
-fn getMaxMethodIndex(comptime tersets_method: type) usize {
-    const type_info = @typeInfo(tersets_method);
+fn getMaxMethodIndex(comptime tersetsMethod: type) usize {
+    const type_info = @typeInfo(tersetsMethod);
     const method_info = switch (type_info) {
         .Enum => |method_info| method_info,
         else => @compileError("Expected a Method enum type"),
