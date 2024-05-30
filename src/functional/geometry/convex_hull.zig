@@ -78,7 +78,8 @@ pub const PointSet = struct {
     }
 };
 
-/// Graham algorithm to incrementally update the `upper_hull` and `lower_hull` given a new `point`.
+/// Graham algorithm to add a new point to `upper_hull` and `lower_hull`. The algorithm ensures
+/// that the upper and lower hull form a Convex Hull.
 pub fn addPointToConvexHull(upper_hull: *PointSet, lower_hull: *PointSet, point: Point) !void {
     if (upper_hull.len < 2) {
         // The first two points can be add directly.
