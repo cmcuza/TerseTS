@@ -26,14 +26,8 @@ const mem = std.mem;
 const testing = std.testing;
 const ArrayList = std.ArrayList;
 
-pub const Error = error{
-    EmptyInput,
-    IncorrectInput,
-    NegativeErrorBound,
-    OutOfMemory,
-    IntergerOverflow,
-    EmptySet,
-};
+const tersets = @import("../../tersets.zig");
+const Error = tersets.Error;
 
 /// Enum for the angle's `Turn` of three consecutive points. The angle can represent a `right` or
 /// `left` turn. If there is no turn, then the points are `colinear`.
@@ -80,16 +74,6 @@ pub const PointSet = struct {
         self.len += 1;
     }
 
-    // Insert `point` to the `PointSet` at the given `index`.
-    pub fn insert(self: *PointSet, point: Point, index: usize) !void {
-        if (index >= self.max_len) {
-            // Resize the array if necessary.
-            return Error.OutOfMemory;
-        }
-        self.points[index] = point;
-        self.len += 1;
-    }
-
     // Remove the last point from the set.
     pub fn pop(self: *PointSet) !void {
         if (self.len == 0) return Error.EmptySet;
@@ -102,9 +86,9 @@ pub fn addPointToConvexHull(upperHull: *PointSet, lowerHull: *PointSet, point: P
     if (upperHull.len < 2) {
         try upperHull.add(point);
     } else {
-        // Update upper hull
+        // Update upper hull.
         var top: usize = upperHull.len - 1;
-        while ((top > 0) and (try getTurn(
+        while ((top > 0) and (getTurn(
             upperHull.points[top - 1],
             upperHull.points[top],
             point,
@@ -118,9 +102,9 @@ pub fn addPointToConvexHull(upperHull: *PointSet, lowerHull: *PointSet, point: P
     if (lowerHull.len < 2) {
         try lowerHull.add(point);
     } else {
-        // Update lower hull
+        // Update lower hull.
         var top: usize = lowerHull.len - 1;
-        while ((top > 0) and (try getTurn(
+        while ((top > 0) and (getTurn(
             lowerHull.points[top - 1],
             lowerHull.points[top],
             point,
@@ -219,16 +203,35 @@ test "incremental convex hull with elements degeneracy" {
     try testing.expectEqual(5, upperHull.len);
     try testing.expectEqual(4, lowerHull.len);
 
+    // Expected Upper Hull
     try testing.expectEqual(0, upperHull.points[0].time);
     try testing.expectEqual(3, upperHull.points[1].time);
     try testing.expectEqual(8, upperHull.points[2].time);
     try testing.expectEqual(19, upperHull.points[3].time);
     try testing.expectEqual(20, upperHull.points[4].time);
-
+    // Expected Lower Hull
     try testing.expectEqual(0, lowerHull.points[0].time);
     try testing.expectEqual(1, lowerHull.points[1].time);
     try testing.expectEqual(15, lowerHull.points[2].time);
     try testing.expectEqual(20, lowerHull.points[3].time);
+}
+
+test "incremental convex hull addPointToConvexHull re-allocate memory" {
+    const num_points: usize = 1000;
+    const allocator = testing.allocator;
+    var rnd = std.rand.DefaultPrng.init(0);
+
+    var upperHull = try PointSet.init(&allocator, 10);
+    defer upperHull.deinit();
+    var lowerHull = try PointSet.init(&allocator, 10);
+    defer lowerHull.deinit();
+    var point: Point = Point{ .time = 0, .value = rnd.random().float(f64) };
+    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    for (1..num_points) |i| {
+        try addPointToConvexHull(&upperHull, &lowerHull, point);
+        point.time = i;
+        point.value = rnd.random().float(f64);
+    }
 }
 
 test "incremental convex hull random elements" {
@@ -247,11 +250,12 @@ test "incremental convex hull random elements" {
         point.value = rnd.random().float(f64);
     }
 
+    // All points in the Upper Hull should turn to the right
     for (1..upperHull.len - 1) |i| {
         const turn = getTurn(upperHull.points[i - 1], upperHull.points[i], upperHull.points[i + 1]);
         try testing.expectEqual(turn, Turn.right);
     }
-
+    // All points in the Lower Hull should turn to the left
     for (1..lowerHull.len - 1) |i| {
         const turn = getTurn(lowerHull.points[i - 1], lowerHull.points[i], lowerHull.points[i + 1]);
         try testing.expectEqual(turn, Turn.left);
