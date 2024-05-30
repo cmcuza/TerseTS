@@ -22,6 +22,7 @@
 //! [2] https://doi.org/10.1109/TSP.2006.875394 (Optimal PLA).
 
 const std = @import("std");
+const mem = std.mem;
 const testing = std.testing;
 
 const Error = @import("../../tersets.zig").Error;
@@ -40,7 +41,7 @@ pub const PointSet = struct {
     points: []Point,
     len: usize,
     max_len: usize,
-    allocator: *const std.mem.Allocator,
+    allocator: *const mem.Allocator,
 
     // Initialize the container with a given `allocator` and max number of points `num_points`.
     // The max number of points it is not fixed. The max number of points will increase as more
@@ -201,13 +202,13 @@ test "incremental convex hull with elements degeneracy" {
     try testing.expectEqual(5, upperHull.len);
     try testing.expectEqual(4, lowerHull.len);
 
-    // Expected Upper Hull
+    // Expected Upper Hull.
     try testing.expectEqual(0, upperHull.points[0].time);
     try testing.expectEqual(3, upperHull.points[1].time);
     try testing.expectEqual(8, upperHull.points[2].time);
     try testing.expectEqual(19, upperHull.points[3].time);
     try testing.expectEqual(20, upperHull.points[4].time);
-    // Expected Lower Hull
+    // Expected Lower Hull.
     try testing.expectEqual(0, lowerHull.points[0].time);
     try testing.expectEqual(1, lowerHull.points[1].time);
     try testing.expectEqual(15, lowerHull.points[2].time);
@@ -248,12 +249,12 @@ test "incremental convex hull random elements" {
         point.value = rnd.random().float(f64);
     }
 
-    // All points in the Upper Hull should turn to the right
+    // All points in the Upper Hull should turn to the right.
     for (1..upperHull.len - 1) |i| {
         const turn = getTurn(upperHull.points[i - 1], upperHull.points[i], upperHull.points[i + 1]);
         try testing.expectEqual(turn, Turn.right);
     }
-    // All points in the Lower Hull should turn to the left
+    // All points in the Lower Hull should turn to the left.
     for (1..lowerHull.len - 1) |i| {
         const turn = getTurn(lowerHull.points[i - 1], lowerHull.points[i], lowerHull.points[i + 1]);
         try testing.expectEqual(turn, Turn.left);
