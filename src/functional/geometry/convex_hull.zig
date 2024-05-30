@@ -46,7 +46,7 @@ pub const PointSet = struct {
     // Initialize the container with a given `allocator` and max number of points `num_points`.
     // The max number of points it is not fixed. The max number of points will increase as more
     // elements are added.
-    pub fn init(allocator: *const std.mem.Allocator, num_points: usize) !PointSet {
+    pub fn init(allocator: *const mem.Allocator, num_points: usize) !PointSet {
         return PointSet{
             .points = try allocator.alloc(Point, num_points),
             .len = 0,
