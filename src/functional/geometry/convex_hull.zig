@@ -127,7 +127,7 @@ fn getTurn(first_point: Point, middle_point: Point, last_point: Point) Turn {
     return if (value > 0) Turn.right else Turn.left;
 }
 
-test "incremental convex hull with elements degeneracy" {
+test "incremental convex hull with known result" {
     const allocator = testing.allocator;
 
     var upperHull = try PointSet.init(&allocator, 2);
