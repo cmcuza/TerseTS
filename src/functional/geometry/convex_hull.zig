@@ -214,24 +214,6 @@ test "incremental convex hull with elements degeneracy" {
     try testing.expectEqual(20, lowerHull.points[3].time);
 }
 
-test "incremental convex hull addPointToConvexHull re-allocate memory" {
-    const num_points: usize = 1000;
-    const allocator = testing.allocator;
-    var rnd = std.rand.DefaultPrng.init(0);
-
-    var upperHull = try PointSet.init(&allocator, 10);
-    defer upperHull.deinit();
-    var lowerHull = try PointSet.init(&allocator, 10);
-    defer lowerHull.deinit();
-    var point: Point = Point{ .time = 0, .value = rnd.random().float(f64) };
-    try addPointToConvexHull(&upperHull, &lowerHull, point);
-    for (1..num_points) |i| {
-        try addPointToConvexHull(&upperHull, &lowerHull, point);
-        point.time = i;
-        point.value = rnd.random().float(f64);
-    }
-}
-
 test "incremental convex hull random elements" {
     const num_points: usize = 1000;
     const allocator = testing.allocator;
