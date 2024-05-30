@@ -78,40 +78,38 @@ pub const PointSet = struct {
     }
 };
 
-/// Graham algorithm to incrementally update the `upperHull` and `lowerHull` given a new `point`.
-pub fn addPointToConvexHull(upperHull: *PointSet, lowerHull: *PointSet, point: Point) !void {
-    if (upperHull.len < 2) {
+/// Graham algorithm to incrementally update the `upper_hull` and `lower_hull` given a new `point`.
+pub fn addPointToConvexHull(upper_hull: *PointSet, lower_hull: *PointSet, point: Point) !void {
+    if (upper_hull.len < 2) {
         // The first two points can be add directly.
-        try upperHull.add(point);
+        try upper_hull.add(point);
     } else {
         // Update upper hull.
-        var top: usize = upperHull.len - 1;
+        var top: usize = upper_hull.len - 1;
         while ((top > 0) and (getTurn(
-            upperHull.points[top - 1],
-            upperHull.points[top],
+            upper_hull.points[top - 1],
+            upper_hull.points[top],
             point,
         ) != Turn.right)) : (top -= 1) {
-            try upperHull.pop();
+            try upper_hull.pop();
         }
-        top += 1;
-        try upperHull.add(point);
+        try upper_hull.add(point);
     }
 
-    if (lowerHull.len < 2) {
+    if (lower_hull.len < 2) {
         // The first two points can be add directly.
-        try lowerHull.add(point);
+        try lower_hull.add(point);
     } else {
         // Update lower hull.
-        var top: usize = lowerHull.len - 1;
+        var top: usize = lower_hull.len - 1;
         while ((top > 0) and (getTurn(
-            lowerHull.points[top - 1],
-            lowerHull.points[top],
+            lower_hull.points[top - 1],
+            lower_hull.points[top],
             point,
         ) != Turn.left)) : (top -= 1) {
-            try lowerHull.pop();
+            try lower_hull.pop();
         }
-        top += 1;
-        try lowerHull.add(point);
+        try lower_hull.add(point);
     }
 }
 
