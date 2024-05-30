@@ -13,11 +13,10 @@
 // limitations under the License.
 
 //! This file contains the Graham algorithm to incrementally create or maintain a convex hull
-//! as well as the necessary structures, enums, and auxiliary functions from the book.
-//! "Mark De Berg, and Marc van Kreveld. Computational geometry: algorithms
-//! and applications. Third Edition. Springer Science & Business Media, 2000.
-//! https://doi.org//10.1007/978-3-540-77974-2".
-//! This algorithm is necessary for the compression algorithms described in:
+//! as well as the necessary structures, enums, and auxiliary functions. The algorithm is described
+//! in: "Mark De Berg, and Marc van Kreveld. Computational geometry: algorithms and applications.
+//! Springer Science & Business Media, 2000. https://doi.org//10.1007/978-3-540-77974-2.
+//! Convex Hulls are necessary in the implementation of the compression algorithms [1] and [2].
 //! [1] https://doi.org/10.14778/1687627.1687645 (Slide Filter).
 //! [2] https://doi.org/10.1109/TSP.2006.875394 (Optimal PLA).
 
@@ -25,7 +24,8 @@ const std = @import("std");
 const mem = std.mem;
 const testing = std.testing;
 
-const Error = @import("../../tersets.zig").Error;
+const tersets = @import("../../tersets.zig");
+const Error = tersets.Error;
 
 /// Enum for the angle's `Turn` of three consecutive points. The angle can represent a `right` or
 /// `left` turn. If there is no turn, then the points are `colinear`.
