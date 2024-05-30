@@ -130,114 +130,114 @@ fn getTurn(first_point: Point, middle_point: Point, last_point: Point) Turn {
 test "incremental convex hull with known result" {
     const allocator = testing.allocator;
 
-    var upperHull = try PointSet.init(&allocator, 2);
-    defer upperHull.deinit();
-    var lowerHull = try PointSet.init(&allocator, 2);
-    defer lowerHull.deinit();
+    var upper_hull = try PointSet.init(&allocator, 2);
+    defer upper_hull.deinit();
+    var lower_hull = try PointSet.init(&allocator, 2);
+    defer lower_hull.deinit();
 
     var point: Point = Point{ .time = 0, .value = 3 };
-    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    try addPointToConvexHull(&upper_hull, &lower_hull, point);
     point.time = 1;
     point.value = 2;
-    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    try addPointToConvexHull(&upper_hull, &lower_hull, point);
     point.time = 2;
     point.value = 3.5;
-    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    try addPointToConvexHull(&upper_hull, &lower_hull, point);
     point.time = 3;
     point.value = 5;
-    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    try addPointToConvexHull(&upper_hull, &lower_hull, point);
     point.time = 4;
     point.value = 3;
-    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    try addPointToConvexHull(&upper_hull, &lower_hull, point);
     point.time = 5;
     point.value = 4;
-    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    try addPointToConvexHull(&upper_hull, &lower_hull, point);
     point.time = 6;
     point.value = 4;
-    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    try addPointToConvexHull(&upper_hull, &lower_hull, point);
     point.time = 7;
     point.value = 3;
-    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    try addPointToConvexHull(&upper_hull, &lower_hull, point);
     point.time = 8;
     point.value = 4.5;
-    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    try addPointToConvexHull(&upper_hull, &lower_hull, point);
     point.time = 9;
     point.value = 3.5;
-    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    try addPointToConvexHull(&upper_hull, &lower_hull, point);
     point.time = 10;
     point.value = 2.5;
-    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    try addPointToConvexHull(&upper_hull, &lower_hull, point);
     point.time = 11;
     point.value = 2.5;
-    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    try addPointToConvexHull(&upper_hull, &lower_hull, point);
     point.time = 12;
     point.value = 3.5;
-    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    try addPointToConvexHull(&upper_hull, &lower_hull, point);
     point.time = 13;
     point.value = 2.5;
-    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    try addPointToConvexHull(&upper_hull, &lower_hull, point);
     point.time = 14;
     point.value = 2.5;
-    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    try addPointToConvexHull(&upper_hull, &lower_hull, point);
     point.time = 15;
     point.value = 2.5;
-    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    try addPointToConvexHull(&upper_hull, &lower_hull, point);
     point.time = 16;
     point.value = 3;
-    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    try addPointToConvexHull(&upper_hull, &lower_hull, point);
     point.time = 17;
     point.value = 3;
-    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    try addPointToConvexHull(&upper_hull, &lower_hull, point);
     point.time = 18;
     point.value = 3;
-    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    try addPointToConvexHull(&upper_hull, &lower_hull, point);
     point.time = 19;
     point.value = 3;
-    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    try addPointToConvexHull(&upper_hull, &lower_hull, point);
     point.time = 20;
     point.value = 2.8;
-    try addPointToConvexHull(&upperHull, &lowerHull, point);
+    try addPointToConvexHull(&upper_hull, &lower_hull, point);
 
-    try testing.expectEqual(5, upperHull.len);
-    try testing.expectEqual(4, lowerHull.len);
+    try testing.expectEqual(5, upper_hull.len);
+    try testing.expectEqual(4, lower_hull.len);
 
     // Expected Upper Hull.
-    try testing.expectEqual(0, upperHull.points[0].time);
-    try testing.expectEqual(3, upperHull.points[1].time);
-    try testing.expectEqual(8, upperHull.points[2].time);
-    try testing.expectEqual(19, upperHull.points[3].time);
-    try testing.expectEqual(20, upperHull.points[4].time);
+    try testing.expectEqual(0, upper_hull.points[0].time);
+    try testing.expectEqual(3, upper_hull.points[1].time);
+    try testing.expectEqual(8, upper_hull.points[2].time);
+    try testing.expectEqual(19, upper_hull.points[3].time);
+    try testing.expectEqual(20, upper_hull.points[4].time);
     // Expected Lower Hull.
-    try testing.expectEqual(0, lowerHull.points[0].time);
-    try testing.expectEqual(1, lowerHull.points[1].time);
-    try testing.expectEqual(15, lowerHull.points[2].time);
-    try testing.expectEqual(20, lowerHull.points[3].time);
+    try testing.expectEqual(0, lower_hull.points[0].time);
+    try testing.expectEqual(1, lower_hull.points[1].time);
+    try testing.expectEqual(15, lower_hull.points[2].time);
+    try testing.expectEqual(20, lower_hull.points[3].time);
 }
 
 test "incremental convex hull random elements" {
     const num_points: usize = 1000;
     const allocator = testing.allocator;
     var rnd = std.rand.DefaultPrng.init(0);
-    var upperHull = try PointSet.init(&allocator, num_points);
-    defer upperHull.deinit();
-    var lowerHull = try PointSet.init(&allocator, num_points);
-    defer lowerHull.deinit();
+    var upper_hull = try PointSet.init(&allocator, num_points);
+    defer upper_hull.deinit();
+    var lower_hull = try PointSet.init(&allocator, num_points);
+    defer lower_hull.deinit();
 
     var point: Point = Point{ .time = 0, .value = rnd.random().float(f64) };
     for (1..num_points) |i| {
-        try addPointToConvexHull(&upperHull, &lowerHull, point);
+        try addPointToConvexHull(&upper_hull, &lower_hull, point);
         point.time = i;
         point.value = rnd.random().float(f64);
     }
 
     // All points in the Upper Hull should turn to the right.
-    for (1..upperHull.len - 1) |i| {
-        const turn = getTurn(upperHull.points[i - 1], upperHull.points[i], upperHull.points[i + 1]);
+    for (1..upper_hull.len - 1) |i| {
+        const turn = getTurn(upper_hull.points[i - 1], upper_hull.points[i], upper_hull.points[i + 1]);
         try testing.expectEqual(turn, Turn.right);
     }
     // All points in the Lower Hull should turn to the left.
-    for (1..lowerHull.len - 1) |i| {
-        const turn = getTurn(lowerHull.points[i - 1], lowerHull.points[i], lowerHull.points[i + 1]);
+    for (1..lower_hull.len - 1) |i| {
+        const turn = getTurn(lower_hull.points[i - 1], lower_hull.points[i], lower_hull.points[i + 1]);
         try testing.expectEqual(turn, Turn.left);
     }
 }
