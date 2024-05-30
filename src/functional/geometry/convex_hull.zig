@@ -15,19 +15,16 @@
 //! This file contains the Graham algorithm to incrementally create or maintain a convex hull
 //! as well as the necessary structures, enums, and auxiliary functions from the book.
 //! "Mark De Berg, and Marc van Kreveld. Computational geometry: algorithms
-//!  and applications. Third Edition. Springer Science & Business Media, 2000.
+//! and applications. Third Edition. Springer Science & Business Media, 2000.
 //! https://doi.org//10.1007/978-3-540-77974-2".
-//! This algorithm is necessary for the compression algorithms described in
+//! This algorithm is necessary for the compression algorithms described in:
 //! [1] https://doi.org/10.14778/1687627.1687645 (Slide Filter).
 //! [2] https://doi.org/10.1109/TSP.2006.875394 (Optimal PLA).
 
 const std = @import("std");
-const mem = std.mem;
 const testing = std.testing;
-const ArrayList = std.ArrayList;
 
-const tersets = @import("../../tersets.zig");
-const Error = tersets.Error;
+const Error = @import("../../tersets.zig").Error;
 
 /// Enum for the angle's `Turn` of three consecutive points. The angle can represent a `right` or
 /// `left` turn. If there is no turn, then the points are `colinear`.
@@ -37,8 +34,8 @@ const Turn = enum(i8) { right, left, colinear };
 const Point = struct { time: usize, value: f64 };
 
 /// Set of points used to store the upper and lower hull of the convex hull. `points` are memory
-/// slide that it's dynamically increased as `len` exceeds `max_len`.A good estimation of `max_len`
-/// can improve both execution time and memory consumption.
+/// slide that it's dynamically increased as `len` exceeds `max_len`. A good estimation of
+/// `max_len` can improve both execution time and memory consumption.
 pub const PointSet = struct {
     points: []Point,
     len: usize,
@@ -65,10 +62,9 @@ pub const PointSet = struct {
     // Add `point` to the `PointSet`.
     pub fn add(self: *PointSet, point: Point) !void {
         if (self.len >= self.max_len) {
-            // Resize the array if necessary.
-            const new_max_len = self.max_len * 2;
-            self.points = try self.allocator.realloc(self.points, new_max_len);
-            self.max_len = new_max_len;
+            // Resize the set of `points`.
+            self.max_len = self.max_len * 2;
+            self.points = try self.allocator.realloc(self.points, self.max_len);
         }
         self.points[self.len] = point;
         self.len += 1;
@@ -84,6 +80,7 @@ pub const PointSet = struct {
 /// Graham algorithm to incrementally update the `upperHull` and `lowerHull` given a new `point`.
 pub fn addPointToConvexHull(upperHull: *PointSet, lowerHull: *PointSet, point: Point) !void {
     if (upperHull.len < 2) {
+        // The first two points can be add directly.
         try upperHull.add(point);
     } else {
         // Update upper hull.
@@ -100,6 +97,7 @@ pub fn addPointToConvexHull(upperHull: *PointSet, lowerHull: *PointSet, point: P
     }
 
     if (lowerHull.len < 2) {
+        // The first two points can be add directly.
         try lowerHull.add(point);
     } else {
         // Update lower hull.
@@ -116,7 +114,7 @@ pub fn addPointToConvexHull(upperHull: *PointSet, lowerHull: *PointSet, point: P
     }
 }
 
-/// Return the type of turn created by the `first_point`, the `middle_point and the `last_point`.
+/// Return the type of turn created by the `first_point`, `middle_point and the `last_point`.
 fn getTurn(first_point: Point, middle_point: Point, last_point: Point) Turn {
     const distance_last_middle: f64 = @floatFromInt(last_point.time - middle_point.time);
     const distance_middle_first: f64 = @floatFromInt(middle_point.time - first_point.time);
@@ -132,9 +130,9 @@ fn getTurn(first_point: Point, middle_point: Point, last_point: Point) Turn {
 test "incremental convex hull with elements degeneracy" {
     const allocator = testing.allocator;
 
-    var upperHull = try PointSet.init(&allocator, 20);
+    var upperHull = try PointSet.init(&allocator, 2);
     defer upperHull.deinit();
-    var lowerHull = try PointSet.init(&allocator, 20);
+    var lowerHull = try PointSet.init(&allocator, 2);
     defer lowerHull.deinit();
 
     var point: Point = Point{ .time = 0, .value = 3 };
