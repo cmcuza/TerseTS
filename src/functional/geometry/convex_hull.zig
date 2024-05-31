@@ -58,14 +58,15 @@ pub const ConvexHull = struct {
     }
 };
 
-/// Add a new `point` to a `hull` as soon as it finds a different angle `turn`.
+/// Auxiliary function to add a new `point` to a given `hull` of the convex hull. The function uses
+/// the given `turn` to correctly add the new point.
 fn addPointToHull(hull: *ArrayList(Point), turn: Turn, point: Point) !void {
     if (hull.items.len < 2) {
         // The first two points can be add directly.
         try hull.append(point);
     } else {
-        // Core idea of Graham's scan.
         var top: usize = hull.items.len - 1;
+        // Remove the last point as long as the `turn` is not the provided.
         while ((top > 0) and (computeTurn(
             hull.items[top - 1],
             hull.items[top],
