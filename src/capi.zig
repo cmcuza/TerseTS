@@ -122,7 +122,6 @@ fn errorToInt(err: Error) i32 {
         Error.NegativeErrorBound => return 3,
         Error.IncorrectInput => return 4,
         Error.OutOfMemory => return 5,
-        Error.EmptySet => return 6,
     }
 }
 

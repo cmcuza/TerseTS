@@ -27,7 +27,6 @@ pub const Error = error{
     IncorrectInput,
     NegativeErrorBound,
     OutOfMemory,
-    EmptySet,
 };
 
 /// The compression methods in TerseTS.
@@ -36,6 +35,9 @@ pub const Method = enum {
     PoorMansCompressionMean,
     SwingFilter,
 };
+
+/// A point represented by `time` and `value`.
+pub const Point = struct { time: usize, value: f64 };
 
 /// Margin to adjust the error bound for numerical stability. Reducing the error bound by this
 /// margin ensures that all the elements of the decompressed time series are within the error bound
