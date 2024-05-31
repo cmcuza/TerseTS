@@ -51,41 +51,31 @@ pub const ConvexHull = struct {
         self.upper_hull.deinit();
     }
 
-    /// Add new `point` to the convex hull following Graham's scan.
+    /// Add new `point` to the convex hull.
     pub fn addPoint(self: *ConvexHull, point: Point) !void {
-        if (self.upper_hull.items.len < 2) {
-            // The first two points can be add directly.
-            try self.upper_hull.append(point);
-        } else {
-            // Update upper hull.
-            var top: usize = self.upper_hull.items.len - 1;
-            while ((top > 0) and (computeTurn(
-                self.upper_hull.items[top - 1],
-                self.upper_hull.items[top],
-                point,
-            ) != Turn.right)) : (top -= 1) {
-                _ = self.upper_hull.pop();
-            }
-            try self.upper_hull.append(point);
-        }
-
-        if (self.lower_hull.items.len < 2) {
-            // The first two points can be add directly.
-            try self.lower_hull.append(point);
-        } else {
-            // Update lower hull.
-            var top: usize = self.lower_hull.items.len - 1;
-            while ((top > 0) and (computeTurn(
-                self.lower_hull.items[top - 1],
-                self.lower_hull.items[top],
-                point,
-            ) != Turn.left)) : (top -= 1) {
-                _ = self.lower_hull.pop();
-            }
-            try self.lower_hull.append(point);
-        }
+        try addPointToHull(&self.upper_hull, Turn.right, point);
+        try addPointToHull(&self.lower_hull, Turn.left, point);
     }
 };
+
+/// Add a new `point` to a `hull` as soon as it finds a different angle `turn`.
+fn addPointToHull(hull: *ArrayList(Point), turn: Turn, point: Point) !void {
+    if (hull.items.len < 2) {
+        // The first two points can be add directly.
+        try hull.append(point);
+    } else {
+        // Core idea of Graham's scan.
+        var top: usize = hull.items.len - 1;
+        while ((top > 0) and (computeTurn(
+            hull.items[top - 1],
+            hull.items[top],
+            point,
+        ) != turn)) : (top -= 1) {
+            _ = hull.pop();
+        }
+        try hull.append(point);
+    }
+}
 
 /// Compute turn created by the path from `first_point` to `middle_point` to `last_point`.
 fn computeTurn(first_point: Point, middle_point: Point, last_point: Point) Turn {
@@ -163,6 +153,7 @@ test "incremental convex hull random elements" {
         );
         try testing.expectEqual(turn, Turn.right);
     }
+
     // All points in the Lower Hull should turn to the left.
     for (1..convex_hull.lower_hull.items.len - 1) |i| {
         const turn = computeTurn(
