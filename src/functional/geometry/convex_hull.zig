@@ -24,9 +24,8 @@ const mem = std.mem;
 const ArrayList = std.ArrayList;
 const testing = std.testing;
 
-// const tersets = @import("../../tersets.zig");
-// const Point = tersets.Point;
-pub const Point = struct { time: usize, value: f64 };
+const tersets = @import("../../tersets.zig");
+const Point = tersets.Point;
 
 /// Enum for the angle's `Turn` of three consecutive points A, B, and C. Essentially, it describes
 /// whether the path from A to B to C makes a `left` turn, a `right` turn, or continues in a
