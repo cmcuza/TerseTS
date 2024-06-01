@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Implementation of the Graham's scan which can maintain a convex hull from the paper
+//! Implementation of Graham's scan which can maintain a convex hull from the paper
 //! "Graham, R.L. An Efficient Algorithm for Determining the Convex Hull of a Finite Planar Set.
 //! Information Processing Letters. 1 (4): 132–133. 1972.
 //! https://doi.org/10.1016/0020-0190(72)90045-2.
@@ -24,8 +24,9 @@ const mem = std.mem;
 const ArrayList = std.ArrayList;
 const testing = std.testing;
 
-const tersets = @import("../../tersets.zig");
-const Point = tersets.Point;
+// const tersets = @import("../../tersets.zig");
+// const Point = tersets.Point;
+pub const Point = struct { time: usize, value: f64 };
 
 /// Enum for the angle's `Turn` of three consecutive points A, B, and C. Essentially, it describes
 /// whether the path from A to B to C makes a `left` turn, a `right` turn, or continues in a
@@ -51,34 +52,36 @@ pub const ConvexHull = struct {
         self.upper_hull.deinit();
     }
 
-    /// Add new `point` to the convex hull.
+    /// Add a new `point` to the convex hull.
     pub fn addPoint(self: *ConvexHull, point: Point) !void {
         try addPointToHull(&self.upper_hull, Turn.right, point);
         try addPointToHull(&self.lower_hull, Turn.left, point);
     }
+
+    /// Auxiliary function to add a new `point` to a given `hull` of the convex hull. The function uses
+    /// the given `turn` to correctly add the new point.
+    fn addPointToHull(hull: *ArrayList(Point), turn: Turn, point: Point) !void {
+        if (hull.items.len < 2) {
+            // The first two points can be add directly.
+            try hull.append(point);
+        } else {
+            var top: usize = hull.items.len - 1;
+            // Remove the last point as long as the `turn` is not the provided.
+            while ((top > 0) and (computeTurn(
+                hull.items[top - 1],
+                hull.items[top],
+                point,
+            ) != turn)) : (top -= 1) {
+                _ = hull.pop();
+            }
+            try hull.append(point);
+        }
+    }
 };
 
-/// Auxiliary function to add a new `point` to a given `hull` of the convex hull. The function uses
-/// the given `turn` to correctly add the new point.
-fn addPointToHull(hull: *ArrayList(Point), turn: Turn, point: Point) !void {
-    if (hull.items.len < 2) {
-        // The first two points can be add directly.
-        try hull.append(point);
-    } else {
-        var top: usize = hull.items.len - 1;
-        // Remove the last point as long as the `turn` is not the provided.
-        while ((top > 0) and (computeTurn(
-            hull.items[top - 1],
-            hull.items[top],
-            point,
-        ) != turn)) : (top -= 1) {
-            _ = hull.pop();
-        }
-        try hull.append(point);
-    }
-}
-
-/// Compute turn created by the path from `first_point` to `middle_point` to `last_point`.
+/// Compute turn created by the path from `first_point` to `middle_point` to `last_point`. If this
+/// function is part of the structure and does not use the `self` parameter, the compiler returns
+/// an error. However, since it is used for testing purposes it cannot be private.
 fn computeTurn(first_point: Point, middle_point: Point, last_point: Point) Turn {
     const distance_last_middle: f64 = @floatFromInt(last_point.time - middle_point.time);
     const distance_middle_first: f64 = @floatFromInt(middle_point.time - first_point.time);
@@ -86,7 +89,12 @@ fn computeTurn(first_point: Point, middle_point: Point, last_point: Point) Turn 
     const cross_product = (middle_point.value - first_point.value) * distance_last_middle -
         (last_point.value - middle_point.value) * distance_middle_first;
 
-    return if (cross_product == 0) Turn.collinear else if (cross_product > 0) Turn.right else Turn.left;
+    return if (cross_product == 0)
+        Turn.collinear
+    else if (cross_product > 0)
+        Turn.right
+    else
+        Turn.left;
 }
 
 test "incremental convex hull with known result" {
@@ -142,8 +150,9 @@ test "incremental convex hull random elements" {
     var convex_hull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
 
-    for (0..num_points) |i|
+    for (0..num_points) |i| {
         try convex_hull.addPoint(.{ .time = i, .value = rnd.random().float(f64) });
+    }
 
     // All points in the Upper Hull should turn to the right.
     for (1..convex_hull.upper_hull.items.len - 1) |i| {
