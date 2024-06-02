@@ -26,15 +26,8 @@ const ArrayList = std.ArrayList;
 
 const tersets = @import("../tersets.zig");
 const Error = tersets.Error;
-
-/// Segment represented by the points: (start_time, start_value) and (end_time, end_value).
-/// The `start_time` and `end_time` represent indices of the time series.
-const Segment = struct {
-    start_time: usize,
-    start_value: f64,
-    end_time: usize,
-    end_value: f64,
-};
+const Point = tersets.Point;
+const Segment = tersets.Segment;
 
 /// Linear function of the form y = slope*x+intercept. It uses f80 for numerical stability.
 const LinearFunction = struct {
@@ -55,18 +48,16 @@ pub fn compress_swing(
     else
         error_bound;
 
-    var upper_bound_linear_function: LinearFunction = LinearFunction{ .slope = 0, .intercept = 0 };
-    var lower_bound_linear_function: LinearFunction = LinearFunction{ .slope = 0, .intercept = 0 };
-    var new_upper_bound_linear_function: LinearFunction = LinearFunction{ .slope = 0, .intercept = 0 };
-    var new_lower_bound_linear_function: LinearFunction = LinearFunction{ .slope = 0, .intercept = 0 };
-    var current_linear_function: LinearFunction = LinearFunction{ .slope = 0, .intercept = 0 };
+    var upper_bound_linear_function: LinearFunction = .{ .slope = 0, .intercept = 0 };
+    var lower_bound_linear_function: LinearFunction = .{ .slope = 0, .intercept = 0 };
+    var new_upper_bound_linear_function: LinearFunction = .{ .slope = 0, .intercept = 0 };
+    var new_lower_bound_linear_function: LinearFunction = .{ .slope = 0, .intercept = 0 };
+    var current_linear_function: LinearFunction = .{ .slope = 0, .intercept = 0 };
 
     // Initialize the current segment with first two points.
-    var current_segment: Segment = Segment{
-        .start_time = 0,
-        .start_value = uncompressed_values[0],
-        .end_time = 1,
-        .end_value = uncompressed_values[1],
+    var current_segment: Segment = .{
+        .start_point = .{ .time = 0, .value = uncompressed_values[0] },
+        .end_point = .{ .time = 1, .value = uncompressed_values[1] },
     };
 
     // Compute the numerator Eq. (6).
@@ -86,8 +77,8 @@ pub fn compress_swing(
             (lower_limit > (uncompressed_values[current_timestamp] + adjusted_error_bound)))
         {
             // Recording mechanism (the current points is outside the limits).
-            try appendValue(f64, current_segment.start_value, compressed_values);
-            const segment_size = current_timestamp - current_segment.start_time - 1;
+            try appendValue(f64, current_segment.start_point.value, compressed_values);
+            const segment_size = current_timestamp - current_segment.start_point.time - 1;
             if (segment_size > 1) {
                 // Denominator of Eq. (6).
                 const sum_square: f80 = @floatFromInt(
@@ -103,26 +94,25 @@ pub fn compress_swing(
                 current_linear_function.slope = slope;
                 current_linear_function.intercept = computeInterceptCoefficient(
                     slope,
-                    current_segment.start_time,
-                    uncompressed_values[current_segment.start_time],
+                    current_segment.start_point,
                 );
                 const end_value = evaluateLinearFunctionAtTime(current_linear_function, current_timestamp - 1);
                 try appendValue(f64, end_value, compressed_values);
             } else {
-                try appendValue(f64, current_segment.end_value, compressed_values);
+                try appendValue(f64, current_segment.end_point.value, compressed_values);
             }
 
             try appendValue(usize, current_timestamp, compressed_values);
 
             // Update the current segment.
-            current_segment.start_time = current_timestamp;
-            current_segment.start_value = uncompressed_values[current_timestamp];
+            current_segment.start_point.time = current_timestamp;
+            current_segment.start_point.value = uncompressed_values[current_timestamp];
 
             // Catch edge case (only one point left). If `current_timestamp+1 >= uncompressed_values.len` then
             // `uncompressed_values[current_timestamp + 1]` will return index out of bound error.
             if (current_timestamp + 1 < uncompressed_values.len) {
-                current_segment.end_time = current_timestamp + 1;
-                current_segment.end_value = uncompressed_values[current_timestamp + 1];
+                current_segment.end_point.time = current_timestamp + 1;
+                current_segment.end_point.value = uncompressed_values[current_timestamp + 1];
 
                 updateSwingLinearFunction(current_segment, &upper_bound_linear_function, adjusted_error_bound);
                 updateSwingLinearFunction(current_segment, &lower_bound_linear_function, -adjusted_error_bound);
@@ -131,8 +121,8 @@ pub fn compress_swing(
                 slope_derivate = computeSlopeDerivate(current_segment);
             } else {
                 // Create linear function with slope zero and intercept equal to the current value.
-                current_segment.end_time = current_timestamp;
-                current_segment.end_value = uncompressed_values[current_timestamp];
+                current_segment.end_point.time = current_timestamp;
+                current_segment.end_point.value = uncompressed_values[current_timestamp];
                 upper_bound_linear_function.slope = 0.0;
                 upper_bound_linear_function.intercept = uncompressed_values[current_timestamp];
                 lower_bound_linear_function.slope = 0.0;
@@ -140,8 +130,8 @@ pub fn compress_swing(
             }
         } else {
             //Filtering mechanism (the current point is still inside the limits).
-            current_segment.end_time = current_timestamp;
-            current_segment.end_value = uncompressed_values[current_timestamp];
+            current_segment.end_point.time = current_timestamp;
+            current_segment.end_point.value = uncompressed_values[current_timestamp];
 
             // Update the potentially new upper and lower bounds with the new current point.
             updateSwingLinearFunction(current_segment, &new_upper_bound_linear_function, adjusted_error_bound);
@@ -173,9 +163,9 @@ pub fn compress_swing(
         }
     }
 
-    const segment_size = current_timestamp - current_segment.start_time - 1;
+    const segment_size = current_timestamp - current_segment.start_point.time - 1;
 
-    try appendValue(f64, current_segment.start_value, compressed_values);
+    try appendValue(f64, current_segment.start_point.value, compressed_values);
     if (segment_size > 1) {
         // Denominator of Eq. (6).
         const sum_square: f80 = @floatFromInt(
@@ -191,14 +181,13 @@ pub fn compress_swing(
         current_linear_function.slope = slope;
         current_linear_function.intercept = computeInterceptCoefficient(
             slope,
-            current_segment.start_time,
-            uncompressed_values[current_segment.start_time],
+            current_segment.start_point,
         );
 
         const end_value: f64 = evaluateLinearFunctionAtTime(current_linear_function, current_timestamp - 1);
         try appendValue(f64, end_value, compressed_values);
     } else {
-        try appendValue(f64, current_segment.end_value, compressed_values);
+        try appendValue(f64, current_segment.end_point.value, compressed_values);
     }
 
     try appendValue(usize, current_timestamp, compressed_values);
@@ -216,34 +205,31 @@ pub fn decompress(
 
     const compressed_lines_and_index = mem.bytesAsSlice(f64, compressed_values);
 
-    var current_linear_function: LinearFunction = LinearFunction{ .slope = 0, .intercept = 0 };
-    var current_segment: Segment = Segment{
-        .start_time = 0,
-        .start_value = 0,
-        .end_time = 0,
-        .end_value = 0,
-    };
+    var current_linear_function: LinearFunction = .{ .slope = 0, .intercept = 0 };
 
     var first_timestamp: usize = 0;
     var index: usize = 0;
     while (index < compressed_lines_and_index.len) : (index += 3) {
-        current_segment.start_time = first_timestamp;
-        current_segment.start_value = compressed_lines_and_index[index];
-        current_segment.end_value = compressed_lines_and_index[index + 1];
-        current_segment.end_time = @as(usize, @bitCast(compressed_lines_and_index[index + 2])) - 1;
+        const current_segment: Segment = .{
+            .start_point = .{ .time = first_timestamp, .value = compressed_lines_and_index[index] },
+            .end_point = .{
+                .time = @as(usize, @bitCast(compressed_lines_and_index[index + 2])) - 1,
+                .value = compressed_lines_and_index[index + 1],
+            },
+        };
 
-        if (current_segment.start_time < current_segment.end_time) {
+        if (current_segment.start_point.time < current_segment.end_point.time) {
             updateSwingLinearFunction(current_segment, &current_linear_function, 0.0);
-            try decompressed_values.append(current_segment.start_value);
-            var current_timestamp: usize = current_segment.start_time + 1;
-            while (current_timestamp < current_segment.end_time) : (current_timestamp += 1) {
+            try decompressed_values.append(current_segment.start_point.value);
+            var current_timestamp: usize = current_segment.start_point.time + 1;
+            while (current_timestamp < current_segment.end_point.time) : (current_timestamp += 1) {
                 const y: f64 = evaluateLinearFunctionAtTime(current_linear_function, current_timestamp);
                 try decompressed_values.append(y);
             }
-            try decompressed_values.append(current_segment.end_value);
+            try decompressed_values.append(current_segment.end_point.value);
             first_timestamp = current_timestamp + 1;
         } else {
-            try decompressed_values.append(current_segment.start_value);
+            try decompressed_values.append(current_segment.start_point.value);
             first_timestamp += 1;
         }
     }
@@ -251,8 +237,8 @@ pub fn decompress(
 
 /// Computes the numerator of the slope derivate as in Eq. (6).
 fn computeSlopeDerivate(segment: Segment) f80 {
-    return (segment.end_value - segment.start_value) *
-        usizeToF80(segment.end_time - segment.start_time);
+    return (segment.end_point.value - segment.start_point.value) *
+        usizeToF80(segment.end_point.time - segment.start_point.time);
 }
 
 /// Updates the linear function coeficients in `linear_function` that passes throught the two
@@ -263,13 +249,15 @@ fn updateSwingLinearFunction(
     linear_function: *LinearFunction,
     error_bound: f32,
 ) void {
-    if (segment.end_time != segment.start_time) {
-        const duration: f80 = @floatFromInt(segment.end_time - segment.start_time);
-        linear_function.slope = (segment.end_value + error_bound - segment.start_value) / duration;
-        linear_function.intercept = segment.start_value - linear_function.slope * usizeToF80(segment.start_time);
+    if (segment.end_point.time != segment.start_point.time) {
+        const duration: f80 = @floatFromInt(segment.end_point.time - segment.start_point.time);
+        linear_function.slope = (segment.end_point.value + error_bound -
+            segment.start_point.value) / duration;
+        linear_function.intercept = segment.start_point.value - linear_function.slope *
+            usizeToF80(segment.start_point.time);
     } else {
         linear_function.slope = 0.0;
-        linear_function.intercept = segment.start_value;
+        linear_function.intercept = segment.start_point.value;
     }
 }
 
@@ -290,10 +278,10 @@ fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)
     }
 }
 
-/// Computes the intercept coefficient of a linear function that passes through the point
-/// (time, value) and with the given slope coefficient.
-fn computeInterceptCoefficient(slope: f80, time: usize, value: f64) f80 {
-    return value - slope * usizeToF80(time);
+/// Computes the intercept coefficient of a linear function that passes through `point` and
+/// with the given slope coefficient.
+fn computeInterceptCoefficient(slope: f80, point: Point) f80 {
+    return point.value - slope * usizeToF80(point.time);
 }
 
 /// Converts `value` of `usize` to `f80`.
