@@ -305,7 +305,7 @@ test "swing filter zero error bound and even size compress and decompress" {
     const allocator = testing.allocator;
     const linear_function = LinearFunction{ .slope = 1, .intercept = 0.0 };
 
-    var list_values = std.ArrayList(f64).init(allocator);
+    var list_values = ArrayList(f64).init(allocator);
     defer list_values.deinit();
     var compressed_values = ArrayList(u8).init(allocator);
     defer compressed_values.deinit();
@@ -338,7 +338,7 @@ test "swing filter zero error bound and odd size compress and decompress" {
 
     const linear_function = LinearFunction{ .slope = 1, .intercept = 0.0 };
 
-    var list_values = std.ArrayList(f64).init(allocator);
+    var list_values = ArrayList(f64).init(allocator);
     defer list_values.deinit();
     var compressed_values = ArrayList(u8).init(allocator);
     defer compressed_values.deinit();
@@ -389,7 +389,7 @@ test "swing filter four random lines and random error bound compress and decompr
         },
     };
 
-    var list_values = std.ArrayList(f64).init(allocator);
+    var list_values = ArrayList(f64).init(allocator);
     defer list_values.deinit();
     var compressed_values = ArrayList(u8).init(allocator);
     defer compressed_values.deinit();
