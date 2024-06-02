@@ -278,8 +278,8 @@ fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)
     }
 }
 
-/// Computes the intercept coefficient of a linear function that passes through `point` and
-/// with the given slope coefficient.
+/// Computes the intercept coefficient of a linear function that passes through `point`
+/// with the given `slope` coefficient.
 fn computeInterceptCoefficient(slope: f80, point: Point) f80 {
     return point.value - slope * usizeToF80(point.time);
 }

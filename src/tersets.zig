@@ -39,7 +39,7 @@ pub const Method = enum {
 /// A point represented by `time` and `value`.
 pub const Point = struct { time: usize, value: f64 };
 
-/// Segment represented by the `start_point` and `end_point`.
+/// This structure models a straight line segment from `start_point` to `end_point`.
 pub const Segment = struct { start_point: Point, end_point: Point };
 
 /// Margin to adjust the error bound for numerical stability. Reducing the error bound by this
