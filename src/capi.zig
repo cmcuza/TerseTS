@@ -35,24 +35,10 @@ pub const CompressedValues = Array(u8);
 /// Configuration to use for compression and/or decompression.
 pub const Configuration = extern struct { method: u8, error_bound: f32 };
 
-/// Get the maximun index of the available methods in TerseTS.
-fn getMaxMethodIndex(comptime TersetsMethod: type) usize {
-    const type_info = @typeInfo(TersetsMethod);
-    const method_info = switch (type_info) {
-        .Enum => |method_info| method_info,
-        else => @compileError("Expected a Method enum type"),
-    };
-
-    var max_index: usize = 0;
-    for (method_info.fields, 0..) |_, i| {
-        max_index = if (i > max_index) i else max_index;
-    }
-
-    return max_index;
-}
-
 /// Compress `uncompressed_values` to `compressed_values` according to `configuration`.
-/// On success zero is returned, and the following non-zero values are returned on errors:
+/// The General Purpose Allocator `allocator` is passed as a parameter to tersets for
+/// memory management in the compression methods. On success zero is returned, and the
+/// following non-zero values are returned on errors:
 /// - 1) Unsupported compression method.
 /// - 2) No uncompressed values.
 /// - 3) Error bound is negative.
@@ -63,15 +49,11 @@ export fn compress(
     configuration: Configuration,
 ) i32 {
     const uncompressed_values = uncompressed_values_array.data[0..uncompressed_values_array.len];
-    var compressed_values = ArrayList(u8).init(allocator);
-    // Check if larger than the largest int used by Method.
-    if (configuration.method > getMaxMethodIndex(tersets.Method)) return 1;
-    const method: tersets.Method = @enumFromInt(configuration.method);
 
-    tersets.compress(
+    const compressed_values = tersets.compress(
         uncompressed_values,
-        &compressed_values,
-        method,
+        allocator,
+        configuration.method,
         configuration.error_bound,
     ) catch |err| return errorToInt(err);
 
@@ -90,18 +72,12 @@ export fn compress(
 export fn decompress(
     compressed_values_array: CompressedValues,
     decompressed_values_array: *UncompressedValues,
-    method_index: u8,
 ) i32 {
     const compressed_values = compressed_values_array.data[0..compressed_values_array.len];
-    var decompressed_values = ArrayList(f64).init(allocator);
-    // Check if larger than the largest int used by Method.
-    if (method_index > getMaxMethodIndex(tersets.Method)) return 1;
-    const method: tersets.Method = @enumFromInt(method_index);
 
-    tersets.decompress(
+    const decompressed_values = tersets.decompress(
         compressed_values,
-        &decompressed_values,
-        method,
+        allocator,
     ) catch |err| return errorToInt(err);
 
     decompressed_values_array.data = decompressed_values.items.ptr;
@@ -118,6 +94,7 @@ fn Array(comptime data_type: type) type {
 // Convert `err` to an `i32` as is not guaranteed to be stable `@intFromError`.
 fn errorToInt(err: Error) i32 {
     switch (err) {
+        Error.UnknownCompression => return 1,
         Error.EmptyInput => return 2,
         Error.NegativeErrorBound => return 3,
         Error.IncorrectInput => return 4,
@@ -149,7 +126,7 @@ test "error for unknown compression method" {
         configuration,
     );
 
-    try testing.expectEqual(return_code, 1);
+    try testing.expectEqual(1, return_code);
 }
 
 test "error for empty input when compressing" {
@@ -169,18 +146,13 @@ test "error for empty input when compressing" {
         configuration,
     );
 
-    try testing.expectEqual(return_code, 2);
+    try testing.expectEqual(2, return_code);
 }
 
 test "error for negative error bound when compressing" {
-    const uncompressed_values = UncompressedValues{
-        .data = undefined,
-        .len = 1, // If undefined an empty input error is returned.
-    };
-    var compressed_values = CompressedValues{
-        .data = undefined,
-        .len = undefined,
-    };
+    const uncompressed_values = UncompressedValues{ .data = undefined, .len = 1 };
+    var compressed_values = CompressedValues{ .data = undefined, .len = undefined };
+
     const configuration = Configuration{ .method = 0, .error_bound = -1 };
 
     const return_code = compress(
@@ -189,48 +161,27 @@ test "error for negative error bound when compressing" {
         configuration,
     );
 
-    try testing.expectEqual(return_code, 3);
+    try testing.expectEqual(3, return_code);
 }
 
 test "error for unknown decompression method" {
-    const compressed_values = CompressedValues{
-        .data = undefined,
-        .len = undefined,
-    };
-    var decompressed_values = UncompressedValues{
-        .data = undefined,
-        .len = undefined,
-    };
-    var configuration = Configuration{ .method = 0, .error_bound = 0 };
-    configuration.method = math.maxInt(@TypeOf(configuration.method));
+    var single_element_array: [1]u8 = [_]u8{255};
 
-    const return_code = decompress(
-        compressed_values,
-        &decompressed_values,
-        configuration.method,
-    );
+    const compressed_values = CompressedValues{ .data = &single_element_array, .len = 1 };
+    var decompressed_values = UncompressedValues{ .data = undefined, .len = undefined };
 
-    try testing.expectEqual(return_code, 1);
+    const return_code = decompress(compressed_values, &decompressed_values);
+
+    try testing.expectEqual(1, return_code);
 }
 
 test "error for empty input when decompressing" {
-    const compressed_values = CompressedValues{
-        .data = undefined,
-        .len = 0,
-    };
-    var decompressed_values = UncompressedValues{
-        .data = undefined,
-        .len = undefined,
-    };
-    const configuration = Configuration{ .method = 0, .error_bound = 0 };
+    const compressed_values = CompressedValues{ .data = undefined, .len = 0 };
+    var decompressed_values = UncompressedValues{ .data = undefined, .len = undefined };
 
-    const return_code = decompress(
-        compressed_values,
-        &decompressed_values,
-        configuration.method,
-    );
+    const return_code = decompress(compressed_values, &decompressed_values);
 
-    try testing.expectEqual(return_code, 2);
+    try testing.expectEqual(2, return_code);
 }
 
 test "can compress and decompress" {
@@ -239,10 +190,7 @@ test "can compress and decompress" {
         .data = &uncompressed_array,
         .len = uncompressed_array.len,
     };
-    var compressed_values = CompressedValues{
-        .data = undefined,
-        .len = undefined,
-    };
+    var compressed_values = CompressedValues{ .data = undefined, .len = undefined };
     var decompressed_values = UncompressedValues{
         .data = &uncompressed_array,
         .len = uncompressed_array.len,
@@ -254,22 +202,18 @@ test "can compress and decompress" {
         &compressed_values,
         configuration,
     );
-    try testing.expectEqual(compress_code, 0);
+    try testing.expectEqual(0, compress_code);
 
     const decompress_code = decompress(
         compressed_values,
         &decompressed_values,
-        configuration.method,
     );
-    try testing.expectEqual(decompress_code, 0);
 
-    try testing.expectEqual(decompressed_values.len, uncompressed_values.len);
+    try testing.expectEqual(0, decompress_code);
+    try testing.expectEqual(uncompressed_values.len, decompressed_values.len);
 
     var i: usize = 0;
     while (i < decompressed_values.len) : (i += 1) {
-        try testing.expectEqual(
-            decompressed_values.data[i],
-            uncompressed_values.data[i],
-        );
+        try testing.expectEqual(uncompressed_values.data[i], decompressed_values.data[i]);
     }
 }

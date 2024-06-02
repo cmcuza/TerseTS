@@ -23,6 +23,7 @@ const swing_slide_filter = @import("functional/swing_slide_filter.zig");
 
 /// The errors that can occur in TerseTS.
 pub const Error = error{
+    UnknownCompression,
     EmptyInput,
     IncorrectInput,
     NegativeErrorBound,
@@ -47,50 +48,63 @@ pub const Segment = struct { start_point: Point, end_point: Point };
 /// with respect to the uncompressed time series.
 pub const ErrorBoundMargin: f32 = 1e-7;
 
-/// Compress `uncompressed_values` within `error_bound` using `method` and write the result to
-/// `compressed_values`. If an error occurs it is returned.
+/// Compress `uncompressed_values` within `error_bound` using `method` and returns the results
+/// as a ArrayList of bytes returned by the compression methods. `allocator` is passed to the
+/// compression functions for memory management. If the compression is sucessful, the `method`
+/// is encoded in the compressed values last byte. If an error occurs it is returned.
 pub fn compress(
     uncompressed_values: []const f64,
-    compressed_values: *ArrayList(u8),
-    method: Method,
+    allocator: Allocator,
+    method_index: u8,
     error_bound: f32,
-) Error!void {
+) Error!ArrayList(u8) {
     //TODO: Specify that TerseTS's timestamps are the values indices.
+
+    if (method_index > getMaxMethodIndex(Method)) return Error.UnknownCompression;
     if (uncompressed_values.len == 0) return Error.EmptyInput;
     if (error_bound < 0) return Error.NegativeErrorBound;
 
+    const method: Method = @enumFromInt(method_index);
+    var compressed_values: ArrayList(u8) = undefined;
     switch (method) {
         .PoorMansCompressionMidrange => {
-            try pmc.compress_midrange(uncompressed_values, compressed_values, error_bound);
+            compressed_values = try pmc.compress_midrange(uncompressed_values, allocator, error_bound);
         },
         .PoorMansCompressionMean => {
-            try pmc.compress_mean(uncompressed_values, compressed_values, error_bound);
+            compressed_values = try pmc.compress_mean(uncompressed_values, allocator, error_bound);
         },
         .SwingFilter => {
-            try swing_slide_filter.compress_swing(
-                uncompressed_values,
-                compressed_values,
-                error_bound,
-            );
+            compressed_values = try swing_slide_filter.compress_swing(uncompressed_values, allocator, error_bound);
         },
     }
+    try compressed_values.append(@intFromEnum(method));
+    return compressed_values;
 }
 
-/// Decompress `compressed_values` using `method` and write the result to `decompressed_values`. If
+/// Decompress `compressed_values` using `method` and write the result to `decompressed_values`.
+/// The compression `method` to use is encoded in the last byte of the `compressed_values`. If
 /// an error occurs it is returned.
 pub fn decompress(
     compressed_values: []const u8,
-    decompressed_values: *ArrayList(f64),
-    method: Method,
-) Error!void {
+    allocator: Allocator,
+) Error!ArrayList(f64) {
     if (compressed_values.len == 0) return Error.EmptyInput;
+
+    const method_index: u8 = compressed_values[compressed_values.len - 1];
+
+    if (method_index > getMaxMethodIndex(Method)) return Error.UnknownCompression;
+
+    const method: Method = @enumFromInt(method_index);
 
     switch (method) {
         .PoorMansCompressionMidrange, .PoorMansCompressionMean => {
-            try pmc.decompress(compressed_values, decompressed_values);
+            return try pmc.decompress(compressed_values[0 .. compressed_values.len - 1], allocator);
         },
         .SwingFilter => {
-            try swing_slide_filter.decompress(compressed_values, decompressed_values);
+            return try swing_slide_filter.decompress(
+                compressed_values[0 .. compressed_values.len - 1],
+                allocator,
+            );
         },
     }
 }
@@ -107,4 +121,20 @@ pub fn isWithinErrorBound(
         if (@abs(uncompressed_values[i] - item) > error_bound) return false;
     }
     return true;
+}
+
+/// Get the maximun index of the available methods in TerseTS.
+fn getMaxMethodIndex(comptime TersetsMethod: type) usize {
+    const type_info = @typeInfo(TersetsMethod);
+    const method_info = switch (type_info) {
+        .Enum => |method_info| method_info,
+        else => @compileError("Expected a Method enum type"),
+    };
+
+    var max_index: usize = 0;
+    for (method_info.fields, 0..) |_, i| {
+        max_index = if (i > max_index) i else max_index;
+    }
+
+    return max_index;
 }

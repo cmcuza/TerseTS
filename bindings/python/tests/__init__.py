@@ -21,7 +21,6 @@ from tersets import compress, decompress, Method
 # Number of values to generate for each test.
 TEST_VALUE_COUNT = 1000
 
-
 class TerseTSPythonTest(unittest.TestCase):
     def test_compress_and_decompress_zero_error(self):
         uncompressed = [
@@ -29,5 +28,5 @@ class TerseTSPythonTest(unittest.TestCase):
             for _ in range(0, TEST_VALUE_COUNT)
         ]
         compressed = compress(uncompressed, 0.0, Method.SwingFilter)
-        decompressed = decompress(compressed, Method.SwingFilter)
+        decompressed = decompress(compressed)
         self.assertEqual(uncompressed, decompressed)

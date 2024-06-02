@@ -105,7 +105,7 @@ def compress(values: List[float], error_bound: float, method: Method) -> bytes:
     return compressed_values.data[: compressed_values.len]
 
 
-def decompress(values: bytes, method: Method) -> List[float]:
+def decompress(values: bytes) -> List[float]:
     """Decompresses values."""
 
     compressed_values = __CompressedValues()
@@ -114,14 +114,7 @@ def decompress(values: bytes, method: Method) -> List[float]:
 
     decompressed_values = __UncompressedValues()
 
-    if (type(method) != Method):
-        # Method does not exists, raise error, and show available options.
-        available_methods = ", ".join([member.name for member in Method])
-        raise TypeError(f"'{method}' is not a valid TerseTS Method. Available method names are: {available_methods}")
-
-    error = __library.decompress(
-        compressed_values, byref(decompressed_values), method.value
-    )
+    error = __library.decompress(compressed_values, byref(decompressed_values))
 
     if error == 1:
         raise ValueError("Unknown decompression method.")
