@@ -21,7 +21,6 @@
 const std = @import("std");
 const math = std.math;
 const mem = std.mem;
-const Allocator = mem.Allocator;
 const testing = std.testing;
 const ArrayList = std.ArrayList;
 
@@ -40,16 +39,14 @@ const LinearFunction = struct {
 /// result to `compressed_values`. If an error occurs it is returned.
 pub fn compress_swing(
     uncompressed_values: []const f64,
-    allocator: Allocator,
+    compressed_values: *ArrayList(u8),
     error_bound: f32,
-) Error!ArrayList(u8) {
+) Error!void {
     // Adjust the error bound to avoid exceeding it during decompression.
     const adjusted_error_bound = if (error_bound > 0)
         error_bound - tersets.ErrorBoundMargin
     else
         error_bound;
-
-    var compressed_values = ArrayList(u8).init(allocator);
 
     var upper_bound_linear_function: LinearFunction = .{ .slope = 0, .intercept = 0 };
     var lower_bound_linear_function: LinearFunction = .{ .slope = 0, .intercept = 0 };
@@ -80,7 +77,7 @@ pub fn compress_swing(
             (lower_limit > (uncompressed_values[current_timestamp] + adjusted_error_bound)))
         {
             // Recording mechanism (the current points is outside the limits).
-            try appendValue(f64, current_segment.start_point.value, &compressed_values);
+            try appendValue(f64, current_segment.start_point.value, compressed_values);
             const segment_size = current_timestamp - current_segment.start_point.time - 1;
             if (segment_size > 1) {
                 // Denominator of Eq. (6).
@@ -100,12 +97,12 @@ pub fn compress_swing(
                     current_segment.start_point,
                 );
                 const end_value = evaluateLinearFunctionAtTime(current_linear_function, current_timestamp - 1);
-                try appendValue(f64, end_value, &compressed_values);
+                try appendValue(f64, end_value, compressed_values);
             } else {
-                try appendValue(f64, current_segment.end_point.value, &compressed_values);
+                try appendValue(f64, current_segment.end_point.value, compressed_values);
             }
 
-            try appendValue(usize, current_timestamp, &compressed_values);
+            try appendValue(usize, current_timestamp, compressed_values);
 
             // Update the current segment.
             current_segment.start_point.time = current_timestamp;
@@ -168,7 +165,7 @@ pub fn compress_swing(
 
     const segment_size = current_timestamp - current_segment.start_point.time - 1;
 
-    try appendValue(f64, current_segment.start_point.value, &compressed_values);
+    try appendValue(f64, current_segment.start_point.value, compressed_values);
     if (segment_size > 1) {
         // Denominator of Eq. (6).
         const sum_square: f80 = @floatFromInt(
@@ -188,25 +185,25 @@ pub fn compress_swing(
         );
 
         const end_value: f64 = evaluateLinearFunctionAtTime(current_linear_function, current_timestamp - 1);
-        try appendValue(f64, end_value, &compressed_values);
+        try appendValue(f64, end_value, compressed_values);
     } else {
-        try appendValue(f64, current_segment.end_point.value, &compressed_values);
+        try appendValue(f64, current_segment.end_point.value, compressed_values);
     }
 
-    try appendValue(usize, current_timestamp, &compressed_values);
-
-    return compressed_values;
+    try appendValue(usize, current_timestamp, compressed_values);
 }
 
 /// Decompress `compressed_values` produced by "Swing Filter" and "Slide Filter" and write the
 /// result to `decompressed_values`. If an error occurs it is returned.
-pub fn decompress(compressed_values: []const u8, allocator: Allocator) Error!ArrayList(f64) {
+pub fn decompress(
+    compressed_values: []const u8,
+    decompressed_values: *ArrayList(f64),
+) Error!void {
     // The compressed representation is composed of three values: (start_value, end_value, end_time)
     // all of type 64-bit float.
     if (compressed_values.len % 24 != 0) return Error.IncorrectInput;
 
     const compressed_lines_and_index = mem.bytesAsSlice(f64, compressed_values);
-    var decompressed_values = ArrayList(f64).init(allocator);
 
     var current_linear_function: LinearFunction = .{ .slope = 0, .intercept = 0 };
 
@@ -236,8 +233,6 @@ pub fn decompress(compressed_values: []const u8, allocator: Allocator) Error!Arr
             first_timestamp += 1;
         }
     }
-
-    return decompressed_values;
 }
 
 /// Computes the numerator of the slope derivate as in Eq. (6).
@@ -300,7 +295,10 @@ test "swing filter zero error bound and even size compress and decompress" {
 
     var list_values = ArrayList(f64).init(allocator);
     defer list_values.deinit();
-
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+    var decompressed_values = ArrayList(f64).init(allocator);
+    defer decompressed_values.deinit();
     const error_bound: f32 = 0.0;
 
     var rnd = std.rand.DefaultPrng.init(0);
@@ -313,17 +311,14 @@ test "swing filter zero error bound and even size compress and decompress" {
 
     const uncompressed_values = list_values.items;
 
-    const compressed_values = try compress_swing(uncompressed_values[0..], allocator, error_bound);
-    const decompressed_values = try decompress(compressed_values.items, allocator);
+    try compress_swing(uncompressed_values[0..], &compressed_values, error_bound);
+    try decompress(compressed_values.items, &decompressed_values);
 
     try testing.expect(tersets.isWithinErrorBound(
         uncompressed_values,
         decompressed_values.items,
         error_bound,
     ));
-
-    compressed_values.deinit();
-    decompressed_values.deinit();
 }
 
 test "swing filter zero error bound and odd size compress and decompress" {
@@ -333,7 +328,10 @@ test "swing filter zero error bound and odd size compress and decompress" {
 
     var list_values = ArrayList(f64).init(allocator);
     defer list_values.deinit();
-
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+    var decompressed_values = ArrayList(f64).init(allocator);
+    defer decompressed_values.deinit();
     const error_bound: f32 = 0.0;
 
     var rnd = std.rand.DefaultPrng.init(0);
@@ -346,17 +344,14 @@ test "swing filter zero error bound and odd size compress and decompress" {
 
     const uncompressed_values = list_values.items;
 
-    const compressed_values = try compress_swing(uncompressed_values[0..], allocator, error_bound);
-    const decompressed_values = try decompress(compressed_values.items, allocator);
+    try compress_swing(uncompressed_values[0..], &compressed_values, error_bound);
+    try decompress(compressed_values.items, &decompressed_values);
 
     try testing.expect(tersets.isWithinErrorBound(
         uncompressed_values,
         decompressed_values.items,
         error_bound,
     ));
-
-    compressed_values.deinit();
-    decompressed_values.deinit();
 }
 
 test "swing filter four random lines and random error bound compress and decompress" {
@@ -384,7 +379,10 @@ test "swing filter four random lines and random error bound compress and decompr
 
     var list_values = ArrayList(f64).init(allocator);
     defer list_values.deinit();
-
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+    var decompressed_values = ArrayList(f64).init(allocator);
+    defer decompressed_values.deinit();
     const error_bound: f32 = rnd.random().float(f32) * 0.1;
 
     var i: usize = 0;
@@ -397,15 +395,12 @@ test "swing filter four random lines and random error bound compress and decompr
 
     const uncompressed_values = list_values.items;
 
-    const compressed_values = try compress_swing(uncompressed_values[0..], allocator, error_bound);
-    const decompressed_values = try decompress(compressed_values.items, allocator);
+    try compress_swing(uncompressed_values[0..], &compressed_values, error_bound);
+    try decompress(compressed_values.items, &decompressed_values);
 
     try testing.expect(tersets.isWithinErrorBound(
         uncompressed_values,
         decompressed_values.items,
         error_bound,
     ));
-
-    compressed_values.deinit();
-    decompressed_values.deinit();
 }

@@ -20,7 +20,6 @@
 const std = @import("std");
 const math = std.math;
 const mem = std.mem;
-const Allocator = mem.Allocator;
 const testing = std.testing;
 const ArrayList = std.ArrayList;
 
@@ -31,18 +30,17 @@ const Error = tersets.Error;
 /// and write the result to `compressed_values`. If an error occurs it is returned.
 pub fn compress_midrange(
     uncompressed_values: []const f64,
-    allocator: Allocator,
+    compressed_values: *ArrayList(u8),
     error_bound: f32,
-) Error!ArrayList(u8) {
+) Error!void {
     var index: usize = 0; // n.
     var minimum: f80 = uncompressed_values[0]; // m.
     var maximum: f80 = uncompressed_values[0]; // M.
-    var compressed_values = ArrayList(u8).init(allocator);
 
     for (uncompressed_values) |value| {
         if ((@max(value, maximum) - @min(value, minimum)) > 2 * error_bound) {
             const compressed_value = (maximum + minimum) / 2;
-            try appendValueAndIndexToArrayList(compressed_value, index, &compressed_values);
+            try appendValueAndIndexToArrayList(compressed_value, index, compressed_values);
             minimum = value;
             maximum = value;
         } else {
@@ -53,30 +51,27 @@ pub fn compress_midrange(
     }
 
     const compressed_value = (maximum + minimum) / 2;
-    try appendValueAndIndexToArrayList(compressed_value, index, &compressed_values);
-
-    return compressed_values;
+    try appendValueAndIndexToArrayList(compressed_value, index, compressed_values);
 }
 
 /// Compress `uncompressed_values` within `error_bound` using "Poor Man’s Compression - Mean"
 /// and write the result to `compressed_values`. If an error occurs it is returned.
 pub fn compress_mean(
     uncompressed_values: []const f64,
-    allocator: Allocator,
+    compressed_values: *ArrayList(u8),
     error_bound: f32,
-) Error!ArrayList(u8) {
+) Error!void {
     var index: usize = 0; // n.
     var minimum = uncompressed_values[0]; // m.
     var maximum = uncompressed_values[0]; // M.
     var sum = uncompressed_values[0];
     var length: f64 = 1;
 
-    var compressed_values = ArrayList(u8).init(allocator);
     for (uncompressed_values) |value| {
         const average = sum / length;
         if ((maximum - average > error_bound) or (average - minimum > error_bound)) {
             const compressed_value = (sum - value) / (length - 1);
-            try appendValueAndIndexToArrayList(compressed_value, index - 1, &compressed_values);
+            try appendValueAndIndexToArrayList(compressed_value, index - 1, compressed_values);
             minimum = value;
             maximum = value;
             sum = value;
@@ -91,19 +86,19 @@ pub fn compress_mean(
     }
 
     const compressed_value = sum / length;
-    try appendValueAndIndexToArrayList(compressed_value, index, &compressed_values);
-
-    return compressed_values;
+    try appendValueAndIndexToArrayList(compressed_value, index, compressed_values);
 }
 
 /// Decompress `compressed_values` produced by "Poor Man’s Compression - Midrange" and
 /// "Poor Man’s Compression - Mean" and write the result to `decompressed_values`. If an error
 /// occurs it is returned.
-pub fn decompress(compressed_values: []const u8, allocator: Allocator) Error!ArrayList(f64) {
+pub fn decompress(
+    compressed_values: []const u8,
+    decompressed_values: *ArrayList(f64),
+) Error!void {
     // The compressed representation is pairs containing a 64-bit float value and 64-bit end index.
     if (compressed_values.len % 16 != 0) return Error.IncorrectInput;
 
-    var decompressed_values = ArrayList(f64).init(allocator);
     const compressed_values_and_index = mem.bytesAsSlice(f64, compressed_values);
 
     var compressed_index: usize = 0;
@@ -116,8 +111,6 @@ pub fn decompress(compressed_values: []const u8, allocator: Allocator) Error!Arr
         }
         uncompressed_index = index;
     }
-
-    return decompressed_values;
 }
 
 /// Append `compressed_value` and `index` to `compressed_values`.
@@ -136,25 +129,27 @@ fn appendValueAndIndexToArrayList(
 test "midrange can compress and decompress" {
     const allocator = testing.allocator;
     const uncompressed_values = [_]f64{ 1.0, 2.0, 2.0, 3.0, 3.0, 3.0 };
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+    var decompressed_values = ArrayList(f64).init(allocator);
+    defer decompressed_values.deinit();
 
-    const compressed_values = try compress_midrange(uncompressed_values[0..], allocator, 0);
-    const decompressed_values = try decompress(compressed_values.items, allocator);
+    try compress_midrange(uncompressed_values[0..], &compressed_values, 0);
+    try decompress(compressed_values.items, &decompressed_values);
 
     try testing.expect(mem.eql(f64, uncompressed_values[0..], decompressed_values.items));
-
-    compressed_values.deinit();
-    decompressed_values.deinit();
 }
 
 test "mean can compress and decompress" {
     const allocator = testing.allocator;
     const uncompressed_values = [_]f64{ 1.0, 2.0, 2.0, 3.0, 3.0, 3.0 };
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+    var decompressed_values = ArrayList(f64).init(allocator);
+    defer decompressed_values.deinit();
 
-    const compressed_values = try compress_mean(uncompressed_values[0..], allocator, 0);
-    const decompressed_values = try decompress(compressed_values.items, allocator);
+    try compress_mean(uncompressed_values[0..], &compressed_values, 0);
+    try decompress(compressed_values.items, &decompressed_values);
 
     try testing.expect(mem.eql(f64, uncompressed_values[0..], decompressed_values.items));
-
-    compressed_values.deinit();
-    decompressed_values.deinit();
 }

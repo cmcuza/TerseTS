@@ -21,6 +21,7 @@ const ArrayList = std.ArrayList;
 
 const tersets = @import("tersets.zig");
 const Error = tersets.Error;
+const Method = tersets.Method;
 
 /// Global memory allocator used by tersets.
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -50,10 +51,16 @@ export fn compress(
 ) i32 {
     const uncompressed_values = uncompressed_values_array.data[0..uncompressed_values_array.len];
 
+    if (configuration.method > tersets.getMaxMethodIndex()) {
+        // This is equivalent to returning Error.UnknownMethod.
+        return 1;
+    }
+    const method: Method = @enumFromInt(configuration.method);
+
     const compressed_values = tersets.compress(
         uncompressed_values,
         allocator,
-        configuration.method,
+        method,
         configuration.error_bound,
     ) catch |err| return errorToInt(err);
 
@@ -94,7 +101,7 @@ fn Array(comptime data_type: type) type {
 // Convert `err` to an `i32` as is not guaranteed to be stable `@intFromError`.
 fn errorToInt(err: Error) i32 {
     switch (err) {
-        Error.UnknownCompression => return 1,
+        Error.UnknownMethod => return 1,
         Error.EmptyInput => return 2,
         Error.NegativeErrorBound => return 3,
         Error.IncorrectInput => return 4,
@@ -197,19 +204,19 @@ test "can compress and decompress" {
     };
     const configuration = Configuration{ .method = 0, .error_bound = 0 };
 
-    const compress_code = compress(
+    const compress_return_code = compress(
         uncompressed_values,
         &compressed_values,
         configuration,
     );
-    try testing.expectEqual(0, compress_code);
+    try testing.expectEqual(0, compress_return_code);
 
-    const decompress_code = decompress(
+    const decompress_return_code = decompress(
         compressed_values,
         &decompressed_values,
     );
 
-    try testing.expectEqual(0, decompress_code);
+    try testing.expectEqual(0, decompress_return_code);
     try testing.expectEqual(uncompressed_values.len, decompressed_values.len);
 
     var i: usize = 0;
