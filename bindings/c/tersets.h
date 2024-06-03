@@ -29,5 +29,4 @@ int32_t compress(struct UncompressedValues const uncompressed_values,
 // configuration. The following non-zero values are returned on errors:
 // - 1) Unsupported decompression method.
 int32_t decompress(struct CompressedValues const compressed_values,
-                   struct UncompressedValues const * const uncompressed_values,
-                   struct Configuration const configuration);
+                   struct UncompressedValues const * const uncompressed_values);
