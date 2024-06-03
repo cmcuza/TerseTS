@@ -102,7 +102,7 @@ pub fn decompress(
             try pmc.decompress(compressed_values_slice, &decompressed_values);
         },
         .SwingFilter => {
-            try swing_slide_filter.decompress(compressed_values_slide, &decompressed_values);
+            try swing_slide_filter.decompress(compressed_values_slice, &decompressed_values);
         },
     }
 
