@@ -51,10 +51,9 @@ export fn compress(
 ) i32 {
     const uncompressed_values = uncompressed_values_array.data[0..uncompressed_values_array.len];
 
-    if (configuration.method > tersets.getMaxMethodIndex()) {
-        // This is equivalent to returning Error.UnknownMethod.
-        return 1;
-    }
+    // Returning 1 is equivalent to returning Error.UnknownMethod.
+    if (configuration.method > tersets.getMaxMethodIndex()) return 1;
+
     const method: Method = @enumFromInt(configuration.method);
 
     const compressed_values = tersets.compress(

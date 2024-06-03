@@ -90,17 +90,16 @@ pub fn decompress(
     if (compressed_values.len == 0) return Error.EmptyInput;
 
     const method_index: u8 = compressed_values[compressed_values.len - 1];
-
     if (method_index > getMaxMethodIndex()) return Error.UnknownMethod;
 
     const method: Method = @enumFromInt(method_index);
-    const compressed_values_slide = compressed_values[0 .. compressed_values.len - 1];
+    const compressed_values_slice = compressed_values[0 .. compressed_values.len - 1];
 
     var decompressed_values = ArrayList(f64).init(allocator);
 
     switch (method) {
         .PoorMansCompressionMidrange, .PoorMansCompressionMean => {
-            try pmc.decompress(compressed_values_slide, &decompressed_values);
+            try pmc.decompress(compressed_values_slice, &decompressed_values);
         },
         .SwingFilter => {
             try swing_slide_filter.decompress(compressed_values_slide, &decompressed_values);
