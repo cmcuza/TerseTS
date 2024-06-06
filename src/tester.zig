@@ -39,7 +39,10 @@ const f64_max = math.floatMax(f64);
 /// to `within_error_bound` after they have been compressed and decompressed using `method`. The
 /// libraries public interface is used to make it simpler refactor the libraries internals.
 pub fn testGenerateCompressAndDecompress(
-    uncompressed_values_generator: fn (allocator: Allocator, seed: usize) Error!ArrayList(f64),
+    uncompressed_values_generator: fn (
+        uncompressed_values: *ArrayList(f64),
+        seed: usize,
+    ) Error!void,
     allocator: Allocator,
     method: Method,
     error_bound: f32,
@@ -49,11 +52,9 @@ pub fn testGenerateCompressAndDecompress(
         error_bound: f32,
     ) bool,
 ) !void {
+    var uncompressed_values = ArrayList(f64).init(allocator);
     const seed: u64 = @bitCast(time.milliTimestamp());
-    const uncompressed_values = try uncompressed_values_generator(
-        allocator,
-        seed,
-    );
+    try uncompressed_values_generator(&uncompressed_values, seed);
     defer uncompressed_values.deinit();
 
     // subsequenceStack contains subsequences to run the test for to find shortest failing sequence.
@@ -143,16 +144,13 @@ pub fn testCompressAndDecompress(
     ));
 }
 
-/// Generate `number_of_values` of random values for use in testing.
-pub fn generateRandomValues(allocator: Allocator, seed: usize) Error!ArrayList(f64) {
-    var values = ArrayList(f64).init(allocator);
-
+/// Generate `number_of_values` of random values for use in testing and add them to
+/// `uncompressed_values`.
+pub fn generateRandomValues(uncompressed_values: *ArrayList(f64), seed: usize) !void {
     var prng = rand.DefaultPrng.init(seed);
     const random = prng.random();
 
     for (0..number_of_values) |_| {
-        try values.append(f64_min + (f64_max - f64_min) * rand.float(random, f64));
+        try uncompressed_values.append(f64_min + (f64_max - f64_min) * rand.float(random, f64));
     }
-
-    return values;
 }
