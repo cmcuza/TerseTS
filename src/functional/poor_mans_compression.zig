@@ -40,14 +40,17 @@ pub fn compressMidrange(
     var maximum: f80 = uncompressed_values[0]; // M.
 
     for (uncompressed_values) |value| {
-        if ((@max(value, maximum) - @min(value, minimum)) > 2 * error_bound) {
+        const nextMinimum = @min(value, minimum);
+        const nextMaximum = @max(value, maximum);
+
+        if ((nextMaximum - nextMinimum) > 2 * error_bound) {
             const compressed_value = (maximum + minimum) / 2;
             try appendValueAndIndexToArrayList(compressed_value, index, compressed_values);
             minimum = value;
             maximum = value;
         } else {
-            minimum = @min(value, minimum);
-            maximum = @max(value, maximum);
+            minimum = nextMinimum;
+            maximum = nextMaximum;
         }
         index += 1;
     }
@@ -64,31 +67,33 @@ pub fn compressMean(
     error_bound: f32,
 ) Error!void {
     var index: usize = 0; // n.
-    var minimum = uncompressed_values[0]; // m.
-    var maximum = uncompressed_values[0]; // M.
-    var sum = uncompressed_values[0];
-    var length: f64 = 1;
+    var minimum = math.nan(f64); // m.
+    var maximum = math.nan(f64); // M.
+    var length: f64 = 0;
+    var average: f80 = 0.0;
 
     for (uncompressed_values) |value| {
-        const average = sum / length;
-        if ((maximum - average > error_bound) or (average - minimum > error_bound)) {
-            const compressed_value = (sum - value) / (length - 1);
-            try appendValueAndIndexToArrayList(compressed_value, index - 1, compressed_values);
+        const nextMinimum = @min(value, minimum);
+        const nextMaximum = @max(value, maximum);
+        const nextLength = length + 1;
+        const nextAverage = (average * length + value) / nextLength;
+
+        if ((nextMaximum - nextAverage > error_bound) or (nextAverage - nextMinimum > error_bound)) {
+            try appendValueAndIndexToArrayList(average, index, compressed_values);
             minimum = value;
             maximum = value;
-            sum = value;
             length = 1;
+            average = value;
         } else {
-            minimum = @min(value, minimum);
-            maximum = @max(value, maximum);
-            sum += value;
-            length += 1;
+            minimum = nextMinimum;
+            maximum = nextMaximum;
+            length = nextLength;
+            average = nextAverage;
         }
         index += 1;
     }
 
-    const compressed_value = sum / length;
-    try appendValueAndIndexToArrayList(compressed_value, index, compressed_values);
+    try appendValueAndIndexToArrayList(average, index, compressed_values);
 }
 
 /// Decompress `compressed_values` produced by "Poor Man’s Compression - Midrange" and
@@ -128,12 +133,13 @@ fn appendValueAndIndexToArrayList(
     try compressed_values.appendSlice(indexAsBytes[0..]);
 }
 
-test "midrange can compress and decompress" {
+test "midrange can always compress and decompress" {
     const allocator = testing.allocator;
-    const uncompressed_values = [_]f64{ 1.0, 2.0, 2.0, 3.0, 3.0, 3.0 };
+    const uncompressed_values = try tester.generateRandomValues(allocator);
+    defer uncompressed_values.deinit();
 
     try tester.testCompressionAndDecompression(
-        &uncompressed_values,
+        uncompressed_values.items,
         allocator,
         Method.PoorMansCompressionMidrange,
         0,
@@ -141,12 +147,13 @@ test "midrange can compress and decompress" {
     );
 }
 
-test "mean can compress and decompress" {
+test "mean can always compress and decompress" {
     const allocator = testing.allocator;
-    const uncompressed_values = [_]f64{ 1.0, 2.0, 2.0, 3.0, 3.0, 3.0 };
+    const uncompressed_values = try tester.generateRandomValues(allocator);
+    defer uncompressed_values.deinit();
 
     try tester.testCompressionAndDecompression(
-        &uncompressed_values,
+        uncompressed_values.items,
         allocator,
         Method.PoorMansCompressionMean,
         0,

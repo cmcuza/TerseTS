@@ -15,11 +15,23 @@
 //! Provides methods for testing TerseTS.
 
 const std = @import("std");
+const ArrayList = std.ArrayList;
+const rand = std.rand;
 const Allocator = std.mem.Allocator;
+const math = std.math;
 const testing = std.testing;
 
 const tersets = @import("tersets.zig");
 const Method = tersets.Method;
+
+/// Number of values to generate for testing.
+const number_of_values = 50;
+
+/// Minimum value of a `f64`.
+const f64_min = math.floatMin(f64);
+
+/// Maximum value of a `f64`.
+const f64_max = math.floatMax(f64);
 
 /// Test that `uncompressed_values` are within `error_bound` according to `within_error_bound`
 /// after it has been compressed and decompressed using `method`. The top level interface is used
@@ -51,4 +63,19 @@ pub fn testCompressionAndDecompression(
         decompressed_values.items,
         error_bound,
     ));
+}
+
+/// Generate `number_of_values` of random values for use in testing.
+pub fn generateRandomValues(allocator: Allocator) !ArrayList(f64) {
+    var values = ArrayList(f64).init(allocator);
+
+    const seed: u64 = undefined; // Purposely undefined to not have a static seed.
+    var prng = rand.DefaultPrng.init(seed);
+    const random = prng.random();
+
+    for (0..number_of_values) |_| {
+        try values.append(f64_min + (f64_max - f64_min) * rand.float(random, f64));
+    }
+
+    return values;
 }
