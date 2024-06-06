@@ -20,29 +20,35 @@ const testing = std.testing;
 
 const tersets = @import("tersets.zig");
 const Method = tersets.Method;
-const Error = tersets.Error;
 
-/// Test that `uncompressed_values` are within `error_bound` according to
-/// `within_error_bound` after it has been compressed and decompressed using
-/// `method`.
-fn testCompressionAndDecompression(
+/// Test that `uncompressed_values` are within `error_bound` according to `within_error_bound`
+/// after it has been compressed and decompressed using `method`. The top level interface is used
+/// to make refactoring easier.
+pub fn testCompressionAndDecompression(
     uncompressed_values: []const f64,
     allocator: Allocator,
     method: Method,
     error_bound: f32,
     within_error_bound: fn (
-        uncompressed_values: []f64,
-        decompressed_values: []f64,
+        uncompressed_values: []const f64,
+        decompressed_values: []const f64,
         error_bound: f32,
     ) bool,
-) Error!void {
-    const compressed_values = tersets.compress(uncompressed_values, allocator, method, error_bound);
-    const decompressed_values = tersets.decompress(compressed_values, allocator);
+) !void {
+    const compressed_values = try tersets.compress(
+        uncompressed_values,
+        allocator,
+        method,
+        error_bound,
+    );
+    defer compressed_values.deinit();
+    const decompressed_values = try tersets.decompress(compressed_values.items, allocator);
+    defer decompressed_values.deinit();
 
-    try testing.expectEqual(uncompressed_values.len, decompressed_values.len);
+    try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
     try testing.expect(within_error_bound(
         uncompressed_values,
-        decompressed_values,
+        decompressed_values.items,
         error_bound,
     ));
 }

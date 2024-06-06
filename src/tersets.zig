@@ -123,8 +123,8 @@ pub fn decompress(
 /// uncompressed time series. The function returns true if all elements are within the error bound,
 /// false otherwise.
 pub fn isWithinErrorBound(
-    uncompressed_values: []f64,
-    decompressed_values: []f64,
+    uncompressed_values: []const f64,
+    decompressed_values: []const f64,
     error_bound: f32,
 ) bool {
     for (decompressed_values, 0..) |item, i| {

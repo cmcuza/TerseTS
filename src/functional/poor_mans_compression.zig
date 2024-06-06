@@ -18,13 +18,15 @@
 //! https://doi.org/10.1109/ICDE.2003.1260811".
 
 const std = @import("std");
+const ArrayList = std.ArrayList;
 const math = std.math;
 const mem = std.mem;
 const testing = std.testing;
-const ArrayList = std.ArrayList;
 
 const tersets = @import("../tersets.zig");
+const Method = tersets.Method;
 const Error = tersets.Error;
+const tester = @import("../tester.zig");
 
 /// Compress `uncompressed_values` within `error_bound` using "Poor Man’s Compression - Midrange"
 /// and write the result to `compressed_values`. If an error occurs it is returned.
@@ -129,27 +131,25 @@ fn appendValueAndIndexToArrayList(
 test "midrange can compress and decompress" {
     const allocator = testing.allocator;
     const uncompressed_values = [_]f64{ 1.0, 2.0, 2.0, 3.0, 3.0, 3.0 };
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
 
-    try compressMidrange(uncompressed_values[0..], &compressed_values, 0);
-    try decompress(compressed_values.items, &decompressed_values);
-
-    try testing.expect(mem.eql(f64, uncompressed_values[0..], decompressed_values.items));
+    try tester.testCompressionAndDecompression(
+        &uncompressed_values,
+        allocator,
+        Method.PoorMansCompressionMidrange,
+        0,
+        tersets.isWithinErrorBound,
+    );
 }
 
 test "mean can compress and decompress" {
     const allocator = testing.allocator;
     const uncompressed_values = [_]f64{ 1.0, 2.0, 2.0, 3.0, 3.0, 3.0 };
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
 
-    try compressMean(uncompressed_values[0..], &compressed_values, 0);
-    try decompress(compressed_values.items, &decompressed_values);
-
-    try testing.expect(mem.eql(f64, uncompressed_values[0..], decompressed_values.items));
+    try tester.testCompressionAndDecompression(
+        &uncompressed_values,
+        allocator,
+        Method.PoorMansCompressionMean,
+        0,
+        tersets.isWithinErrorBound,
+    );
 }
