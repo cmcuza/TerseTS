@@ -127,8 +127,14 @@ pub fn isWithinErrorBound(
     decompressed_values: []const f64,
     error_bound: f32,
 ) bool {
-    for (decompressed_values, 0..) |item, i| {
-        if (@abs(uncompressed_values[i] - item) > error_bound) return false;
+    if (uncompressed_values.len != decompressed_values.len) {
+        return false;
+    }
+
+    for (0..uncompressed_values.len) |index| {
+        const uncompressed_value = uncompressed_values[index];
+        const decompressed_value = decompressed_values[index];
+        if (@abs(uncompressed_value - decompressed_value) > error_bound) return false;
     }
     return true;
 }
