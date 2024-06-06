@@ -135,11 +135,8 @@ fn appendValueAndIndexToArrayList(
 
 test "midrange can always compress and decompress" {
     const allocator = testing.allocator;
-    const uncompressed_values = try tester.generateRandomValues(allocator);
-    defer uncompressed_values.deinit();
-
-    try tester.testCompressionAndDecompression(
-        uncompressed_values.items,
+    try tester.testGenerateCompressAndDecompress(
+        tester.generateRandomValues,
         allocator,
         Method.PoorMansCompressionMidrange,
         0,
@@ -149,11 +146,8 @@ test "midrange can always compress and decompress" {
 
 test "mean can always compress and decompress" {
     const allocator = testing.allocator;
-    const uncompressed_values = try tester.generateRandomValues(allocator);
-    defer uncompressed_values.deinit();
-
-    try tester.testCompressionAndDecompression(
-        uncompressed_values.items,
+    try tester.testGenerateCompressAndDecompress(
+        tester.generateRandomValues,
         allocator,
         Method.PoorMansCompressionMean,
         0,
