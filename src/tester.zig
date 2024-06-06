@@ -17,11 +17,13 @@
 const std = @import("std");
 const ArrayList = std.ArrayList;
 const rand = std.rand;
+const Random = rand.Random;
 const Allocator = std.mem.Allocator;
 const Error = std.mem.Allocator.Error;
 const math = std.math;
 const time = std.time;
 const testing = std.testing;
+const debug = std.debug;
 
 const tersets = @import("tersets.zig");
 const Method = tersets.Method;
@@ -41,7 +43,7 @@ const f64_max = math.floatMax(f64);
 pub fn testGenerateCompressAndDecompress(
     uncompressed_values_generator: fn (
         uncompressed_values: *ArrayList(f64),
-        seed: usize,
+        random: Random,
     ) Error!void,
     allocator: Allocator,
     method: Method,
@@ -52,9 +54,12 @@ pub fn testGenerateCompressAndDecompress(
         error_bound: f32,
     ) bool,
 ) !void {
-    var uncompressed_values = ArrayList(f64).init(allocator);
     const seed: u64 = @bitCast(time.milliTimestamp());
-    try uncompressed_values_generator(&uncompressed_values, seed);
+    var prng = rand.DefaultPrng.init(seed);
+    const random = prng.random();
+
+    var uncompressed_values = ArrayList(f64).init(allocator);
+    try uncompressed_values_generator(&uncompressed_values, random);
     defer uncompressed_values.deinit();
 
     // subsequenceStack contains subsequences to run the test for to find shortest failing sequence.
@@ -144,12 +149,39 @@ pub fn testCompressAndDecompress(
     ));
 }
 
-/// Generate `number_of_values` of random values for use in testing and add them to
-/// `uncompressed_values`.
-pub fn generateRandomValues(uncompressed_values: *ArrayList(f64), seed: usize) !void {
-    var prng = rand.DefaultPrng.init(seed);
-    const random = prng.random();
+// Replace each normal value in `uncompressed_values` with a positive infinity, negative infinity,
+// or NaN with the passed probability. The non-normal values are written to `uncompressed_values`
+// in the previously listed order, thus a positive infinity maybe overwritten by a negative infinity
+// and so on. The probabilities are asserted to be between zero and one.
+pub fn replaceNormalValues(
+    uncompressed_values: *ArrayList(f64),
+    positive_infinity_probability: f32,
+    negative_infinity_probability: f32,
+    not_a_number_probability: f32,
+    random: Random,
+) void {
+    debug.assert(0 <= positive_infinity_probability and positive_infinity_probability <= 1);
+    debug.assert(0 <= negative_infinity_probability and negative_infinity_probability <= 1);
+    debug.assert(0 <= not_a_number_probability and not_a_number_probability <= 1);
 
+    for (0..uncompressed_values.items.len) |index| {
+        if (random.float(f32) < positive_infinity_probability) {
+            uncompressed_values.items[index] = math.inf(f64);
+        }
+
+        if (random.float(f32) < negative_infinity_probability) {
+            uncompressed_values.items[index] = -math.inf(f64);
+        }
+
+        if (random.float(f32) < not_a_number_probability) {
+            uncompressed_values.items[index] = math.nan(f64);
+        }
+    }
+}
+
+/// Generate `number_of_values` of random values for use in testing using `random` and add them to
+/// `uncompressed_values`.
+pub fn generateRandomValues(uncompressed_values: *ArrayList(f64), random: Random) !void {
     for (0..number_of_values) |_| {
         try uncompressed_values.append(f64_min + (f64_max - f64_min) * rand.float(random, f64));
     }
