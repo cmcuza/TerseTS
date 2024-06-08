@@ -68,7 +68,7 @@ class __Configuration(Structure):
     _fields_ = [("method", c_byte), ("error_bound", c_float)]
 
 
-# Mirror TerseTS Method Enum.    
+# Mirror TerseTS Method Enum.
 @unique
 class Method(Enum):
     PoorMansCompressionMidrange = 0
@@ -90,17 +90,15 @@ def compress(values: List[float], error_bound: float, method: Method) -> bytes:
         # Method does not exists, raise error, and show available options.
         available_methods = ", ".join([member.name for member in Method])
         raise TypeError(f"'{method}' is not a valid TerseTS Method. Available method names are: {available_methods}")
-    
+
     configuration = __Configuration(method.value, error_bound)
-    
+
     error = __library.compress(
         uncompressed_values, byref(compressed_values), configuration
     )
 
     if error == 1:
-        # TODO: Handle different errors from TerseTS. 
-        raise ValueError("Unknown error.") 
-    
+        raise ValueError("Unknown error.")
 
     return compressed_values.data[: compressed_values.len]
 

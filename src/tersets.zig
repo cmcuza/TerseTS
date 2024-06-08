@@ -58,8 +58,6 @@ pub fn compress(
     method: Method,
     error_bound: f32,
 ) Error!ArrayList(u8) {
-    //TODO: Specify that TerseTS's timestamps are the values indices.
-
     if (uncompressed_values.len == 0) return Error.EmptyInput;
     if (error_bound < 0) return Error.NegativeErrorBound;
 
