@@ -18,7 +18,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
-const pmc = @import("functional/poor_mans_compression.zig");
+const poor_mans_compression = @import("functional/poor_mans_compression.zig");
 const swing_slide_filter = @import("functional/swing_slide_filter.zig");
 
 /// The errors that can occur in TerseTS.
@@ -65,13 +65,25 @@ pub fn compress(
 
     switch (method) {
         .PoorMansCompressionMidrange => {
-            try pmc.compress_midrange(uncompressed_values, &compressed_values, error_bound);
+            try poor_mans_compression.compressMidrange(
+                uncompressed_values,
+                &compressed_values,
+                error_bound,
+            );
         },
         .PoorMansCompressionMean => {
-            try pmc.compress_mean(uncompressed_values, &compressed_values, error_bound);
+            try poor_mans_compression.compressMean(
+                uncompressed_values,
+                &compressed_values,
+                error_bound,
+            );
         },
         .SwingFilter => {
-            try swing_slide_filter.compress_swing(uncompressed_values, &compressed_values, error_bound);
+            try swing_slide_filter.compressSwing(
+                uncompressed_values,
+                &compressed_values,
+                error_bound,
+            );
         },
     }
     try compressed_values.append(@intFromEnum(method));
@@ -97,7 +109,7 @@ pub fn decompress(
 
     switch (method) {
         .PoorMansCompressionMidrange, .PoorMansCompressionMean => {
-            try pmc.decompress(compressed_values_slice, &decompressed_values);
+            try poor_mans_compression.decompress(compressed_values_slice, &decompressed_values);
         },
         .SwingFilter => {
             try swing_slide_filter.decompress(compressed_values_slice, &decompressed_values);
