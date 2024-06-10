@@ -28,7 +28,7 @@ const Error = tersets.Error;
 
 /// Compress `uncompressed_values` within `error_bound` using "Poor Man’s Compression - Midrange"
 /// and write the result to `compressed_values`. If an error occurs it is returned.
-pub fn compress_midrange(
+pub fn compressMidrange(
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
     error_bound: f32,
@@ -56,7 +56,7 @@ pub fn compress_midrange(
 
 /// Compress `uncompressed_values` within `error_bound` using "Poor Man’s Compression - Mean"
 /// and write the result to `compressed_values`. If an error occurs it is returned.
-pub fn compress_mean(
+pub fn compressMean(
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
     error_bound: f32,
@@ -134,7 +134,7 @@ test "midrange can compress and decompress" {
     var decompressed_values = ArrayList(f64).init(allocator);
     defer decompressed_values.deinit();
 
-    try compress_midrange(uncompressed_values[0..], &compressed_values, 0);
+    try compressMidrange(uncompressed_values[0..], &compressed_values, 0);
     try decompress(compressed_values.items, &decompressed_values);
 
     try testing.expect(mem.eql(f64, uncompressed_values[0..], decompressed_values.items));
@@ -148,7 +148,7 @@ test "mean can compress and decompress" {
     var decompressed_values = ArrayList(f64).init(allocator);
     defer decompressed_values.deinit();
 
-    try compress_mean(uncompressed_values[0..], &compressed_values, 0);
+    try compressMean(uncompressed_values[0..], &compressed_values, 0);
     try decompress(compressed_values.items, &decompressed_values);
 
     try testing.expect(mem.eql(f64, uncompressed_values[0..], decompressed_values.items));

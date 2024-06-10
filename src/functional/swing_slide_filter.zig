@@ -37,7 +37,7 @@ const LinearFunction = struct {
 
 /// Compress `uncompressed_values` within `error_bound` using "Swing Filter" and write the
 /// result to `compressed_values`. If an error occurs it is returned.
-pub fn compress_swing(
+pub fn compressSwing(
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
     error_bound: f32,
@@ -311,7 +311,7 @@ test "swing filter zero error bound and even size compress and decompress" {
 
     const uncompressed_values = list_values.items;
 
-    try compress_swing(uncompressed_values[0..], &compressed_values, error_bound);
+    try compressSwing(uncompressed_values[0..], &compressed_values, error_bound);
     try decompress(compressed_values.items, &decompressed_values);
 
     try testing.expect(tersets.isWithinErrorBound(
@@ -344,7 +344,7 @@ test "swing filter zero error bound and odd size compress and decompress" {
 
     const uncompressed_values = list_values.items;
 
-    try compress_swing(uncompressed_values[0..], &compressed_values, error_bound);
+    try compressSwing(uncompressed_values[0..], &compressed_values, error_bound);
     try decompress(compressed_values.items, &decompressed_values);
 
     try testing.expect(tersets.isWithinErrorBound(
@@ -395,7 +395,7 @@ test "swing filter four random lines and random error bound compress and decompr
 
     const uncompressed_values = list_values.items;
 
-    try compress_swing(uncompressed_values[0..], &compressed_values, error_bound);
+    try compressSwing(uncompressed_values[0..], &compressed_values, error_bound);
     try decompress(compressed_values.items, &decompressed_values);
 
     try testing.expect(tersets.isWithinErrorBound(
