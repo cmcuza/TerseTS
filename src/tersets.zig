@@ -38,7 +38,7 @@ pub const Method = enum {
 };
 
 /// A point represented by `time` and `value`.
-pub const Point = struct { time: usize, value: f64 };
+pub const Point = struct { time: f64, value: f64 };
 
 /// This structure models a straight line segment from `start_point` to `end_point`.
 pub const Segment = struct { start_point: Point, end_point: Point };
@@ -128,13 +128,17 @@ pub fn isWithinErrorBound(
     error_bound: f32,
 ) bool {
     if (uncompressed_values.len != decompressed_values.len) {
+        std.debug.print("\nHere not the same size\n", .{});
         return false;
     }
 
     for (0..uncompressed_values.len) |index| {
         const uncompressed_value = uncompressed_values[index];
         const decompressed_value = decompressed_values[index];
-        if (@abs(uncompressed_value - decompressed_value) > error_bound) return false;
+        if (@abs(uncompressed_value - decompressed_value) > error_bound) {
+            std.debug.print("\n{} and {}\n", .{ uncompressed_value, decompressed_value });
+            return false;
+        }
     }
     return true;
 }
