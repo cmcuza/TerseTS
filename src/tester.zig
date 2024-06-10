@@ -173,12 +173,11 @@ pub fn replaceNormalValues(
     }
 }
 
-/// Generate `number_of_values` of random values for use in testing using `random` and add them to
-/// `uncompressed_values`.
+/// Generate `number_of_values` of random `f64` values for use in testing using `random` and add
+/// them to `uncompressed_values`.
 pub fn generateRandomValues(uncompressed_values: *ArrayList(f64), random: Random) !void {
     for (0..number_of_values) |_| {
-        // math.floatMax(f64) is not used as it is larger than -math.floatMin(f64).
-        try uncompressed_values.append(math.floatMin(f64) +
-            (-math.floatMin(f64) - math.floatMin(f64)) * rand.float(random, f64));
+        // rand can only generate f64 values in the range [0, 1).
+        try uncompressed_values.append(@as(f64, @bitCast(rand.int(random, u64))));
     }
 }
