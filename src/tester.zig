@@ -35,14 +35,14 @@ const number_of_values = 50;
 /// to `within_error_bound` after they have been compressed and decompressed using `method`. The
 /// libraries public interface is used to make it simpler refactor the libraries internals.
 pub fn testGenerateCompressAndDecompress(
-    uncompressed_values_generator: fn (
+    uncompressedValuesGenerator: fn (
         uncompressed_values: *ArrayList(f64),
         random: Random,
     ) Error!void,
     allocator: Allocator,
     method: Method,
     error_bound: f32,
-    within_error_bound: fn (
+    withinErrorBound: fn (
         uncompressed_values: []const f64,
         decompressed_values: []const f64,
         error_bound: f32,
@@ -53,7 +53,7 @@ pub fn testGenerateCompressAndDecompress(
     const random = prng.random();
 
     var uncompressed_values = ArrayList(f64).init(allocator);
-    try uncompressed_values_generator(&uncompressed_values, random);
+    try uncompressedValuesGenerator(&uncompressed_values, random);
     defer uncompressed_values.deinit();
 
     // subsequenceStack contains subsequences to run the test for to find shortest failing sequence.
@@ -76,7 +76,7 @@ pub fn testGenerateCompressAndDecompress(
             allocator,
             method,
             error_bound,
-            within_error_bound,
+            withinErrorBound,
         ) catch {
             // To simplify debugging failed tests that use auto generated data, the tests are
             // retried with smaller subsequence to find the smallest subsequence that fails.
@@ -111,15 +111,16 @@ pub fn testGenerateCompressAndDecompress(
     }
 }
 
-/// Test that `uncompressed_values` are within `error_bound` according to `within_error_bound`
-/// after it has been compressed and decompressed using `method`. The libraries public interface is
-/// used to make it simpler refactor the libraries internals.
+/// Test that `uncompressed_values` are within `error_bound` according to `within_error_bound` after
+/// it has been compressed and decompressed using `method`. Assumes that `within_error_bound`
+/// returns `false` if the number of uncompressed and decompressed values are different. The
+/// libraries public interface is used to make it simpler to refactor the libraries internals.
 pub fn testCompressAndDecompress(
     uncompressed_values: []const f64,
     allocator: Allocator,
     method: Method,
     error_bound: f32,
-    within_error_bound: fn (
+    withinErrorBound: fn (
         uncompressed_values: []const f64,
         decompressed_values: []const f64,
         error_bound: f32,
@@ -135,8 +136,7 @@ pub fn testCompressAndDecompress(
     const decompressed_values = try tersets.decompress(compressed_values.items, allocator);
     defer decompressed_values.deinit();
 
-    try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
-    try testing.expect(within_error_bound(
+    try testing.expect(withinErrorBound(
         uncompressed_values,
         decompressed_values.items,
         error_bound,
@@ -177,7 +177,7 @@ pub fn replaceNormalValues(
 /// `uncompressed_values`.
 pub fn generateRandomValues(uncompressed_values: *ArrayList(f64), random: Random) !void {
     for (0..number_of_values) |_| {
-        // math.floatMax(f64) is not used as it larger than -math.floatMin(f64).
+        // math.floatMax(f64) is not used as it is larger than -math.floatMin(f64).
         try uncompressed_values.append(math.floatMin(f64) +
             (-math.floatMin(f64) - math.floatMin(f64)) * rand.float(random, f64));
     }
