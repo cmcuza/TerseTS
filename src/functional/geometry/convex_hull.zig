@@ -25,14 +25,15 @@ const ArrayList = std.ArrayList;
 const testing = std.testing;
 
 const tersets = @import("../../tersets.zig");
-const Point = tersets.Point;
+const Point = tersets.DiscretePoint;
 
 /// Enum for the angle's `Turn` of three consecutive points A, B, and C. Essentially, it describes
 /// whether the path from A to B to C makes a `left` turn, a `right` turn, or continues in a
 /// straight line also called collinear.
 const Turn = enum(i8) { right, left, collinear };
 
-/// Convex Hull formed by an upper and lower hull.
+/// Convex Hull formed by an upper and lower hull. The hulls are formed by the input data with
+/// discrete time axis thus, `Point` is always represented by a `DiscretePoint`.
 pub const ConvexHull = struct {
     lower_hull: ArrayList(Point),
     upper_hull: ArrayList(Point),
