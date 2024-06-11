@@ -26,8 +26,8 @@ const ArrayList = std.ArrayList;
 
 const tersets = @import("../tersets.zig");
 const Error = tersets.Error;
-const Point = tersets.Point;
-const Segment = tersets.Segment;
+const DiscretePoint = tersets.DiscretePoint;
+const DiscreteSegment = tersets.DiscreteSegment;
 
 /// Linear function of the form y = slope*x+intercept. It uses f80 for numerical stability.
 const LinearFunction = struct {
@@ -55,7 +55,7 @@ pub fn compressSwing(
     var current_linear_function: LinearFunction = .{ .slope = 0, .intercept = 0 };
 
     // Initialize the current segment with first two points.
-    var current_segment: Segment = .{
+    var current_segment: DiscreteSegment = .{
         .start_point = .{ .time = 0, .value = uncompressed_values[0] },
         .end_point = .{ .time = 1, .value = uncompressed_values[1] },
     };
@@ -195,7 +195,7 @@ pub fn compressSwing(
 
 /// Decompress `compressed_values` produced by "Swing Filter" and "Slide Filter" and write the
 /// result to `decompressed_values`. If an error occurs it is returned.
-pub fn decompress(
+pub fn decompressSwing(
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
 ) Error!void {
@@ -210,7 +210,7 @@ pub fn decompress(
     var first_timestamp: usize = 0;
     var index: usize = 0;
     while (index < compressed_lines_and_index.len) : (index += 3) {
-        const current_segment: Segment = .{
+        const current_segment: DiscreteSegment = .{
             .start_point = .{ .time = first_timestamp, .value = compressed_lines_and_index[index] },
             .end_point = .{
                 .time = @as(usize, @bitCast(compressed_lines_and_index[index + 2])) - 1,
@@ -236,7 +236,7 @@ pub fn decompress(
 }
 
 /// Computes the numerator of the slope derivate as in Eq. (6).
-fn computeSlopeDerivate(segment: Segment) f80 {
+fn computeSlopeDerivate(segment: DiscreteSegment) f80 {
     return (segment.end_point.value - segment.start_point.value) *
         usizeToF80(segment.end_point.time - segment.start_point.time);
 }
@@ -245,7 +245,7 @@ fn computeSlopeDerivate(segment: Segment) f80 {
 /// points of the `segment`. The linear function is swinged down or up based on the `error_bound`.
 /// If `error_bound` is negative, `linear_function` is swing down. It is swing up otherwise.
 fn updateSwingLinearFunction(
-    segment: Segment,
+    segment: DiscreteSegment,
     linear_function: *LinearFunction,
     error_bound: f32,
 ) void {
@@ -278,9 +278,9 @@ fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)
     }
 }
 
-/// Computes the intercept coefficient of a linear function that passes through `point`
-/// with the given `slope` coefficient.
-fn computeInterceptCoefficient(slope: f80, point: Point) f80 {
+/// Computes the intercept coefficient of a linear function that passes through the `point` with
+/// the given `slope` coefficient.
+fn computeInterceptCoefficient(slope: f80, point: DiscretePoint) f80 {
     return point.value - slope * usizeToF80(point.time);
 }
 
@@ -312,7 +312,7 @@ test "swing filter zero error bound and even size compress and decompress" {
     const uncompressed_values = list_values.items;
 
     try compressSwing(uncompressed_values[0..], &compressed_values, error_bound);
-    try decompress(compressed_values.items, &decompressed_values);
+    try decompressSwing(compressed_values.items, &decompressed_values);
 
     try testing.expect(tersets.isWithinErrorBound(
         uncompressed_values,
@@ -345,7 +345,7 @@ test "swing filter zero error bound and odd size compress and decompress" {
     const uncompressed_values = list_values.items;
 
     try compressSwing(uncompressed_values[0..], &compressed_values, error_bound);
-    try decompress(compressed_values.items, &decompressed_values);
+    try decompressSwing(compressed_values.items, &decompressed_values);
 
     try testing.expect(tersets.isWithinErrorBound(
         uncompressed_values,
@@ -396,7 +396,7 @@ test "swing filter four random lines and random error bound compress and decompr
     const uncompressed_values = list_values.items;
 
     try compressSwing(uncompressed_values[0..], &compressed_values, error_bound);
-    try decompress(compressed_values.items, &decompressed_values);
+    try decompressSwing(compressed_values.items, &decompressed_values);
 
     try testing.expect(tersets.isWithinErrorBound(
         uncompressed_values,

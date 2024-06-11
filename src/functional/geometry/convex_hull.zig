@@ -25,23 +25,24 @@ const ArrayList = std.ArrayList;
 const testing = std.testing;
 
 const tersets = @import("../../tersets.zig");
-const Point = tersets.Point;
+const DiscretePoint = tersets.DiscretePoint;
 
 /// Enum for the angle's `Turn` of three consecutive points A, B, and C. Essentially, it describes
 /// whether the path from A to B to C makes a `left` turn, a `right` turn, or continues in a
 /// straight line also called collinear.
 const Turn = enum(i8) { right, left, collinear };
 
-/// Convex Hull formed by an upper and lower hull.
+/// Convex Hull formed by an upper and lower hull. The hulls are formed by the input data with
+/// discrete time axis thus, the ConvexHull is always represented by `DiscretePoint`.
 pub const ConvexHull = struct {
-    lower_hull: ArrayList(Point),
-    upper_hull: ArrayList(Point),
+    lower_hull: ArrayList(DiscretePoint),
+    upper_hull: ArrayList(DiscretePoint),
 
     // Initialize the container with a given `allocator`.
     pub fn init(allocator: mem.Allocator) !ConvexHull {
         return ConvexHull{
-            .lower_hull = ArrayList(Point).init(allocator),
-            .upper_hull = ArrayList(Point).init(allocator),
+            .lower_hull = ArrayList(DiscretePoint).init(allocator),
+            .upper_hull = ArrayList(DiscretePoint).init(allocator),
         };
     }
 
@@ -52,14 +53,14 @@ pub const ConvexHull = struct {
     }
 
     /// Add a new `point` to the convex hull.
-    pub fn addPoint(self: *ConvexHull, point: Point) !void {
+    pub fn addPoint(self: *ConvexHull, point: DiscretePoint) !void {
         try addPointToHull(&self.upper_hull, Turn.right, point);
         try addPointToHull(&self.lower_hull, Turn.left, point);
     }
 
     /// Auxiliary function to add a new `point` to a given `hull` of the convex hull. The function uses
     /// the given `turn` to correctly add the new point.
-    fn addPointToHull(hull: *ArrayList(Point), turn: Turn, point: Point) !void {
+    fn addPointToHull(hull: *ArrayList(DiscretePoint), turn: Turn, point: DiscretePoint) !void {
         if (hull.items.len < 2) {
             // The first two points can be add directly.
             try hull.append(point);
@@ -81,7 +82,11 @@ pub const ConvexHull = struct {
 /// Compute turn created by the path from `first_point` to `middle_point` to `last_point`. If this
 /// function is part of the structure and does not use the `self` parameter, the compiler returns
 /// an error. However, since it is used for testing purposes it cannot be private.
-fn computeTurn(first_point: Point, middle_point: Point, last_point: Point) Turn {
+fn computeTurn(
+    first_point: DiscretePoint,
+    middle_point: DiscretePoint,
+    last_point: DiscretePoint,
+) Turn {
     const distance_last_middle: f64 = @floatFromInt(last_point.time - middle_point.time);
     const distance_middle_first: f64 = @floatFromInt(middle_point.time - first_point.time);
 

@@ -37,11 +37,11 @@ pub const Method = enum {
     SwingFilter,
 };
 
-/// A point represented by `time` and `value`.
-pub const Point = struct { time: usize, value: f64 };
+/// `Segment` with discrete `time` axis. `time_type` is type `usize`.
+pub const DiscreteSegment = Segment(usize);
 
-/// This structure models a straight line segment from `start_point` to `end_point`.
-pub const Segment = struct { start_point: Point, end_point: Point };
+/// `Point` with discrete `time` axis. `time_type` is type `usize`.
+pub const DiscretePoint = Point(usize);
 
 /// Margin to adjust the error bound for numerical stability. Reducing the error bound by this
 /// margin ensures that all the elements of the decompressed time series are within the error bound
@@ -112,7 +112,7 @@ pub fn decompress(
             try poor_mans_compression.decompress(compressed_values_slice, &decompressed_values);
         },
         .SwingFilter => {
-            try swing_slide_filter.decompress(compressed_values_slice, &decompressed_values);
+            try swing_slide_filter.decompressSwing(compressed_values_slice, &decompressed_values);
         },
     }
 
@@ -149,4 +149,18 @@ pub fn getMaxMethodIndex() usize {
     }
 
     return max_index;
+}
+
+/// `Point` is a point represented by `time` and `value`. `time` is of datatype `time_type`.
+fn Point(comptime time_type: type) type {
+    return struct { time: time_type, value: f64 };
+}
+
+/// `Segment` models a straight line segment from `start_point` to `end_point`. `time` is of
+///  datatype `time_type`.
+fn Segment(comptime time_type: type) type {
+    return struct {
+        start_point: Point(time_type),
+        end_point: Point(time_type),
+    };
 }
