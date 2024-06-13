@@ -263,10 +263,8 @@ pub fn compressSlide(
         if ((upper_limit < (uncompressed_values[current_timestamp] - adjusted_error_bound)) or
             (lower_limit > (uncompressed_values[current_timestamp] + adjusted_error_bound)))
         {
-            // Recording mechanism. (the current points is outside the limits).
-            //Find the linear approximation that cross the interception
-            // point of the upper and lower bounds and slope between the slopes of the upper and
-            // lower bounds.
+            // Recording mechanism. (the current points is outside the limits). The linear approximation
+            // crosses the interception point of the upper and lower bounds.
             computeInterceptionPoint(lower_bound, upper_bound, &intercept_point);
 
             // In the article, the authors suggest to compute the slope using Eq. (6). However, this is
@@ -284,21 +282,29 @@ pub fn compressSlide(
                 ),
             };
 
-            const init_value = evaluateLinearFunctionAtTime(
-                current_linear_approximation,
-                usize,
-                current_segment.start_point.time,
-            );
+            const segment_size = current_segment.end_point.time - current_segment.start_point.time;
 
-            try appendValue(f64, init_value, compressed_values);
+            if (segment_size > 1) {
+                const init_value = evaluateLinearFunctionAtTime(
+                    current_linear_approximation,
+                    usize,
+                    current_segment.start_point.time,
+                );
 
-            const end_value = evaluateLinearFunctionAtTime(
-                current_linear_approximation,
-                usize,
-                current_segment.end_point.time,
-            );
-            try appendValue(f64, end_value, compressed_values);
+                try appendValue(f64, init_value, compressed_values);
 
+                const end_value = evaluateLinearFunctionAtTime(
+                    current_linear_approximation,
+                    usize,
+                    current_segment.end_point.time,
+                );
+
+                try appendValue(f64, end_value, compressed_values);
+            } else {
+                // Necessary for numerical stability.
+                try appendValue(f64, current_segment.start_point.value, compressed_values);
+                try appendValue(f64, current_segment.end_point.value, compressed_values);
+            }
             try appendValue(usize, current_timestamp, compressed_values);
 
             // Update the current segment.
@@ -334,6 +340,7 @@ pub fn compressSlide(
 
             try convex_hull.addPoint(current_segment.end_point);
 
+            // The new upper bound would be found only on the upper hull. Lemma (4.3).
             for (convex_hull.upper_hull.items[0 .. convex_hull.upper_hull.items.len - 1]) |hull_point| {
                 updateSlideLinearFunction(
                     .{ .start_point = hull_point, .end_point = current_segment.end_point },
@@ -342,11 +349,12 @@ pub fn compressSlide(
                 );
 
                 if (new_upper_bound.slope < upper_bound.slope) {
-                    // Slide down
+                    // Slide down.
                     upper_bound = new_upper_bound;
                 }
             }
 
+            // The new lower bound would be found only on the lower hull. Lemma (4.3).
             for (convex_hull.lower_hull.items[0 .. convex_hull.lower_hull.items.len - 1]) |hull_point| {
                 updateSlideLinearFunction(
                     .{ .start_point = hull_point, .end_point = current_segment.end_point },
@@ -355,7 +363,7 @@ pub fn compressSlide(
                 );
 
                 if (new_lower_bound.slope > lower_bound.slope) {
-                    //Slide up
+                    // Slide up.
                     lower_bound = new_lower_bound;
                 }
             }
@@ -650,7 +658,11 @@ test "swing filter four random lines and random error bound compress and decompr
     while (i < 1000) : (i += 1) {
         lineIndex = i / 250;
         const noise = rnd.random().float(f64) * 0.1 - 0.05;
-        try list_values.append(evaluateLinearFunctionAtTime(linear_functions[lineIndex], usize, i) + noise);
+        try list_values.append(evaluateLinearFunctionAtTime(
+            linear_functions[lineIndex],
+            usize,
+            i,
+        ) + noise);
     }
 
     const uncompressed_values = list_values.items;
@@ -695,11 +707,49 @@ test "slide filter zero error bound and even size compress and decompress" {
     );
     try decompress(compressed_values.items, &decompressed_values);
 
-    // try testing.expect(tersets.isWithinErrorBound(
-    //     uncompressed_values,
-    //     decompressed_values.items,
-    //     error_bound,
-    // ));
+    try testing.expect(tersets.isWithinErrorBound(
+        uncompressed_values,
+        decompressed_values.items,
+        error_bound,
+    ));
+}
+
+test "slide filter zero error bound and odd size compress and decompress" {
+    const allocator = testing.allocator;
+
+    const linear_function = LinearFunction{ .slope = 1, .intercept = 0.0 };
+
+    var list_values = ArrayList(f64).init(allocator);
+    defer list_values.deinit();
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+    var decompressed_values = ArrayList(f64).init(allocator);
+    defer decompressed_values.deinit();
+    const error_bound: f32 = 0.0;
+
+    var rnd = std.rand.DefaultPrng.init(0);
+
+    var i: usize = 0;
+    while (i < 101) : (i += 1) {
+        const noise = rnd.random().float(f64) * 0.1 - 0.05;
+        try list_values.append(evaluateLinearFunctionAtTime(linear_function, usize, i) + noise);
+    }
+
+    const uncompressed_values = list_values.items;
+
+    try compressSlide(
+        uncompressed_values[0..],
+        &compressed_values,
+        allocator,
+        error_bound,
+    );
+    try decompress(compressed_values.items, &decompressed_values);
+
+    try testing.expect(tersets.isWithinErrorBound(
+        uncompressed_values,
+        decompressed_values.items,
+        error_bound,
+    ));
 }
 
 test "slide filter four random lines and random error bound compress and decompress" {
@@ -738,7 +788,11 @@ test "slide filter four random lines and random error bound compress and decompr
     while (i < 100) : (i += 1) {
         lineIndex = i / 250;
         const noise = rnd.random().float(f64) - 0.05;
-        try list_values.append(evaluateLinearFunctionAtTime(linear_functions[lineIndex], usize, i) + noise);
+        try list_values.append(evaluateLinearFunctionAtTime(
+            linear_functions[lineIndex],
+            usize,
+            i,
+        ) + noise);
     }
 
     const uncompressed_values = list_values.items;
