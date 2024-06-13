@@ -17,6 +17,19 @@
 //! Online piece-wise linear approximation of numerical streams with precision guarantees.
 //! Proc. VLDB Endow. 2, 1, 2009.
 //! https://doi.org/10.14778/1687627.1687645".
+//! The implementation of Slide Filter has been slightly modified the proposed method in two main
+//!  aspects. 1) The slope of the linear approximation does not minimize the squared error of the
+//! points in the segment. 2) Any two consecutive linear approximations are disjointed—these two
+//! changes are necessary due to the paper's imprecision in Lemma 4.4.
+//! 1) To compute the slope with minimum squared error the starting point needs to be known from
+//! the beginning. However, in Slide Filter the starting point depends on the continuously updated
+//! upper and lower bounds as well as alpha and beta as explained in Lines 19, and 20 of Alg 2. The
+//! simple and efficient solution implemented here is to compute the slope as the mean of the upper
+//! and lower bounds' slopes. This solution satisfies Eq. (5) and ensures that the linear
+//! approximation meets the error bound. 2) To join two consecutive linear approximations, we need
+//! to find alpha and beta as described in Lemma 4.4. However, in Figure 5 the Lemma is
+//! contradicted making reproducibility challenging. Finally, although alpha and beta probably
+//! exist and would improve the method's performance, a mathematical proof is needed.
 
 const std = @import("std");
 const math = std.math;
@@ -267,12 +280,6 @@ pub fn compressSlide(
             // crosses the interception point of the upper and lower bounds.
             computeInterceptionPoint(lower_bound, upper_bound, &intercept_point);
 
-            // In the article, the authors suggest to compute the slope using Eq. (6). However, this is
-            // not possible since the starting point is unknown until the new linear approximation is
-            // determined. In `Swing Filter`, this is possible because the starting point is always the
-            // first point of the segment. In `Slide Filter` the starting point depends on alpha and beta
-            // as explained in Lines 19, and 20 of Alg 2. A simple and efficient solution is to assing
-            // the mean of the upper and lower bounds' slopes. This solution satisfies Eq. (5).
             const current_linear_approximation = .{
                 .slope = (lower_bound.slope + upper_bound.slope) / 2,
                 .intercept = computeInterceptCoefficient(
