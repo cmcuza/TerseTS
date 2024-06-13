@@ -226,12 +226,6 @@ pub fn compressSlide(
     var convex_hull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
 
-    var previous_upper_bound: LinearFunction = .{ .slope = undefined, .intercept = undefined };
-    var previous_lower_bound: LinearFunction = .{ .slope = undefined, .intercept = undefined };
-    var previous_linear_approximation: LinearFunction = .{
-        .slope = undefined,
-        .intercept = undefined,
-    };
     var current_upper_bound: LinearFunction = .{ .slope = undefined, .intercept = undefined };
     var current_lower_bound: LinearFunction = .{ .slope = undefined, .intercept = undefined };
     var current_segment: DiscreteSegment = .{
@@ -331,10 +325,6 @@ pub fn compressSlide(
                     },
                 };
 
-                previous_linear_approximation = current_linear_approximation;
-                previous_lower_bound = current_lower_bound;
-                previous_upper_bound = current_upper_bound;
-
                 updateSlideLinearFunction(
                     DiscreteSegment,
                     current_segment,
@@ -347,6 +337,7 @@ pub fn compressSlide(
                     &current_lower_bound,
                     -adjusted_error_bound,
                 );
+
                 std.debug.print("Current point time {}\n", .{current_segment.end_point.time});
                 convex_hull.clean();
                 try convex_hull.addPoint(current_segment.start_point);
