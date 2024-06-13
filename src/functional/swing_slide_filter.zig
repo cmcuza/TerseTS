@@ -29,7 +29,6 @@ const Error = tersets.Error;
 const DiscretePoint = tersets.DiscretePoint;
 const DiscreteSegment = tersets.DiscreteSegment;
 const ContinousPoint = tersets.ContinousPoint;
-const ContinousSegment = tersets.ContinousSegment;
 
 const ConvexHull = @import("geometry/convex_hull.zig").ConvexHull;
 
@@ -130,10 +129,6 @@ pub fn compressSwing(
                 // Create linear function with slope zero and intercept equal to the current value.
                 current_segment.end_point.time = current_timestamp;
                 current_segment.end_point.value = uncompressed_values[current_timestamp];
-                upper_bound.slope = 0.0;
-                upper_bound.intercept = uncompressed_values[current_timestamp];
-                lower_bound.slope = 0.0;
-                lower_bound.intercept = uncompressed_values[current_timestamp];
             }
         } else {
             //Filtering mechanism (the current point is still inside the limits).
@@ -226,8 +221,10 @@ pub fn compressSlide(
     var convex_hull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
 
-    var current_upper_bound: LinearFunction = .{ .slope = undefined, .intercept = undefined };
-    var current_lower_bound: LinearFunction = .{ .slope = undefined, .intercept = undefined };
+    var intercept_point: ContinousPoint = .{ .time = undefined, .value = undefined };
+
+    var upper_bound: LinearFunction = .{ .slope = undefined, .intercept = undefined };
+    var lower_bound: LinearFunction = .{ .slope = undefined, .intercept = undefined };
     var current_segment: DiscreteSegment = .{
         .start_point = .{ .time = 0, .value = uncompressed_values[0] },
         .end_point = .{ .time = 1, .value = uncompressed_values[1] },
@@ -239,44 +236,38 @@ pub fn compressSlide(
     try convex_hull.addPoint(current_segment.end_point);
 
     updateSlideLinearFunction(
-        DiscreteSegment,
         current_segment,
-        &current_upper_bound,
+        &upper_bound,
         adjusted_error_bound,
     );
     updateSlideLinearFunction(
-        DiscreteSegment,
         current_segment,
-        &current_lower_bound,
+        &lower_bound,
         -adjusted_error_bound,
     );
 
     var current_timestamp: usize = 2;
     while (current_timestamp < uncompressed_values.len) : (current_timestamp += 1) {
+        // Evaluate the upper and lower bound linear functions at current timestamp.
         const upper_limit = evaluateLinearFunctionAtTime(
-            current_upper_bound,
+            upper_bound,
             usize,
             current_timestamp,
         );
         const lower_limit = evaluateLinearFunctionAtTime(
-            current_lower_bound,
+            lower_bound,
             usize,
             current_timestamp,
         );
-        std.debug.print("----------\n", .{});
-        std.debug.print("upper bound slope {:.4} and intercept {:.4}\n", .{ current_upper_bound.slope, current_upper_bound.intercept });
-        std.debug.print("lower bound slope {:.4} and intercept {:.4}\n", .{ current_lower_bound.slope, current_lower_bound.intercept });
-        std.debug.print("----------\n", .{});
+
         if ((upper_limit < (uncompressed_values[current_timestamp] - adjusted_error_bound)) or
             (lower_limit > (uncompressed_values[current_timestamp] + adjusted_error_bound)))
         {
-            // Recording mechanism. Find the linear approximation that passes the interception
+            // Recording mechanism. (the current points is outside the limits).
+            //Find the linear approximation that cross the interception
             // point of the upper and lower bounds and slope between the slopes of the upper and
             // lower bounds.
-            var intercept_point: ContinousPoint = .{ .time = undefined, .value = undefined }; // z^k
-            computeInterceptionPoint(current_lower_bound, current_upper_bound, &intercept_point);
-
-            std.debug.print("Recording \n", .{});
+            computeInterceptionPoint(lower_bound, upper_bound, &intercept_point);
 
             // In the article, the authors suggest to compute the slope using Eq. (6). However, this is
             // not possible since the starting point is unknown until the new linear approximation is
@@ -285,20 +276,18 @@ pub fn compressSlide(
             // as explained in Lines 19, and 20 of Alg 2. A simple and efficient solution is to assing
             // the mean of the upper and lower bounds' slopes. This solution satisfies Eq. (5).
             const current_linear_approximation = .{
-                .slope = (current_lower_bound.slope + current_upper_bound.slope) / 2,
+                .slope = (lower_bound.slope + upper_bound.slope) / 2,
                 .intercept = computeInterceptCoefficient(
-                    (current_lower_bound.slope + current_upper_bound.slope) / 2,
+                    (lower_bound.slope + upper_bound.slope) / 2,
                     ContinousPoint,
                     intercept_point,
                 ),
             };
 
-            std.debug.print("Current linear approximation slope {:.4} and intercept {:.4}\n", .{ current_linear_approximation.slope, current_linear_approximation.intercept });
-
             const init_value = evaluateLinearFunctionAtTime(
                 current_linear_approximation,
                 usize,
-                current_segment.time,
+                current_segment.start_point.time,
             );
 
             try appendValue(f64, init_value, compressed_values);
@@ -306,133 +295,111 @@ pub fn compressSlide(
             const end_value = evaluateLinearFunctionAtTime(
                 current_linear_approximation,
                 usize,
-                current_segment.start_point.time - 1,
+                current_segment.end_point.time,
             );
             try appendValue(f64, end_value, compressed_values);
 
-            try appendValue(usize, current_segment.end_point.time, compressed_values);
+            try appendValue(usize, current_timestamp, compressed_values);
 
+            // Update the current segment.
+            current_segment.start_point.time = current_timestamp;
+            current_segment.start_point.value = uncompressed_values[current_timestamp];
+
+            // Catch edge case (only one point left). If `current_timestamp+1 >= uncompressed_values.len` then
+            // `uncompressed_values[current_timestamp + 1]` will return index out of bound error.
             if (current_timestamp + 1 < uncompressed_values.len) {
                 // Update the current segment.
-                current_segment = .{
-                    .start_point = .{
-                        .time = current_timestamp,
-                        .value = uncompressed_values[current_timestamp],
-                    },
-                    .end_point = .{
-                        .time = current_timestamp + 1,
-                        .value = uncompressed_values[current_timestamp + 1],
-                    },
+                current_segment.end_point = .{
+                    .time = current_timestamp + 1,
+                    .value = uncompressed_values[current_timestamp + 1],
                 };
 
-                updateSlideLinearFunction(
-                    DiscreteSegment,
-                    current_segment,
-                    &current_upper_bound,
-                    adjusted_error_bound,
-                );
-                updateSlideLinearFunction(
-                    DiscreteSegment,
-                    current_segment,
-                    &current_lower_bound,
-                    -adjusted_error_bound,
-                );
+                updateSlideLinearFunction(current_segment, &upper_bound, adjusted_error_bound);
+                updateSlideLinearFunction(current_segment, &lower_bound, -adjusted_error_bound);
 
-                std.debug.print("Current point time {}\n", .{current_segment.end_point.time});
                 convex_hull.clean();
                 try convex_hull.addPoint(current_segment.start_point);
                 try convex_hull.addPoint(current_segment.end_point);
+
                 current_timestamp += 1;
-            } else { // Create linear function with slope zero and intercept equal to the current value.
+            } else {
+                // Create linear function with slope zero and intercept equal to the current value.
                 current_segment.end_point.time = current_timestamp;
                 current_segment.end_point.value = uncompressed_values[current_timestamp];
-                current_upper_bound.slope = 0.0;
-                current_upper_bound.intercept = uncompressed_values[current_timestamp];
-                current_lower_bound.slope = 0.0;
-                current_lower_bound.intercept = uncompressed_values[current_timestamp];
             }
         } else {
-            //Filtering mechanism
-            current_segment.end_point = .{
-                .time = current_timestamp,
-                .value = uncompressed_values[current_timestamp],
-            };
+            //Filtering mechanism (the current point is still inside the limits).
+            current_segment.end_point.time = current_timestamp;
+            current_segment.end_point.value = uncompressed_values[current_timestamp];
 
             try convex_hull.addPoint(current_segment.end_point);
 
-            std.debug.print("Filtering with point ({}, {})\n", .{ current_segment.end_point.time, current_segment.end_point.value });
-            // Compute the potentially new upper and lower bounds
-            updateSlideLinearFunction(
-                DiscreteSegment,
-                current_segment,
-                &new_upper_bound,
-                adjusted_error_bound,
-            );
-            updateSlideLinearFunction(
-                DiscreteSegment,
-                current_segment,
-                &new_lower_bound,
-                -adjusted_error_bound,
-            );
+            for (convex_hull.upper_hull.items[0 .. convex_hull.upper_hull.items.len - 1]) |hull_point| {
+                updateSlideLinearFunction(
+                    .{ .start_point = hull_point, .end_point = current_segment.end_point },
+                    &new_upper_bound,
+                    adjusted_error_bound,
+                );
 
-            const new_upper_limit = evaluateLinearFunctionAtTime(
-                new_upper_bound,
-                usize,
-                current_timestamp,
-            );
-            const new_lower_limit = evaluateLinearFunctionAtTime(
-                new_lower_bound,
-                usize,
-                current_timestamp,
-            );
-
-            if (upper_limit > new_upper_limit) {
-                // Slide down
-                std.debug.print("Slide down\n", .{});
-                for (convex_hull.upper_hull.items[0 .. convex_hull.upper_hull.items.len - 1]) |hull_point| {
-                    updateSlideLinearFunction(
-                        DiscreteSegment,
-                        .{ .start_point = hull_point, .end_point = current_segment.end_point },
-                        &new_upper_bound,
-                        adjusted_error_bound,
-                    );
-
-                    if (new_upper_bound.slope < current_upper_bound.slope) {
-                        current_upper_bound = new_upper_bound;
-                    }
+                if (new_upper_bound.slope < upper_bound.slope) {
+                    // Slide down
+                    upper_bound = new_upper_bound;
                 }
             }
-            if (lower_limit < new_lower_limit) {
-                //Slide up
-                std.debug.print("Slide up\n", .{});
-                for (convex_hull.lower_hull.items[0 .. convex_hull.lower_hull.items.len - 1]) |hull_point| {
-                    updateSlideLinearFunction(
-                        DiscreteSegment,
-                        .{ .start_point = hull_point, .end_point = current_segment.end_point },
-                        &new_lower_bound,
-                        -adjusted_error_bound,
-                    );
 
-                    if (new_lower_bound.slope > current_lower_bound.slope) {
-                        current_lower_bound = new_lower_bound;
-                    }
+            for (convex_hull.lower_hull.items[0 .. convex_hull.lower_hull.items.len - 1]) |hull_point| {
+                updateSlideLinearFunction(
+                    .{ .start_point = hull_point, .end_point = current_segment.end_point },
+                    &new_lower_bound,
+                    -adjusted_error_bound,
+                );
+
+                if (new_lower_bound.slope > lower_bound.slope) {
+                    //Slide up
+                    lower_bound = new_lower_bound;
                 }
             }
         }
     }
 
-    // const segment_size = current_timestamp - current_segment.start_point.time - 1;
+    const segment_size = current_timestamp - current_segment.start_point.time - 1;
 
-    // if (segment_size > 1) {} else {
-    //     try appendValue(f64, current_segment.end_point.value, compressed_values);
-    // }
+    if (segment_size > 1) {
+        computeInterceptionPoint(lower_bound, upper_bound, &intercept_point);
+        const linear_approximation = .{
+            .slope = (lower_bound.slope + upper_bound.slope) / 2,
+            .intercept = computeInterceptCoefficient(
+                (lower_bound.slope + upper_bound.slope) / 2,
+                ContinousPoint,
+                intercept_point,
+            ),
+        };
 
-    // try appendValue(usize, current_timestamp, compressed_values);
+        const init_value = evaluateLinearFunctionAtTime(
+            linear_approximation,
+            usize,
+            current_segment.start_point.time,
+        );
+
+        try appendValue(f64, init_value, compressed_values);
+
+        const end_value = evaluateLinearFunctionAtTime(
+            linear_approximation,
+            usize,
+            current_timestamp - 1,
+        );
+        try appendValue(f64, end_value, compressed_values);
+    } else {
+        try appendValue(f64, current_segment.start_point.value, compressed_values);
+        try appendValue(f64, current_segment.end_point.value, compressed_values);
+    }
+
+    try appendValue(usize, current_timestamp, compressed_values);
 }
 
 /// Decompress `compressed_values` produced by "Swing Filter" and "Slide Filter" and write the
 /// result to `decompressed_values`. If an error occurs it is returned.
-pub fn decompressSwing(
+pub fn decompress(
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
 ) Error!void {
@@ -442,7 +409,7 @@ pub fn decompressSwing(
 
     const compressed_lines_and_index = mem.bytesAsSlice(f64, compressed_values);
 
-    var current_linear_function: LinearFunction = .{ .slope = undefined, .intercept = undefined };
+    var linear_approximation: LinearFunction = .{ .slope = undefined, .intercept = undefined };
 
     var first_timestamp: usize = 0;
     var index: usize = 0;
@@ -456,12 +423,12 @@ pub fn decompressSwing(
         };
 
         if (current_segment.start_point.time < current_segment.end_point.time) {
-            updateSwingLinearFunction(current_segment, &current_linear_function, 0.0);
+            updateSwingLinearFunction(current_segment, &linear_approximation, 0.0);
             try decompressed_values.append(current_segment.start_point.value);
             var current_timestamp: usize = current_segment.start_point.time + 1;
             while (current_timestamp < current_segment.end_point.time) : (current_timestamp += 1) {
                 const y: f64 = evaluateLinearFunctionAtTime(
-                    current_linear_function,
+                    linear_approximation,
                     usize,
                     current_timestamp,
                 );
@@ -543,27 +510,16 @@ fn computeInterceptCoefficient(slope: f80, comptime point_type: type, point: poi
 /// (`segment.start_point.time`, `segment.start_point.value - error_bound`) and
 /// (`segment.end_point.time`, `segment.end_point.value + error_bound`).
 fn updateSlideLinearFunction(
-    comptime segment_type: type,
-    segment: segment_type,
+    segment: DiscreteSegment,
     linear_function: *LinearFunction,
     error_bound: f32,
 ) void {
     if (segment.end_point.time != segment.start_point.time) {
-        var duration: f80 = undefined;
-        var starting_point: f80 = undefined;
-        if (segment_type == DiscreteSegment) {
-            duration = @floatFromInt(segment.end_point.time - segment.start_point.time);
-            starting_point = usizeToF80(segment.start_point.time);
-        } else {
-            duration = segment.end_point.time - segment.start_point.time;
-            starting_point = segment.start_point.time;
-        }
-
+        const duration: f80 = @floatFromInt(segment.end_point.time - segment.start_point.time);
         linear_function.slope = (segment.end_point.value + 2 * error_bound -
             segment.start_point.value) / duration;
-
         linear_function.intercept = segment.start_point.value - error_bound -
-            linear_function.slope * starting_point;
+            linear_function.slope * usizeToF80(segment.start_point.time);
     } else {
         linear_function.slope = 0.0;
         linear_function.intercept = segment.start_point.value;
@@ -616,7 +572,7 @@ test "swing filter zero error bound and even size compress and decompress" {
     const uncompressed_values = list_values.items;
 
     try compressSwing(uncompressed_values[0..], &compressed_values, error_bound);
-    try decompressSwing(compressed_values.items, &decompressed_values);
+    try decompress(compressed_values.items, &decompressed_values);
 
     try testing.expect(tersets.isWithinErrorBound(
         uncompressed_values,
@@ -649,7 +605,7 @@ test "swing filter zero error bound and odd size compress and decompress" {
     const uncompressed_values = list_values.items;
 
     try compressSwing(uncompressed_values[0..], &compressed_values, error_bound);
-    try decompressSwing(compressed_values.items, &decompressed_values);
+    try decompress(compressed_values.items, &decompressed_values);
 
     try testing.expect(tersets.isWithinErrorBound(
         uncompressed_values,
@@ -700,7 +656,7 @@ test "swing filter four random lines and random error bound compress and decompr
     const uncompressed_values = list_values.items;
 
     try compressSwing(uncompressed_values[0..], &compressed_values, error_bound);
-    try decompressSwing(compressed_values.items, &decompressed_values);
+    try decompress(compressed_values.items, &decompressed_values);
 
     try testing.expect(tersets.isWithinErrorBound(
         uncompressed_values,
@@ -711,41 +667,93 @@ test "swing filter four random lines and random error bound compress and decompr
 
 test "slide filter zero error bound and even size compress and decompress" {
     const allocator = testing.allocator;
+    const linear_function = LinearFunction{ .slope = 1, .intercept = 0.0 };
+
     var list_values = ArrayList(f64).init(allocator);
     defer list_values.deinit();
     var compressed_values = ArrayList(u8).init(allocator);
     defer compressed_values.deinit();
-    // var decompressed_values = ArrayList(f64).init(allocator);
-    // defer decompressed_values.deinit();
-    const error_bound: f32 = 0.5;
+    var decompressed_values = ArrayList(f64).init(allocator);
+    defer decompressed_values.deinit();
+    const error_bound: f32 = 0.0;
 
-    try list_values.append(2.3);
-    try list_values.append(3.0);
-    try list_values.append(3.5);
-    try list_values.append(4.0);
-    try list_values.append(2.5);
-    try list_values.append(1.6);
-    try list_values.append(1);
-    try list_values.append(0.9);
-    try list_values.append(4.0);
-    try list_values.append(3.6);
-    try list_values.append(3.2);
-    try list_values.append(2.7);
+    var rnd = std.rand.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
+
+    var i: usize = 0;
+    while (i < 100) : (i += 1) {
+        const noise = rnd.random().float(f64) * 0.1 - 0.05;
+        try list_values.append(evaluateLinearFunctionAtTime(linear_function, usize, i) + noise);
+    }
 
     const uncompressed_values = list_values.items;
 
-    std.debug.print("Items\n", .{});
-    for (uncompressed_values) |item| {
-        std.debug.print("{} ", .{item});
-    }
-    std.debug.print("\n", .{});
-
-    try compressSlide(uncompressed_values[0..], &compressed_values, allocator, error_bound);
-    // try decompressSwing(compressed_values.items, &decompressed_values);
+    try compressSlide(
+        uncompressed_values[0..],
+        &compressed_values,
+        allocator,
+        error_bound,
+    );
+    try decompress(compressed_values.items, &decompressed_values);
 
     // try testing.expect(tersets.isWithinErrorBound(
     //     uncompressed_values,
     //     decompressed_values.items,
     //     error_bound,
     // ));
+}
+
+test "slide filter four random lines and random error bound compress and decompress" {
+    const allocator = testing.allocator;
+    var rnd = std.rand.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
+
+    const linear_functions = [_]LinearFunction{
+        LinearFunction{
+            .slope = 2 * (rnd.random().float(f64) - 0.5),
+            .intercept = 2 * (rnd.random().float(f64) - 0.5),
+        },
+        LinearFunction{
+            .slope = 2 * (rnd.random().float(f64) - 0.5),
+            .intercept = 2 * (rnd.random().float(f64) - 0.5),
+        },
+        LinearFunction{
+            .slope = 2 * (rnd.random().float(f64) - 0.5),
+            .intercept = 2 * (rnd.random().float(f64) - 0.5),
+        },
+        LinearFunction{
+            .slope = 2 * (rnd.random().float(f64) - 0.5),
+            .intercept = 2 * (rnd.random().float(f64) - 0.5),
+        },
+    };
+
+    var list_values = ArrayList(f64).init(allocator);
+    defer list_values.deinit();
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+    var decompressed_values = ArrayList(f64).init(allocator);
+    defer decompressed_values.deinit();
+    const error_bound: f32 = rnd.random().float(f32);
+
+    var i: usize = 0;
+    var lineIndex: usize = 0;
+    while (i < 100) : (i += 1) {
+        lineIndex = i / 250;
+        const noise = rnd.random().float(f64) - 0.05;
+        try list_values.append(evaluateLinearFunctionAtTime(linear_functions[lineIndex], usize, i) + noise);
+    }
+
+    const uncompressed_values = list_values.items;
+
+    try compressSlide(
+        uncompressed_values[0..],
+        &compressed_values,
+        allocator,
+        error_bound,
+    );
+    try decompress(compressed_values.items, &decompressed_values);
+
+    try testing.expect(tersets.isWithinErrorBound(
+        uncompressed_values,
+        decompressed_values.items,
+        error_bound,
+    ));
 }
