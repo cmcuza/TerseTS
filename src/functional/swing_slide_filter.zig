@@ -558,8 +558,8 @@ fn updateSlideLinearFunction(
     }
 }
 
-/// Computes the interception point between `linear_function_1` and `linear_function_2` and
-/// returns it in `point`. If the lines are parallel, the interception is `undefined`.
+/// Computes the interception point between `linear_function_one` and `linear_function_two` and
+/// returns it in `point`. If the lines are parallel, the interception with the y-axis is returned.
 fn computeInterceptionPoint(
     linear_function_one: LinearFunction,
     linear_function_two: LinearFunction,
