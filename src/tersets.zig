@@ -35,13 +35,21 @@ pub const Method = enum {
     PoorMansCompressionMidrange,
     PoorMansCompressionMean,
     SwingFilter,
+    SlideFilter,
 };
 
-/// `Segment` with discrete `time` axis. `time_type` is type `usize`.
-pub const DiscreteSegment = Segment(usize);
-
-/// `Point` with discrete `time` axis. `time_type` is type `usize`.
+/// `Point` with discrete `time` axis.
 pub const DiscretePoint = Point(usize);
+
+/// `Point` with continous `time` axis.
+pub const ContinousPoint = Point(f64);
+
+/// `Segment` models a straight line segment from `start_point` to `end_point`. All segments
+/// have discrete points.
+pub const Segment = struct {
+    start_point: DiscretePoint,
+    end_point: DiscretePoint,
+};
 
 /// Margin to adjust the error bound for numerical stability. Reducing the error bound by this
 /// margin ensures that all the elements of the decompressed time series are within the error bound
@@ -85,6 +93,14 @@ pub fn compress(
                 error_bound,
             );
         },
+        .SlideFilter => {
+            try swing_slide_filter.compressSlide(
+                uncompressed_values,
+                &compressed_values,
+                allocator,
+                error_bound,
+            );
+        },
     }
     try compressed_values.append(@intFromEnum(method));
     return compressed_values;
@@ -111,8 +127,8 @@ pub fn decompress(
         .PoorMansCompressionMidrange, .PoorMansCompressionMean => {
             try poor_mans_compression.decompress(compressed_values_slice, &decompressed_values);
         },
-        .SwingFilter => {
-            try swing_slide_filter.decompressSwing(compressed_values_slice, &decompressed_values);
+        .SwingFilter, .SlideFilter => {
+            try swing_slide_filter.decompress(compressed_values_slice, &decompressed_values);
         },
     }
 
@@ -154,13 +170,4 @@ pub fn getMaxMethodIndex() usize {
 /// `Point` is a point represented by `time` and `value`. `time` is of datatype `time_type`.
 fn Point(comptime time_type: type) type {
     return struct { time: time_type, value: f64 };
-}
-
-/// `Segment` models a straight line segment from `start_point` to `end_point`. `time` is of
-///  datatype `time_type`.
-fn Segment(comptime time_type: type) type {
-    return struct {
-        start_point: Point(time_type),
-        end_point: Point(time_type),
-    };
 }

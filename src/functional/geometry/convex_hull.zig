@@ -58,6 +58,32 @@ pub const ConvexHull = struct {
         try addPointToHull(&self.lower_hull, Turn.left, point);
     }
 
+    /// Invalidates all element pointers in the upper and lower hull. The capacity is preserved.
+    pub fn clean(self: *ConvexHull) void {
+        self.upper_hull.clearRetainingCapacity();
+        self.lower_hull.clearRetainingCapacity();
+    }
+
+    /// Returns the points in the `upper_hull` except the last one.
+    pub fn getUpperHullExceptLast(self: *ConvexHull) []const DiscretePoint {
+        const len = self.upper_hull.items.len;
+        if (len <= 1) {
+            // Return an empty array if there's only one or no items.
+            return &[_]DiscretePoint{};
+        }
+        return self.upper_hull.items[0 .. len - 1];
+    }
+
+    /// Returns the points in the `lower_hull` except the last one.
+    pub fn getLowerHullExceptLast(self: *ConvexHull) []const DiscretePoint {
+        const len = self.lower_hull.items.len;
+        if (len <= 1) {
+            // Return an empty array if there's only one or no items.
+            return &[_]DiscretePoint{};
+        }
+        return self.lower_hull.items[0 .. len - 1];
+    }
+
     /// Auxiliary function to add a new `point` to a given `hull` of the convex hull. The function uses
     /// the given `turn` to correctly add the new point.
     fn addPointToHull(hull: *ArrayList(DiscretePoint), turn: Turn, point: DiscretePoint) !void {

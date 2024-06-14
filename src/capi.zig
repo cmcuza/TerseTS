@@ -112,6 +112,7 @@ test "method enum must match method constants" {
     try testing.expectEqual(@intFromEnum(tersets.Method.PoorMansCompressionMidrange), 0);
     try testing.expectEqual(@intFromEnum(tersets.Method.PoorMansCompressionMean), 1);
     try testing.expectEqual(@intFromEnum(tersets.Method.SwingFilter), 2);
+    try testing.expectEqual(@intFromEnum(tersets.Method.SlideFilter), 3);
 }
 
 test "error for unknown compression method" {
