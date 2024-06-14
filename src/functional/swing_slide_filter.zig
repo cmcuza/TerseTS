@@ -17,19 +17,20 @@
 //! Online piece-wise linear approximation of numerical streams with precision guarantees.
 //! Proc. VLDB Endow. 2, 1, 2009.
 //! https://doi.org/10.14778/1687627.1687645".
-//! The implementation of Slide Filter has been slightly modified the proposed method in two main
-//!  aspects. 1) The slope of the linear approximation does not minimize the squared error of the
-//! points in the segment. 2) Any two consecutive linear approximations are disjointed—these two
-//! changes are necessary due to the paper's imprecision in Lemma 4.4.
-//! 1) To compute the slope with minimum squared error the starting point needs to be known from
-//! the beginning. However, in Slide Filter the starting point depends on the continuously updated
-//! upper and lower bounds as well as alpha and beta as explained in Lines 19, and 20 of Alg 2. The
-//! simple and efficient solution implemented here is to compute the slope as the mean of the upper
-//! and lower bounds' slopes. This solution satisfies Eq. (5) and ensures that the linear
-//! approximation meets the error bound. 2) To join two consecutive linear approximations, we need
-//! to find alpha and beta as described in Lemma 4.4. However, in Figure 5 the Lemma is
-//! contradicted making reproducibility challenging. Finally, although alpha and beta probably
-//! exist and would improve the method's performance, a mathematical proof is needed.
+//! The implementation of the Slide Filter differs from the proposed method in two key aspects.
+//! First, the slope of the linear approximation does not minimize the squared error due to the
+//! unknown initial point until the end of the segment being approximated. Additionally, there
+//! is a contradiction in Lemma (4.4) where f^{k}{i} (f^{k'}{i}) should be less than t_{j_{k-1}},
+//! but Fig. 5(b) shows f^{k}{i} > t{j_{k-1}}. Given these errors, the following changes have been
+//! made to the implementation:
+//! 1) The slope for the linear approximation averages the slopes of the upper and lower bounds.
+//! This method aligns with Eq. (5) and adheres the linear approximation to the given error bound.
+//! 2) All consecutive linear approximations remain disjoint. For each approximation g_k(x), we
+//! record the initial and final segment times on g_k, separately. Normally, consecutive linear
+//! approximations could share the final and initial segment time of g_{k-1} and g_k, respectively,
+//! if meeting three conditions given in Lemma (4.4). However, due to the inconsistencies and
+//! unclear proof of Lemma (4.4), it is uncertain if Lemma (4.4) can ensure that the derived bounds
+//! will consistently yield a linear approximation within the error bound.
 
 const std = @import("std");
 const math = std.math;
@@ -40,8 +41,8 @@ const ArrayList = std.ArrayList;
 const tersets = @import("../tersets.zig");
 const Error = tersets.Error;
 const DiscretePoint = tersets.DiscretePoint;
-const DiscreteSegment = tersets.DiscreteSegment;
 const ContinousPoint = tersets.ContinousPoint;
+const Segment = tersets.Segment;
 
 const ConvexHull = @import("geometry/convex_hull.zig").ConvexHull;
 
@@ -57,20 +58,24 @@ pub fn compressSwing(
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
     error_bound: f32,
-) Error!void {
-    // Adjust the error bound to avoid exceeding it during decompression.
+) !void {
+    // Adjust the error bound to avoid exceeding it during decompression due to numerical
+    // inestabilities. This can happen if the linear approximation is equal to one of the
+    // upper or lower bounds.
     const adjusted_error_bound = if (error_bound > 0)
         error_bound - tersets.ErrorBoundMargin
     else
         error_bound;
 
+    // Initialize the linear function used across the method. Their values will be defined as part
+    // of the method logic, thus now are undefined.
     var upper_bound: LinearFunction = .{ .slope = undefined, .intercept = undefined };
     var lower_bound: LinearFunction = .{ .slope = undefined, .intercept = undefined };
     var new_upper_bound: LinearFunction = .{ .slope = undefined, .intercept = undefined };
     var new_lower_bound: LinearFunction = .{ .slope = undefined, .intercept = undefined };
 
     // Initialize the current segment with first two points.
-    var current_segment: DiscreteSegment = .{
+    var current_segment: Segment = .{
         .start_point = .{ .time = 0, .value = uncompressed_values[0] },
         .end_point = .{ .time = 1, .value = uncompressed_values[1] },
     };
@@ -81,10 +86,10 @@ pub fn compressSwing(
     updateSwingLinearFunction(current_segment, &upper_bound, adjusted_error_bound);
     updateSwingLinearFunction(current_segment, &lower_bound, -adjusted_error_bound);
 
-    // First two points already part of `current_segment`, next point is at index two.
+    // The first two points are already part of `current_segment`, the next point is at index two.
     var current_timestamp: usize = 2;
     while (current_timestamp < uncompressed_values.len) : (current_timestamp += 1) {
-        // Evaluate the upper and lower bound linear functions at current timestamp.
+        // Evaluate the upper and lower bound linear functions at the current timestamp.
         const upper_limit = evaluateLinearFunctionAtTime(upper_bound, usize, current_timestamp);
         const lower_limit = evaluateLinearFunctionAtTime(lower_bound, usize, current_timestamp);
 
@@ -118,6 +123,9 @@ pub fn compressSwing(
 
                 try appendValue(f64, end_value, compressed_values);
             } else {
+                // Storing uncompressed values instead of those from the linear approximation is crucial
+                // for numerical stability, particularly when the error bound is zero. In such cases,
+                // decompression must be lossless, and even minimal approximation errors are unacceptable.
                 try appendValue(f64, current_segment.end_point.value, compressed_values);
             }
 
@@ -127,8 +135,7 @@ pub fn compressSwing(
             current_segment.start_point.time = current_timestamp;
             current_segment.start_point.value = uncompressed_values[current_timestamp];
 
-            // Catch edge case (only one point left). If `current_timestamp+1 >= uncompressed_values.len` then
-            // `uncompressed_values[current_timestamp + 1]` will return index out of bound error.
+            // Edge case as only one point is left.
             if (current_timestamp + 1 < uncompressed_values.len) {
                 current_segment.end_point.time = current_timestamp + 1;
                 current_segment.end_point.value = uncompressed_values[current_timestamp + 1];
@@ -139,7 +146,7 @@ pub fn compressSwing(
                 current_timestamp += 1;
                 slope_derivate = computeSlopeDerivate(current_segment);
             } else {
-                // Create linear function with slope zero and intercept equal to the current value.
+                // Only one point left. The `end_point` is at the `current_timestamp`.
                 current_segment.end_point.time = current_timestamp;
                 current_segment.end_point.value = uncompressed_values[current_timestamp];
             }
@@ -216,7 +223,7 @@ pub fn compressSwing(
 }
 
 /// Compress `uncompressed_values` within `error_bound` using "Slide Filter" and write the
-/// result to `compressed_values`. The memory `allocator` is used to initialize the ConvexHull.
+/// result to `compressed_values`. The `allocator` is used to allocate memory for the convex hull.
 /// If an error occurs it is returned.
 pub fn compressSlide(
     uncompressed_values: []const f64,
@@ -225,7 +232,9 @@ pub fn compressSlide(
     error_bound: f32,
 ) !void {
 
-    // Adjust the error bound to avoid exceeding it during decompression.
+    // Adjust the error bound to avoid exceeding it during decompression due to numerical
+    // inestabilities. This can happen if the linear approximation is equal to one of the
+    // upper or lower bounds.
     const adjusted_error_bound = if (error_bound > 0)
         error_bound - tersets.ErrorBoundMargin
     else
@@ -234,16 +243,22 @@ pub fn compressSlide(
     var convex_hull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
 
+    // Initialize the interception point between the upper and lower bounds. The point will be
+    // defined as part of the method's logic, thus now it is undefined.
     var intercept_point: ContinousPoint = .{ .time = undefined, .value = undefined };
 
+    // Initialize the linear function used across the method. Their values will be defined as part
+    // of the method's logic, thus now are undefined.
     var upper_bound: LinearFunction = .{ .slope = undefined, .intercept = undefined };
     var lower_bound: LinearFunction = .{ .slope = undefined, .intercept = undefined };
-    var current_segment: DiscreteSegment = .{
+    var new_upper_bound: LinearFunction = .{ .slope = undefined, .intercept = undefined };
+    var new_lower_bound: LinearFunction = .{ .slope = undefined, .intercept = undefined };
+
+    // Initialize the current segment with first two points.
+    var current_segment: Segment = .{
         .start_point = .{ .time = 0, .value = uncompressed_values[0] },
         .end_point = .{ .time = 1, .value = uncompressed_values[1] },
     };
-    var new_upper_bound: LinearFunction = .{ .slope = undefined, .intercept = undefined };
-    var new_lower_bound: LinearFunction = .{ .slope = undefined, .intercept = undefined };
 
     try convex_hull.addPoint(current_segment.start_point);
     try convex_hull.addPoint(current_segment.end_point);
@@ -259,9 +274,10 @@ pub fn compressSlide(
         -adjusted_error_bound,
     );
 
+    // The first two points are already part of `current_segment`, the next point is at index two.
     var current_timestamp: usize = 2;
     while (current_timestamp < uncompressed_values.len) : (current_timestamp += 1) {
-        // Evaluate the upper and lower bound linear functions at current timestamp.
+        // Evaluate the upper and lower bound linear functions at the current timestamp.
         const upper_limit = evaluateLinearFunctionAtTime(
             upper_bound,
             usize,
@@ -276,7 +292,7 @@ pub fn compressSlide(
         if ((upper_limit < (uncompressed_values[current_timestamp] - adjusted_error_bound)) or
             (lower_limit > (uncompressed_values[current_timestamp] + adjusted_error_bound)))
         {
-            // Recording mechanism. (the current points is outside the limits). The linear approximation
+            // Recording mechanism. The current points is outside the limits. The linear approximation
             // crosses the interception point of the upper and lower bounds.
             computeInterceptionPoint(lower_bound, upper_bound, &intercept_point);
 
@@ -308,7 +324,9 @@ pub fn compressSlide(
 
                 try appendValue(f64, end_value, compressed_values);
             } else {
-                // Necessary for numerical stability.
+                // Storing uncompressed values instead of those from the linear approximation is crucial
+                // for numerical stability, particularly when the error bound is zero. In such cases,
+                // decompression must be lossless, and even minimal approximation errors are unacceptable.
                 try appendValue(f64, current_segment.start_point.value, compressed_values);
                 try appendValue(f64, current_segment.end_point.value, compressed_values);
             }
@@ -318,8 +336,7 @@ pub fn compressSlide(
             current_segment.start_point.time = current_timestamp;
             current_segment.start_point.value = uncompressed_values[current_timestamp];
 
-            // Catch edge case (only one point left). If `current_timestamp+1 >= uncompressed_values.len` then
-            // `uncompressed_values[current_timestamp + 1]` will return index out of bound error.
+            // Edge case as only one point is left.
             if (current_timestamp + 1 < uncompressed_values.len) {
                 // Update the current segment.
                 current_segment.end_point = .{
@@ -336,19 +353,19 @@ pub fn compressSlide(
 
                 current_timestamp += 1;
             } else {
-                // Create linear function with slope zero and intercept equal to the current value.
+                // Only one point left. The `end_point` is at the `current_timestamp`.
                 current_segment.end_point.time = current_timestamp;
                 current_segment.end_point.value = uncompressed_values[current_timestamp];
             }
         } else {
-            //Filtering mechanism (the current point is still inside the limits).
+            // Filtering mechanism. The current point is still inside the limits.
             current_segment.end_point.time = current_timestamp;
             current_segment.end_point.value = uncompressed_values[current_timestamp];
 
             try convex_hull.addPoint(current_segment.end_point);
 
-            // The new upper bound would be found only on the upper hull. Lemma (4.3).
-            for (convex_hull.upper_hull.items[0 .. convex_hull.upper_hull.items.len - 1]) |hull_point| {
+            // The new upper bound can be found on the upper hull. Lemma (4.3).
+            for (convex_hull.getUpperHullExceptLast()) |hull_point| {
                 updateSlideLinearFunction(
                     .{ .start_point = hull_point, .end_point = current_segment.end_point },
                     &new_upper_bound,
@@ -361,8 +378,8 @@ pub fn compressSlide(
                 }
             }
 
-            // The new lower bound would be found only on the lower hull. Lemma (4.3).
-            for (convex_hull.lower_hull.items[0 .. convex_hull.lower_hull.items.len - 1]) |hull_point| {
+            // The new lower bound can be found on the lower hull. Lemma (4.3).
+            for (convex_hull.getLowerHullExceptLast()) |hull_point| {
                 updateSlideLinearFunction(
                     .{ .start_point = hull_point, .end_point = current_segment.end_point },
                     &new_lower_bound,
@@ -429,7 +446,7 @@ pub fn decompress(
     var first_timestamp: usize = 0;
     var index: usize = 0;
     while (index < compressed_lines_and_index.len) : (index += 3) {
-        const current_segment: DiscreteSegment = .{
+        const current_segment: Segment = .{
             .start_point = .{ .time = first_timestamp, .value = compressed_lines_and_index[index] },
             .end_point = .{
                 .time = @as(usize, @bitCast(compressed_lines_and_index[index + 2])) - 1,
@@ -459,7 +476,7 @@ pub fn decompress(
 }
 
 /// Computes the numerator of the slope derivate as in Eq. (6).
-fn computeSlopeDerivate(segment: DiscreteSegment) f80 {
+fn computeSlopeDerivate(segment: Segment) f80 {
     return (segment.end_point.value - segment.start_point.value) *
         usizeToF80(segment.end_point.time - segment.start_point.time);
 }
@@ -468,7 +485,7 @@ fn computeSlopeDerivate(segment: DiscreteSegment) f80 {
 /// points of the `segment`. The linear function is swinged down or up based on the `error_bound`.
 /// If `error_bound` is negative, `linear_function` is swing down. It is swing up otherwise.
 fn updateSwingLinearFunction(
-    segment: DiscreteSegment,
+    segment: Segment,
     linear_function: *LinearFunction,
     error_bound: f32,
 ) void {
@@ -525,7 +542,7 @@ fn computeInterceptCoefficient(slope: f80, comptime point_type: type, point: poi
 /// (`segment.start_point.time`, `segment.start_point.value - error_bound`) and
 /// (`segment.end_point.time`, `segment.end_point.value + error_bound`).
 fn updateSlideLinearFunction(
-    segment: DiscreteSegment,
+    segment: Segment,
     linear_function: *LinearFunction,
     error_bound: f32,
 ) void {
@@ -544,18 +561,19 @@ fn updateSlideLinearFunction(
 /// Computes the interception point between `linear_function_1` and `linear_function_2` and
 /// returns it in `point`. If the lines are parallel, the interception is `undefined`.
 fn computeInterceptionPoint(
-    linear_function_1: LinearFunction,
-    linear_function_2: LinearFunction,
+    linear_function_one: LinearFunction,
+    linear_function_two: LinearFunction,
     point: *ContinousPoint,
 ) void {
-    if (linear_function_1.slope != linear_function_2.slope) {
-        point.time = @floatCast((linear_function_2.intercept - linear_function_1.intercept) /
-            (linear_function_1.slope - linear_function_2.slope));
-        point.value = @floatCast(linear_function_1.slope * point.time + linear_function_1.intercept);
+    if (linear_function_one.slope != linear_function_two.slope) {
+        point.time = @floatCast((linear_function_two.intercept - linear_function_one.intercept) /
+            (linear_function_one.slope - linear_function_two.slope));
+        point.value = @floatCast(linear_function_one.slope * point.time + linear_function_one.intercept);
     } else {
-        // There is no interception, the linear functions are parallel.
-        point.time = undefined;
-        point.value = undefined;
+        // There is no interception, the linear functions are parallel. Any point is part of the
+        // interception. Return the interception with the y-axis as the interception.
+        point.time = 0;
+        point.value = @floatCast(linear_function_one.intercept);
     }
 }
 
