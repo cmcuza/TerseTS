@@ -39,15 +39,15 @@ const SegmentMetadata = struct {
     lower_bound_slope: f64,
 };
 
-const Hash64Context = struct {
-    const epsilon: f64 = 1e-10;
+const HashF64Context = struct {
+    // const epsilon: f64 = 1e-12;
 
-    pub fn hash(_: Hash64Context, value: f64) u64 {
+    pub fn hash(_: HashF64Context, value: f64) u64 {
         return @as(u64, @bitCast(value));
     }
 
-    pub fn eql(_: Hash64Context, value_one: f64, value_two: f64) bool {
-        return @abs(value_one - value_two) < epsilon;
+    pub fn eql(_: HashF64Context, value_one: f64, value_two: f64) bool {
+        return value_one == value_two;
     }
 };
 
@@ -68,7 +68,7 @@ pub fn compressSimPiece(
     var segments_metadata_map = HashMap(
         f64,
         ArrayList(SegmentMetadata),
-        Hash64Context,
+        HashF64Context,
         std.hash_map.default_max_load_percentage,
     ).init(allocator);
     defer segments_metadata_map.deinit();
@@ -81,20 +81,20 @@ pub fn compressSimPiece(
         adjusted_error_bound,
     );
 
-    var merged_segments_metadata = ArrayList(SegmentMetadata).init(allocator);
-    merged_segments_metadata.deinit();
+    // var merged_segments_metadata = ArrayList(SegmentMetadata).init(allocator);
+    // merged_segments_metadata.deinit();
 
     // Sim-Piece Phase 2: Merge the segments.
-    try computeMergedSegmentsMetadata(
-        segments_metadata_map,
-        &merged_segments_metadata,
-        allocator,
-    );
+    // try computeMergedSegmentsMetadata(
+    //     segments_metadata_map,
+    //     &merged_segments_metadata,
+    //     allocator,
+    // );
 
     var reshaped_segments_metadata = AutoHashMap(usize, HashMap(
         f64,
         ArrayList(usize),
-        Hash64Context,
+        HashF64Context,
         std.hash_map.default_max_load_percentage,
     )).init(allocator);
     reshaped_segments_metadata.deinit();
@@ -104,6 +104,12 @@ pub fn compressSimPiece(
     //     merged_segments_metadata,
     //     &reshaped_segments_metadata,
     // );
+
+    var iterator = segments_metadata_map.iterator();
+    while (iterator.next()) |entry| {
+        entry.value_ptr.deinit();
+    }
+
     try compressed_values.append(0);
 }
 
@@ -114,7 +120,7 @@ fn computeSegmentsMetadataMap(
     segments_metadata_map: *HashMap(
         f64,
         ArrayList(SegmentMetadata),
-        Hash64Context,
+        HashF64Context,
         std.hash_map.default_max_load_percentage,
     ),
     allocator: mem.Allocator,
@@ -193,7 +199,7 @@ fn computeMergedSegmentsMetadata(
     segments_metadata_map: HashMap(
         f64,
         ArrayList(SegmentMetadata),
-        Hash64Context,
+        HashF64Context,
         std.hash_map.default_max_load_percentage,
     ),
     merged_segments_metadata: *ArrayList(SegmentMetadata),
@@ -257,7 +263,7 @@ fn addSegmentMetadata(
     metadata_map: *HashMap(
         f64,
         ArrayList(SegmentMetadata),
-        Hash64Context,
+        HashF64Context,
         std.hash_map.default_max_load_percentage,
     ),
     metadata: SegmentMetadata,
@@ -296,3 +302,132 @@ pub fn decompress(
         decompressed_values.items[index] = item;
     }
 }
+
+test "f64 context can hash" {
+    const allocator = testing.allocator;
+    var f64_hash_map = HashMap(
+        f64,
+        f64,
+        HashF64Context,
+        std.hash_map.default_max_load_percentage,
+    ).init(allocator);
+    defer f64_hash_map.deinit();
+    var rnd = std.rand.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
+
+    // Even a small deviation like this should not impact the ability to hash the numbers.
+    const deviation_margin = 1e-16;
+    for (0..100) |_| {
+        const rand_number = rnd.random().float(f64) - 0.5;
+        try f64_hash_map.put(rand_number, rand_number);
+        try f64_hash_map.put(rand_number - deviation_margin, rand_number - deviation_margin);
+        try f64_hash_map.put(rand_number + deviation_margin, rand_number + deviation_margin);
+    }
+
+    // All elements are expected to be hashed independently, without collisions.
+    try testing.expectEqual(300, f64_hash_map.count());
+
+    var iterator = f64_hash_map.iterator();
+    while (iterator.next()) |entry| {
+        const key = entry.key_ptr.*;
+        const value = entry.value_ptr.*;
+        try testing.expectEqual(key, value);
+    }
+}
+
+test "hashmap can map f64 to segment metadata array list" {
+    const allocator = testing.allocator;
+    var f64_metadata_hash_map = HashMap(
+        f64,
+        ArrayList(SegmentMetadata),
+        HashF64Context,
+        std.hash_map.default_max_load_percentage,
+    ).init(allocator);
+    defer {
+        var iterator = f64_metadata_hash_map.iterator();
+        while (iterator.next()) |entry| {
+            entry.value_ptr.*.deinit();
+        }
+        f64_metadata_hash_map.deinit();
+    }
+
+    var f64_usize_hash_map = HashMap(
+        f64,
+        usize,
+        HashF64Context,
+        std.hash_map.default_max_load_percentage,
+    ).init(allocator);
+    defer f64_usize_hash_map.deinit();
+
+    var rnd = std.rand.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
+
+    for (0..200) |_| {
+        const rand_number = @floor((rnd.random().float(f64) - 0.5) * 100) / 10;
+
+        const count_map_result = try f64_usize_hash_map.getOrPut(rand_number);
+        if (!count_map_result.found_existing) {
+            count_map_result.value_ptr.* = 0;
+        }
+        count_map_result.value_ptr.* += 1;
+
+        const metadata_map_result = try f64_metadata_hash_map.getOrPut(rand_number);
+        if (!metadata_map_result.found_existing) {
+            metadata_map_result.value_ptr.* = ArrayList(SegmentMetadata).init(allocator);
+        }
+        try metadata_map_result.value_ptr.*.append(SegmentMetadata{
+            .start_time = count_map_result.value_ptr.*,
+            .lower_bound_slope = rand_number,
+            .upper_bound_slope = rand_number,
+        });
+    }
+
+    var iterator_map = f64_metadata_hash_map.iterator();
+    while (iterator_map.next()) |entry| {
+        const expected_array_size: usize = f64_usize_hash_map.get(entry.key_ptr.*).?;
+        try testing.expectEqual(expected_array_size, entry.value_ptr.*.items.len);
+
+        for (entry.value_ptr.*.items, 1..) |item, i| {
+            try testing.expectEqual(i, item.start_time);
+            try testing.expectEqual(entry.key_ptr.*, item.lower_bound_slope);
+        }
+    }
+}
+
+// test "sim-piece can compress and decompress" {
+//     const allocator = testing.allocator;
+
+//     var list_values = ArrayList(f64).init(allocator);
+//     defer list_values.deinit();
+//     var compressed_values = ArrayList(u8).init(allocator);
+//     defer compressed_values.deinit();
+//     // const error_bound: f32 = 2.0;
+//     var segments_metadata_map = HashMap(
+//         f64,
+//         f64,
+//         Hash64Context,
+//         std.hash_map.default_max_load_percentage,
+//     ).init(allocator);
+//     defer segments_metadata_map.deinit();
+
+//     var rnd = std.rand.DefaultPrng.init(0);
+//     std.debug.print("\n", .{});
+//     for (0..20) |_| {
+//         try list_values.append(@floor(rnd.random().float(f64) * 1000) / 100);
+//         try segments_metadata_map.put(list_values.getLast(), list_values.getLast());
+//         std.debug.print("{} ", .{list_values.getLast()});
+//     }
+//     std.debug.print("\n", .{});
+
+//     const res = segments_metadata_map.get(list_values.items[3]);
+
+//     std.debug.print("Element test {}\n", .{res.?});
+//     std.debug.print("\n", .{});
+
+//     // const uncompressed_values = list_values.items;
+
+// try compressSimPiece(
+//     uncompressed_values[0..],
+//     &compressed_values,
+//     allocator,
+//     error_bound,
+// );
+// }
