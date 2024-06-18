@@ -59,57 +59,47 @@ pub fn compressSimPiece(
     allocator: mem.Allocator,
     error_bound: f32,
 ) Error!void {
-    // Adjust the error bound to avoid exceeding it during decompression.
-    const adjusted_error_bound = if (error_bound > 0)
-        error_bound - tersets.ErrorBoundMargin
-    else
-        error_bound;
-
     var segments_metadata_map = HashMap(
         f64,
         ArrayList(SegmentMetadata),
         HashF64Context,
         std.hash_map.default_max_load_percentage,
     ).init(allocator);
-    defer segments_metadata_map.deinit();
+    defer {
+        var iterator = segments_metadata_map.iterator();
+        while (iterator.next()) |entry| {
+            entry.value_ptr.*.deinit();
+        }
+        segments_metadata_map.deinit();
+    }
 
     // Sim-Piece Phase 1: Compute the Segment Metadata Map.
     try computeSegmentsMetadataMap(
         uncompressed_values,
         &segments_metadata_map,
         allocator,
-        adjusted_error_bound,
+        error_bound,
     );
 
-    // var merged_segments_metadata = ArrayList(SegmentMetadata).init(allocator);
-    // merged_segments_metadata.deinit();
+    var merged_segments_metadata = ArrayList(SegmentMetadata).init(allocator);
+    defer merged_segments_metadata.deinit();
 
     // Sim-Piece Phase 2: Merge the segments.
-    // try computeMergedSegmentsMetadata(
-    //     segments_metadata_map,
-    //     &merged_segments_metadata,
-    //     allocator,
-    // );
+    try computeMergedSegmentsMetadata(segments_metadata_map, &merged_segments_metadata, allocator);
 
-    var reshaped_segments_metadata = AutoHashMap(usize, HashMap(
-        f64,
-        ArrayList(usize),
-        HashF64Context,
-        std.hash_map.default_max_load_percentage,
-    )).init(allocator);
-    reshaped_segments_metadata.deinit();
+    // var reshaped_segments_metadata = AutoHashMap(usize, HashMap(
+    //     f64,
+    //     ArrayList(usize),
+    //     HashF64Context,
+    //     std.hash_map.default_max_load_percentage,
+    // )).init(allocator);
+    // reshaped_segments_metadata.deinit();
 
     // Sim-Piece Phase 3: Reshape segment metadata to output.
     // reshapeSegmentsMetadata(
     //     merged_segments_metadata,
     //     &reshaped_segments_metadata,
     // );
-
-    var iterator = segments_metadata_map.iterator();
-    while (iterator.next()) |entry| {
-        entry.value_ptr.deinit();
-    }
-
     try compressed_values.append(0);
 }
 
@@ -124,15 +114,21 @@ fn computeSegmentsMetadataMap(
         std.hash_map.default_max_load_percentage,
     ),
     allocator: mem.Allocator,
-    adjusted_error_bound: f32,
+    error_bound: f32,
 ) !void {
+    // Adjust the error bound to avoid exceeding it during decompression.
+    const adjusted_error_bound = if (error_bound > 0)
+        error_bound - tersets.ErrorBoundMargin
+    else
+        error_bound;
+
     var upper_bound_slope: f64 = math.floatMax(f64);
-    var lower_bound_slope: f64 = math.floatMin(f64);
+    var lower_bound_slope: f64 = -math.floatMax(f64);
 
     // Initialize the `start_point` with the first uncompressed value.
     var start_point: DiscretePoint = .{ .time = 0, .value = uncompressed_values[0] };
 
-    var quantized_start_value = quantize(uncompressed_values[0], adjusted_error_bound);
+    var quantized_start_value = quantize(uncompressed_values[0], error_bound);
 
     // First point already part of `current_segment`, next point is at index one.
     var current_timestamp: usize = 1;
@@ -142,22 +138,18 @@ fn computeSegmentsMetadataMap(
             .value = uncompressed_values[current_timestamp],
         };
 
-        const segment_size: usize = current_timestamp - start_point.time;
-        const upper_limit: f64 = upper_bound_slope * @as(
-            f64,
-            @floatFromInt(segment_size),
-        ) + quantized_start_value;
-
-        const lower_limit: f64 = lower_bound_slope * @as(
-            f64,
-            @floatFromInt(segment_size),
-        ) + quantized_start_value;
+        const segment_size: f64 = @floatFromInt(current_timestamp - start_point.time);
+        const upper_limit: f64 = upper_bound_slope * segment_size + quantized_start_value;
+        const lower_limit: f64 = lower_bound_slope * segment_size + quantized_start_value;
 
         if ((upper_limit < (end_point.value - adjusted_error_bound)) or
             ((lower_limit > (end_point.value + adjusted_error_bound))))
         {
             // The new point is outside the upper and lower limit. Record a new segment metadata in
             // `segments_metadata_map` associated to `quantized_start_value`.
+            std.debug.print("***Recording, start point {} ", .{start_point.time});
+            std.debug.print("upper and lower bounds {:.4} {:.4} ", .{ upper_bound_slope, lower_bound_slope });
+            std.debug.print("intercept {:.4} \n", .{quantized_start_value});
             try addSegmentMetadata(segments_metadata_map, .{
                 .start_time = start_point.time,
                 .upper_bound_slope = upper_bound_slope,
@@ -165,27 +157,33 @@ fn computeSegmentsMetadataMap(
             }, quantized_start_value, allocator);
 
             start_point = end_point;
-            quantized_start_value = quantize(start_point.value, adjusted_error_bound);
+            quantized_start_value = quantize(start_point.value, error_bound);
             upper_bound_slope = math.floatMax(f64);
-            lower_bound_slope = math.floatMin(f64);
+            lower_bound_slope = -math.floatMax(f64);
         } else {
             // The new point is within the upper and lower bounds. Update the bounds' slopes.
+
             const new_upper_bound_slope: f64 =
-                (end_point.value + adjusted_error_bound - quantized_start_value) /
-                @as(f64, @floatFromInt(segment_size));
+                (end_point.value + adjusted_error_bound - quantized_start_value) / segment_size;
             const new_lower_bound_slope: f64 =
-                (end_point.value - adjusted_error_bound - quantized_start_value) /
-                @as(f64, @floatFromInt(segment_size));
+                (end_point.value - adjusted_error_bound - quantized_start_value) / segment_size;
 
             if (end_point.value + adjusted_error_bound < upper_limit)
-                upper_bound_slope = @max(new_upper_bound_slope, lower_limit);
+                upper_bound_slope = @max(new_upper_bound_slope, lower_bound_slope);
             if (end_point.value - adjusted_error_bound > lower_limit)
-                lower_bound_slope = @min(new_lower_bound_slope, upper_limit);
+                lower_bound_slope = @min(new_lower_bound_slope, upper_bound_slope);
         }
     }
 
-    const segment_size: usize = current_timestamp - start_point.time;
-    if (segment_size != 0) {
+    const segment_size = current_timestamp - start_point.time;
+    if (segment_size >= 1) {
+        if (segment_size == 1) {
+            upper_bound_slope = 0;
+            lower_bound_slope = 0;
+        }
+        std.debug.print("***Recording, start point {} ", .{start_point.time});
+        std.debug.print("upper and lower bounds {:.4} {:.4} ", .{ upper_bound_slope, lower_bound_slope });
+        std.debug.print("intercept {:.4} \n", .{quantized_start_value});
         try addSegmentMetadata(segments_metadata_map, .{
             .start_time = start_point.time,
             .upper_bound_slope = upper_bound_slope,
@@ -208,8 +206,12 @@ fn computeMergedSegmentsMetadata(
     var timestamps_array = ArrayList(usize).init(allocator);
     defer timestamps_array.deinit();
 
+    std.debug.print("\n", .{});
+    std.debug.print("Count of segments {}\n", .{segments_metadata_map.count()});
     var iterator = segments_metadata_map.iterator();
+
     while (iterator.next()) |entry| {
+        std.debug.print("B={} \n", .{entry.key_ptr.*});
         const metadata_array = entry.value_ptr;
         mem.sort(
             SegmentMetadata,
@@ -239,7 +241,7 @@ fn computeMergedSegmentsMetadata(
             } else {
                 // A new merged segment metadata needs to be created.
                 for (timestamps_array.items) |timestamp| {
-                    try merged_segments_metadata.append(.{
+                    try merged_segments_metadata.append(SegmentMetadata{
                         .start_time = timestamp,
                         .lower_bound_slope = merge_metadata.lower_bound_slope,
                         .upper_bound_slope = merge_metadata.upper_bound_slope,
@@ -248,6 +250,7 @@ fn computeMergedSegmentsMetadata(
             }
         }
     }
+    std.debug.print("Count of segments {}\n", .{segments_metadata_map.count()});
 }
 
 /// Sim-Piece Phase 3. Reshape the input segment metadata array.
@@ -270,12 +273,11 @@ fn addSegmentMetadata(
     quantize_value: f64,
     allocator: mem.Allocator,
 ) !void {
-    const result = try metadata_map.getOrPut(quantize_value);
-    if (!result.found_existing) {
-        result.value_ptr.* = ArrayList(SegmentMetadata).init(allocator);
+    const get_result = try metadata_map.getOrPut(quantize_value);
+    if (!get_result.found_existing) {
+        get_result.value_ptr.* = ArrayList(SegmentMetadata).init(allocator);
     }
-    var metadata_array = result.value_ptr.*;
-    try metadata_array.append(metadata);
+    try get_result.value_ptr.*.append(metadata);
 }
 
 fn compareMetadata(comptime T: type) fn (void, T, T) bool {
@@ -392,42 +394,29 @@ test "hashmap can map f64 to segment metadata array list" {
     }
 }
 
-// test "sim-piece can compress and decompress" {
-//     const allocator = testing.allocator;
+test "sim-piece can compress and decompress" {
+    const allocator = testing.allocator;
 
-//     var list_values = ArrayList(f64).init(allocator);
-//     defer list_values.deinit();
-//     var compressed_values = ArrayList(u8).init(allocator);
-//     defer compressed_values.deinit();
-//     // const error_bound: f32 = 2.0;
-//     var segments_metadata_map = HashMap(
-//         f64,
-//         f64,
-//         Hash64Context,
-//         std.hash_map.default_max_load_percentage,
-//     ).init(allocator);
-//     defer segments_metadata_map.deinit();
+    var list_values = ArrayList(f64).init(allocator);
+    defer list_values.deinit();
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+    const error_bound: f32 = 2;
 
-//     var rnd = std.rand.DefaultPrng.init(0);
-//     std.debug.print("\n", .{});
-//     for (0..20) |_| {
-//         try list_values.append(@floor(rnd.random().float(f64) * 1000) / 100);
-//         try segments_metadata_map.put(list_values.getLast(), list_values.getLast());
-//         std.debug.print("{} ", .{list_values.getLast()});
-//     }
-//     std.debug.print("\n", .{});
+    var rnd = std.rand.DefaultPrng.init(2);
+    std.debug.print("\n", .{});
+    for (0..10) |_| {
+        try list_values.append(@floor(rnd.random().float(f64) * 100) / 10);
+        std.debug.print("{} ", .{list_values.getLast()});
+    }
+    std.debug.print("\n", .{});
 
-//     const res = segments_metadata_map.get(list_values.items[3]);
+    const uncompressed_values = list_values.items;
 
-//     std.debug.print("Element test {}\n", .{res.?});
-//     std.debug.print("\n", .{});
-
-//     // const uncompressed_values = list_values.items;
-
-// try compressSimPiece(
-//     uncompressed_values[0..],
-//     &compressed_values,
-//     allocator,
-//     error_bound,
-// );
-// }
+    try compressSimPiece(
+        uncompressed_values[0..],
+        &compressed_values,
+        allocator,
+        error_bound,
+    );
+}
