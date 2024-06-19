@@ -141,7 +141,7 @@ pub fn decompress(
             try swing_slide_filter.decompress(compressed_values_slice, &decompressed_values);
         },
         .SimPiece => {
-            try sim_piece.decompress(compressed_values_slice, &decompressed_values);
+            try sim_piece.decompress(compressed_values_slice, &decompressed_values, allocator);
         },
     }
 
