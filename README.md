@@ -17,7 +17,113 @@ TerseTS can be compiled and cross-compiled from source:
    - Microsoft Windows: `zig build -Dtarget=x86_64-windows -Doptimize=ReleaseFast`
 
 # Usage
-TODO
+
+To use TerseTS in a C project, follow these steps:
+
+1. **Installation**:
+   - Ensure TerseTS is installed and compiled as per the installation instructions.
+
+2. **Linking**:
+   - For Windows: Link the `tersets.dll` to your project.
+   - For Linux: Link the `libtersets.so` to your project.
+   - Include the header file `tersets/bindings/c/tersets.h` in your project.
+
+3. **Include the Header**:
+   - Add `#include "tersets.h"` in your source files where you intend to use TerseTS functions. 
+
+4. **Compression and Decompression Interface**:
+   - Use the provided interface to compress and decompress time series data.
+
+### Example
+
+```c
+#include "tersets.h"
+#include <stdio.h>
+
+int main() {
+    // Example uncompressed data
+    double data[] = {1.0, 2.0, 3.0, 4.0, 5.0};
+    struct UncompressedValues uncompressed_values = {data, 5};
+
+    // Configuration for compression
+    struct Configuration config = {2, 0.0}; // Method 2 (e.g., SwingFilter), 0.0 error bound
+
+    // Prepare for compressed data
+    struct CompressedValues compressed_values;
+    
+    // Compress the data
+    int32_t result = compress(uncompressed_values, &compressed_values, config);
+    if (result != 0) {
+        printf("Compression failed with error code %d\n", result);
+        return -1;
+    }
+
+    printf("Compression successful. Compressed data length: %lu\n", compressed_values.len);
+    
+    // Prepare for decompressed data
+    struct UncompressedValues decompressed_values;
+   
+    // Decompress the data
+    int32_t result = decompress(compressed_values, &decompressed_values);
+    if (result != 0) {
+        printf("Decompression failed with error code %d\n", result);
+        return -1;
+    }
+
+    printf("Decompression successful. Uncompressed data length: %lu\n", decompressed_values.len);
+    
+    // Free the uncompressed data if dynamically allocated (not shown here)
+    // free(decompressed_values.data);
+    // free(compressed_values.data);
+    return 0;
+}
+```
+### Notes
+1. Ensure that the method field in `Configuration` is set to a valid compression/decompression method supported by `TerseTS`.
+2. Free dynamically allocated memory appropriately to avoid memory leaks.
+
+## Example Usage in Python
+
+To use TerseTS in a Python project, follow these steps:
+
+1. **Installation**:
+   - Ensure TerseTS is installed and compiled as per the installation instructions.
+   - Ensure the Python bindings in `tersets/bindings/python/tersets` are available in your project.
+
+2. **Linking the Library**:
+   - Modify the `__init__.py` file in the TerseTS Python bindings to link the correct shared library for your operating system. Specifically, change the `library_path` variable to reflect the path to TerseTS's library.
+
+3. **Import the Library**:
+   - Import the necessary functions and classes from the TerseTS Python module.
+
+4. **Compression and Decompression Interface**:
+    - Use the following interface to compress and decompress time series data.
+
+### Example
+```python
+import random
+import sys
+from tersets import compress, decompress, Method
+
+# Number of values to generate for each test.
+TEST_VALUE_COUNT = 1000
+
+# Example Usage
+
+# Generate some random uncompressed data
+uncompressed = [random.uniform() for _ in range(TEST_VALUE_COUNT)]
+
+# Compress the data with zero error using the SwingFilter method
+compressed = compress(uncompressed, 0.0, Method.SwingFilter)
+
+# Decompress the data back to its original form
+decompressed = decompress(compressed)
+
+# Verify that the decompressed data matches the original data
+assert uncompressed == decompressed
+print("Compression and decompression were successful.")
+```
+
 
 # Bindings
 TerseTS provides a C-API that is designed to be simple to wrap. Currently, TerseTS includes bindings for the following programming languages which can be used without installation of any dependencies:
