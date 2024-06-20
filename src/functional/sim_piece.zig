@@ -18,11 +18,11 @@
 //! Proc. VLDB Endow. 16, 8 2023.
 //! https://doi.org/10.14778/3594512.3594521".
 //! The implementation is partially based on the authors implementation at
-//! https://github.com/xkitsios/Sim-Piece (accessed on 20-06-24). Few changes where made to support
-//! an error bound equals to zero and to improve numerical stability. This is because Sim-Piece
+//! https://github.com/xkitsios/Sim-Piece (accessed on 20-06-24). Few changes were made to support
+//! an error bound equal to zero and to improve numerical stability. This is because Sim-Piece
 //! does not support lossless compression. Setting `error_bound` to zero will cause an error due to
 //! undefined quantization (`b=floor(value/error_bound)*error_bound`). This has a ripple effect
-//! across the algorithm that demands the implementation of especial instructions to handle a zero
+//! across the algorithm that demands the implementation of special instructions to handle a zero
 //! error bound. Nevertheless, the numerical instabilities inherent to floating point operations
 //! mean that decompressed values will not exactly match the original uncompressed values. To alert
 //! the user, a warning is shown if the `error_bound` equals zero.
