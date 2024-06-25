@@ -101,9 +101,9 @@ int main() {
 
 TerseTS provides `./bindings/c/tersets.h` as binding for C/C++, thus, the `#include "tersets.h"` in the source code. You need to link the TerseTS library to your project [linking](#linking).
 
--  Ensure that the method field in `Configuration` is set to a valid compression/decompression method supported by `TerseTS`.
+Ensure that the method field in `Configuration` is set to a valid compression/decompression method supported by `TerseTS`.
 
--  Free dynamically allocated memory appropriately to avoid memory leaks.
+Free dynamically allocated memory appropriately to avoid memory leaks.
 </details>
 
 <a id="python-usage-example"></a>
