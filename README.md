@@ -126,7 +126,7 @@ To use TerseTS from Python first ensure the `__init__.py` file in `binding/pytho
 
 </details>
 
-### Linking:
+## Linking:
 
 * **For Windows:** Link the `tersets.dll` to your project. `tersets.dll` can be found in the output folder after compiling TersetTS, by default: `zig-out/lib/tersets.dll`.  
 
