@@ -4,7 +4,7 @@
 
 TerseTS is a library that provides methods for lossless and lossy compressing time series. To match existing literature the methods are organized based on [Time Series Compression Survey](https://dl.acm.org/doi/10.1145/3560814). The library is implemented in Zig and provides a C-API with [bindings](#Installation) for other languages.
 
-# Installation
+# Usage
 TerseTS can be compiled and cross-compiled from source:
 1. Install the latest version of [Zig](https://ziglang.org/)
 2. Build TerseTS for development in `Debug` mode using Zig, e.g.,:
@@ -15,28 +15,46 @@ TerseTS can be compiled and cross-compiled from source:
    - Linux: `zig build -Dtarget=x86_64-linux -Doptimize=ReleaseFast`
    - macOS: `zig build -Dtarget=aarch64-macos -Doptimize=ReleaseFast`
    - Microsoft Windows: `zig build -Dtarget=x86_64-windows -Doptimize=ReleaseFast`
+4. Using TerseTS in Different Languages:
+   - TerseTS provides a C-API that is designed to be simple to wrap. Currently, TerseTS includes bindings for the following programming languages which can be used without installation of any dependencies.
+      - [Zig](src/tersets.zig). Check an example in [Zig Usage Example](#zig-usage-example).
+      - [C](bindings/c/tersets.h). Check an example in [C/C++ Usage Example](#c-usage-example).
+      - [C++](bindings/c/tersets.h). Check an example in [C/C++ Usage Example](#c-usage-example).
+      - [Python](bindings/python/tersets) using [ctypes](https://docs.python.org/3/library/ctypes.html). Check an example in [Python Usage Example](#python-usage-example).
+<details>
+<summary><strong>Zig</strong></summary>
 
-# Usage
+### Zig Usage Example
 
-To use TerseTS in a C project, follow these steps:
 
-1. **Installation**:
-   - Ensure TerseTS is installed and compiled as per the installation instructions.
+```rust
+const std = @import("std");
+const tersets = @import("path/to/tersets.zig");
 
-2. **Linking**:
-   - For Windows: Link the `tersets.dll` to your project.
-   - For Linux: Link the `libtersets.so` to your project.
-   - Include the header file `tersets/bindings/c/tersets.h` in your project.
+pub fn main() void {
+    var data = [_]f64{1.0, 2.0, 3.0, 4.0, 5.0};
+    const config = tersets.Configuration{
+        .method = .SwingFilter,
+        .error_bound = 0.0,
+    };
+    
+    var compressed = try tersets.compress(data[0..], config);
+    defer std.heap.page_allocator.free(compressed);
 
-3. **Include the Header**:
-   - Add `#include "tersets.h"` in your source files where you intend to use TerseTS functions. 
+    var decompressed = try tersets.decompress(compressed, config);
+    defer std.heap.page_allocator.free(decompressed);
 
-4. **Compression and Decompression Interface**:
-   - Use the provided interface to compress and decompress time series data.
+    std.debug.print("Decompression successful: {any}\n", .{decompressed});
+}
+```
+</details>
 
-### Example
+<details>
+<summary><strong>C</strong></summary>
 
-```c
+### C Usage Example
+
+```c 
 #include "tersets.h"
 #include <stdio.h>
 
@@ -79,27 +97,17 @@ int main() {
 }
 ```
 ### Notes
-1. Ensure that the method field in `Configuration` is set to a valid compression/decompression method supported by `TerseTS`.
-2. Free dynamically allocated memory appropriately to avoid memory leaks.
+1. Include the Header and Link the Library.
+2. Add #include "tersets.h" in your source files and link the TerseTS library to your project.
+3. Ensure that the method field in `Configuration` is set to a valid compression/decompression method supported by `TerseTS`.
+4. Free dynamically allocated memory appropriately to avoid memory leaks.
+</details>
 
-## Example Usage in Python
+<details>
+<summary><strong>Python</strong></summary>
 
-To use TerseTS in a Python project, follow these steps:
+### Python Usage Example
 
-1. **Installation**:
-   - Ensure TerseTS is installed and compiled as per the installation instructions.
-   - Ensure the Python bindings in `tersets/bindings/python/tersets` are available in your project.
-
-2. **Linking the Library**:
-   - Modify the `__init__.py` file in the TerseTS Python bindings to link the correct shared library for your operating system. Specifically, change the `library_path` variable to reflect the path to TerseTS's library.
-
-3. **Import the Library**:
-   - Import the necessary functions and classes from the TerseTS Python module.
-
-4. **Compression and Decompression Interface**:
-    - Use the following interface to compress and decompress time series data.
-
-### Example
 ```python
 import random
 import sys
@@ -123,14 +131,14 @@ decompressed = decompress(compressed)
 assert uncompressed == decompressed
 print("Compression and decompression were successful.")
 ```
+### Notes
+   1. Modify the `__init__.py` file in the TerseTS Python bindings to link the correct shared library for your operating system. Specifically, change the `library_path` variable to reflect the path to TerseTS's library.
+   2. Import the necessary functions and classes from the TerseTS Python module.
+
+</details>
 
 
-# Bindings
-TerseTS provides a C-API that is designed to be simple to wrap. Currently, TerseTS includes bindings for the following programming languages which can be used without installation of any dependencies:
-- [Zig](src/tersets.zig)
-- [C](bindings/c/tersets.h)
-- [C++](bindings/c/tersets.h)
-- [Python](bindings/python/tersets) using [ctypes](https://docs.python.org/3/library/ctypes.html)
+
 
 # License
 TerseTS is licensed under version 2.0 of the Apache License and a copy of the license is bundled with the program.
