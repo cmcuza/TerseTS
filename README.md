@@ -18,7 +18,7 @@ TerseTS can be compiled and cross-compiled from source:
    - Microsoft Windows: `zig build -Dtarget=x86_64-windows -Doptimize=ReleaseFast`
 
 ## Usage
-TerseTS provides a C-API that is designed to be simple to wrap. Currently, TerseTS includes API for the following programming languages which can be used without installation of any dependencies:
+TerseTS provides a C-API that is designed to be simple to wrap. Currently, TerseTS includes APIs for the following programming languages which can be used without installation of any dependencies:
 <a id="zig-usage-example"></a>
 <details>
 <summary><strong>Zig Usage Example</strong></summary>
