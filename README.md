@@ -30,7 +30,8 @@ const tersets = @import("path/to/tersets.zig");
 pub fn main() void {
    var uncompressed_values = [_]f64{1.0, 2.0, 3.0, 4.0, 5.0};
    std.debug.print("Uncompressed data length: {any}\n", .{uncompressed_values.len});
-    
+   
+   // The supported compression methods are specified in tersets.zig.
    const config = tersets.Configuration{
         .method = .SwingFilter,
         .error_bound = 0.1,
@@ -50,7 +51,7 @@ pub fn main() void {
 
 TerseTS provides `./src/tersets.zig` as the single access point and two main functions `compress` and `decompress`. 
 
-For compression, you can select the compression method through the `Configuration` structure with two parameters: the compression method, e.g., `.method=.SwingFilter`, and the error bound, e.g., `.error_bound = 0.1`. 
+For compression, you can select the compression method through the `Configuration` structure with two parameters: the compression method, e.g., `.method=.SwingFilter`, and the error bound, e.g., `.error_bound = 0.1`. The supported compression methods are specified in `src/tersets.zig`. 
 
 For decompression, the `Configuration` is not needed as the method is encoded in the compressed values.
 </details>
@@ -69,11 +70,13 @@ int main() {
    
    printf("Uncompressed data length: %lu\n", uncompressed_values.len);
    
-   // Configuration for compression.
+   // Configuration for compression. 
+   // The supported compression methods are specified in tersets.zig.
    // Method 2 is SwingFilter and 0.1 error bound.
    struct Configuration config = {2, 0.0}; 
 
-   // Prepare for compressed data.
+   // Prepare for compressed data. 
+   // The compressed values point to dynamically allocated data that should be deallocated.
    struct CompressedValues compressed_values;
     
    // Compress the data.
@@ -85,7 +88,8 @@ int main() {
 
    printf("Compression successful. Decompressed data length: %lu\n", compressed_values.len);
     
-   // Prepare for decompressed data.
+   // Prepare for decompressed data. 
+   // The decompressed values point to dynamically allocated data that should be deallocated.
    struct UncompressedValues decompressed_values;
    
    // Decompress the data.
