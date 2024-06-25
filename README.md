@@ -21,10 +21,6 @@ TerseTS can be compiled and cross-compiled from source:
 
 ## Getting Started
 TerseTS provides a C-API that is designed to be simple to wrap. Currently, TerseTS includes bindings for the following programming languages which can be used without installation of any dependencies:
--  [Zig Usage Example](#zig-usage-example)
--  [C/C++ Usage Example](#c-usage-example)
--  [Python Usage Example](#python-usage-example)
-
 <a id="zig-usage-example"></a>
 <details>
 <summary><strong>Zig Usage Example</strong></summary>
