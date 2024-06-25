@@ -46,7 +46,11 @@ pub fn main() void {
 }
 ```
 
-TerseTS provides `./src/tersets.zig` as the single access point and two main functions `compress` and `decompress`. For compression, you can select the compression method through the `Configuration` structure with two parameters: the compression method, e.g., `.method=.SwingFilter`, and the error bound, e.g., `.error_bound = 0.1`. For decompression, the `Configuration` is not needed as the method is encoded in the compressed values.
+TerseTS provides `./src/tersets.zig` as the single access point and two main functions `compress` and `decompress`. 
+
+For compression, you can select the compression method through the `Configuration` structure with two parameters: the compression method, e.g., `.method=.SwingFilter`, and the error bound, e.g., `.error_bound = 0.1`. 
+
+For decompression, the `Configuration` is not needed as the method is encoded in the compressed values.
 </details>
 
 <a id="c-usage-example"></a>
