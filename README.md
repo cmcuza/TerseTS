@@ -160,7 +160,7 @@ print("Uncompressed data length: ", len(uncompressed_values))
 # The supported compression methods are specified in tersets.zig.
 # The Python-API provides a `Method` enum to access the available methods.
 # Compress the data.
-compressed_values = compress(uncompressed, error_bound, method)
+compressed_values = compress(uncompressed, method, error_bound)
 
 print("Compression successful. Compressed data length: ", len(compressed_values))
 
@@ -175,8 +175,8 @@ TerseTS provides `./bindings/python/tersets/__init__.py` as binding for Python w
 - **`compress()` Function:** 
    - **Parameters:**
       - `uncompressed_values`: The array of values to compress.
-      - `error_bound`: The error bound. 
       - `method`: The Python binding provides the `Method` enum to provide direct access to the available methods supported by `TerseTS`. The supported compression methods are specified in `src/tersets.zig`. 
+      - `error_bound`: The error bound. 
    - **Returns:** A list of compressed values.
 - **`decompress()` Function:** 
    - **Parameters:**

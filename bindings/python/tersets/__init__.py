@@ -77,7 +77,7 @@ class Method(Enum):
 
 
 # Public Functions.
-def compress(values: List[float], error_bound: float, method: Method) -> bytes:
+def compress(values: List[float], method: Method, error_bound: float) -> bytes:
     """Compresses values."""
 
     uncompressed_values = __UncompressedValues()
