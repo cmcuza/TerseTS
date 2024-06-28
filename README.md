@@ -2,7 +2,7 @@
   <img src="docs/tersets.jpg" alt="TerseTS">
 </h1>
 
-TerseTS is a library that provides methods for lossless and lossy compressing time series. To match existing literature the methods are organized based on [Time Series Compression Survey](https://dl.acm.org/doi/10.1145/3560814). The library is implemented in Zig and provides a C-API with [bindings](#usage) for other languages.
+TerseTS is a library that provides methods for lossless and lossy compressing time series. To match existing literature the methods are organized based on [Time Series Compression Survey](https://dl.acm.org/doi/10.1145/3560814). The library is implemented in Zig and provides a Zig-API and C-API with [bindings](#usage) for other languages.
 
 # Getting Started 
 ## Compilation
@@ -18,7 +18,7 @@ TerseTS can be compiled and cross-compiled from source:
    - Microsoft Windows: `zig build -Dtarget=x86_64-windows -Doptimize=ReleaseFast`
 
 ## Usage
-TerseTS provides a C-API that is designed to be simple to wrap. Currently, TerseTS includes APIs for the following programming languages which can be used without installation of any dependencies:
+TerseTS provides a Zig-API and a C-API that is designed to be simple to wrap. Currently, TerseTS includes APIs for the following programming languages which can be used without installation of any dependencies:
 <a id="zig-usage-example"></a>
 <details>
 <summary><strong>Zig Usage Example</strong></summary>
@@ -26,39 +26,42 @@ TerseTS provides a C-API that is designed to be simple to wrap. Currently, Terse
 ```c
 const std = @import("std");
 const tersets = @import("path/to/tersets.zig");
+const gpa = std.heap.GeneralPurposeAllocator(.{}){};
+const allocator = gpa.allocator();
 
 pub fn main() void {
    var uncompressed_values = [_]f64{1.0, 2.0, 3.0, 4.0, 5.0};
    std.debug.print("Uncompressed data length: {any}\n", .{uncompressed_values.len});
    
+   // Configuration for compression. 
    // The supported compression methods are specified in tersets.zig.
-   const config = tersets.Configuration{
-        .method = .SwingFilter,
-        .error_bound = 0.1,
-   };
-    
-   var compressed_values = try tersets.compress(data[0..], config);
-   defer std.heap.page_allocator.free(compressed);
+   const method = tersets.Method.SwingFilter,
+   const error_bound: f32 = 0.1;
+   
+   // Compress the data. 
+   var compressed_values = try tersets.compress(data[0..], allocator, method, error_bound);
+   // The compressed values point to dynamically allocated data that should be deallocated.
+   defer compressed_values.deinit();
 
    std.debug.print("Compression successful. Compressed data length: {any}\n", .{compressed_values.items.len});
     
-   var decompressed_values = try tersets.decompress(compressed, config);
-   defer std.heap.page_allocator.free(decompressed);
+   // Decompress the data. 
+   var decompressed_values = try tersets.decompress(compressed, allocator);
+   // The decompressed values point to dynamically allocated data that should be deallocated.
+   defer decompressed_values.deinit();
 
    std.debug.print("Decompression successful. Decompressed data length {any}\n", .{decompressed_values.items.len});
 }
 ```
 
-TerseTS provides `./src/tersets.zig` as the single access point and two main functions `compress` and `decompress`. 
+TerseTS provides `./src/tersets.zig` as the single access point and two main functions `compress()` and `decompress()`. 
 
-For compression, you can select the compression method through the `Configuration` structure with two parameters: the compression method, e.g., `.method=.SwingFilter`, and the error bound, e.g., `.error_bound = 0.1`. The supported compression methods are specified in `src/tersets.zig`. 
-
-For decompression, the `Configuration` is not needed as the method is encoded in the compressed values.
+The compression method can be selected through the `Configuration` structure with two parameters: the compression method, e.g., `.method=.SwingFilter`, and the error bound, e.g., `.error_bound=0.1`. The supported compression methods are specified in `src/tersets.zig`. 
 </details>
 
 <a id="c-usage-example"></a>
 <details>
-<summary><strong>C/C++ Usage Example</strong></summary>
+<summary><strong>C Usage Example</strong></summary>
 
 ```c 
 #include "tersets.h"
@@ -73,7 +76,7 @@ int main() {
    // Configuration for compression. 
    // The supported compression methods are specified in tersets.zig.
    // Method 2 is SwingFilter and 0.1 error bound.
-   struct Configuration config = {2, 0.0}; 
+   struct Configuration config = {2, 0.1}; 
 
    // Prepare for compressed data. 
    // The compressed values point to dynamically allocated data that should be deallocated.
@@ -101,18 +104,18 @@ int main() {
 
    printf("Decompression successful. Decompressed data length: %lu\n", decompressed_values.len);
     
-   // Free the compressed and decompressed value.
+   // Free the compressed and decompressed values.
    free(decompressed_values.data);
    free(compressed_values.data);
    return 0;
 }
 ```
 
-TerseTS provides `./bindings/c/tersets.h` as API for C/C++ which should be included in the source code, i.e., `#include "tersets.h"`. You need to [link](#linking) the TerseTS library to the project. 
+TerseTS provides `./bindings/c/tersets.h` as API for C which should be included in the source code, i.e., `#include "tersets.h"`. The TerseTS library must also be [linked](#linking) to the project. 
 
 Ensure that the method field in `Configuration` is set to a valid compression/decompression method supported by `TerseTS`.
 
-Free dynamically allocated memory appropriately to avoid memory leaks.
+Remember to free dynamically allocated memory appropriately to avoid memory leaks.
 </details>
 
 <a id="python-usage-example"></a>
@@ -129,7 +132,9 @@ error_bound = 0.1
 
 print("Uncompressed data length: ", len(uncompressed_values))
 
-# Compress using the SwingFilter method.
+# The supported compression methods are specified in tersets.zig.
+# The Python-API provides a `Method` enum to access the available methods.
+# Compress the data.
 compressed_values = compress(uncompressed, 0.1, Method.SwingFilter)
 
 print("Compression successful. Compressed data length: ", len(compressed_values))
@@ -140,7 +145,7 @@ decompressed_values = decompress(compressed_values)
 print("Decompression successful. Decompressed data length: ", len(decompressed_values))
 ```
 
-TerseTS provides `./bindings/python/tersets/__init__.py` as binding for Python which allows directly importing tersets, i.e., `import tersets`.
+TerseTS provides `./bindings/python/tersets/__init__.py` as binding for Python which can be imported directly into a Python program with `import tersets`. The binding automatically loads the native library but assumes it is not moved.
 
 The Python binding provides the `Method` enum to provide direct access to the available methods supported by `TerseTS`.
 </details>
