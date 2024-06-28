@@ -56,9 +56,18 @@ pub fn main() void {
 
 TerseTS provides `./src/tersets.zig` as the single access point and two main functions `compress()` and `decompress()`. 
 
-The `compress()` function receives the `uncompressed_values`, a `allocator` to allocate memory for the returned `compressed_values` and other intermediate structures needed for compression, a compression method identification, e.g, `tersets.Method.SwingFilter` and error bound of type `f32`. The supported compression methods are specified in `src/tersets.zig`. 
-
-The `decompress()` function receives the `compressed_values` and a `allocator` to allocate memory for the returned `decompressed_values`.
+- **`compress()` Function:** 
+   - **Parameters:**
+      - `uncompressed_values`: The array of values to compress.
+      - `allocator`: Used to allocate memory for the returned `compressed_values` and other intermediate structures needed for compression.
+      - `method`: Compression method identifier based as specified in `tersets.Method`, e.g., `tersets.Method.SwingFilter`. The supported compression methods are specified in `src/tersets.zig`. 
+      - `error_bound`: An error bound of type `f32`. 
+   - **Returns:** A dynamically allocated `compressed_values: ArrayList`, which must be deallocated with `deinit()`.
+- **`decompress()` Function:** 
+   - **Parameters:**
+      - `compressed_values`: The compressed data to decompress.
+      - `allocator`: Used to allocate memory for the returned `decompressed_values`.
+   - **Returns:** A dynamically allocated `decompressed_values: ArrayList`, which must be deallocated with `deinit()`.   
 </details>
 
 <a id="c-usage-example"></a>
@@ -115,7 +124,17 @@ int main() {
 
 TerseTS provides `./bindings/c/tersets.h` as API for C which should be included in the source code, i.e., `#include "tersets.h"`. The TerseTS library must also be [linked](#linking) to the project. 
 
-The compression method can be selected through the `Configuration` structure with two parameters: the compression method, and the error bound. The supported compression methods are specified in `src/tersets.zig`. 
+- **`compress()` Function:** 
+   - **Parameters:**
+      - `uncompressed_values`: The array of values to compress.
+      - `compressed_values`: A pointer to a structure where the compressed values will be stored. The data is dynamically allocated.
+      - `config`: The configuration structure specifying the compression method and error bound. The supported compression methods are specified in `src/tersets.zig`. 
+   - **Returns:** An integer indicating success `(0)` or an error code.
+- **`decompress()` Function:** 
+   - **Parameters:**
+      - `compressed_values`: The compressed data to decompress.
+      - `decompressed_values`: A pointer to a structure where the decompressed values will be stored. The data is dynamically allocated.
+   - **Returns:** An integer indicating success `(0)` or an error code.
 
 Remember to free dynamically allocated memory appropriately to avoid memory leaks.
 </details>
@@ -130,6 +149,10 @@ import sys
 from tersets import compress, decompress, Method
 
 uncompressed_values = [1.0, 2.0, 3.0, 4.0, 5.0]
+
+# Configuration for compression. 
+# The supported compression methods are specified in tersets.zig.
+method = Method.SwingFilter
 error_bound = 0.1
 
 print("Uncompressed data length: ", len(uncompressed_values))
@@ -137,7 +160,7 @@ print("Uncompressed data length: ", len(uncompressed_values))
 # The supported compression methods are specified in tersets.zig.
 # The Python-API provides a `Method` enum to access the available methods.
 # Compress the data.
-compressed_values = compress(uncompressed, 0.1, Method.SwingFilter)
+compressed_values = compress(uncompressed, error_bound, method)
 
 print("Compression successful. Compressed data length: ", len(compressed_values))
 
@@ -149,7 +172,16 @@ print("Decompression successful. Decompressed data length: ", len(decompressed_v
 
 TerseTS provides `./bindings/python/tersets/__init__.py` as binding for Python which can be imported directly into a Python program with `import tersets`. The binding automatically loads the native library but assumes it is not moved.
 
-The Python binding provides the `Method` enum to provide direct access to the available methods supported by `TerseTS`.
+- **`compress()` Function:** 
+   - **Parameters:**
+      - `uncompressed_values`: The array of values to compress.
+      - `error_bound`: The error bound. 
+      - `method`: The Python binding provides the `Method` enum to provide direct access to the available methods supported by `TerseTS`. The supported compression methods are specified in `src/tersets.zig`. 
+   - **Returns:** A list of compressed values.
+- **`decompress()` Function:** 
+   - **Parameters:**
+      - `compressed_values`: The compressed data to decompress.
+   - **Returns:** A list of decompressed values.
 </details>
 
 ## Linking:
