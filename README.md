@@ -35,18 +35,18 @@ pub fn main() void {
    
    // Configuration for compression. 
    // The supported compression methods are specified in tersets.zig.
-   const method = tersets.Method.SwingFilter,
+   const method = tersets.Method.SwingFilter;
    const error_bound: f32 = 0.1;
    
    // Compress the data. 
-   var compressed_values = try tersets.compress(data[0..], allocator, method, error_bound);
+   var compressed_values = try tersets.compress(uncompressed_values, allocator, method, error_bound);
    // The compressed values point to dynamically allocated data that should be deallocated.
    defer compressed_values.deinit();
 
    std.debug.print("Compression successful. Compressed data length: {any}\n", .{compressed_values.items.len});
     
    // Decompress the data. 
-   var decompressed_values = try tersets.decompress(compressed, allocator);
+   var decompressed_values = try tersets.decompress(compressed_values, allocator);
    // The decompressed values point to dynamically allocated data that should be deallocated.
    defer decompressed_values.deinit();
 
@@ -56,7 +56,9 @@ pub fn main() void {
 
 TerseTS provides `./src/tersets.zig` as the single access point and two main functions `compress()` and `decompress()`. 
 
-The compression method can be selected through the `Configuration` structure with two parameters: the compression method, e.g., `.method=.SwingFilter`, and the error bound, e.g., `.error_bound=0.1`. The supported compression methods are specified in `src/tersets.zig`. 
+The `compress()` function receives the `uncompressed_values`, a `allocator` to allocate memory for the returned `compressed_values` and other intermediate structures needed for compression, a compression method identification, e.g, `tersets.Method.SwingFilter` and error bound of type `f32`. The supported compression methods are specified in `src/tersets.zig`. 
+
+The `decompress()` function receives the `compressed_values` and a `allocator` to allocate memory for the returned `decompressed_values`.
 </details>
 
 <a id="c-usage-example"></a>
@@ -113,7 +115,7 @@ int main() {
 
 TerseTS provides `./bindings/c/tersets.h` as API for C which should be included in the source code, i.e., `#include "tersets.h"`. The TerseTS library must also be [linked](#linking) to the project. 
 
-Ensure that the method field in `Configuration` is set to a valid compression/decompression method supported by `TerseTS`.
+The compression method can be selected through the `Configuration` structure with two parameters: the compression method, and the error bound. The supported compression methods are specified in `src/tersets.zig`. 
 
 Remember to free dynamically allocated memory appropriately to avoid memory leaks.
 </details>
