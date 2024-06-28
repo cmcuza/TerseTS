@@ -60,7 +60,7 @@ TerseTS provides `./src/tersets.zig` as the single access point and two main fun
    - **Parameters:**
       - `uncompressed_values`: The array of values to compress.
       - `allocator`: Used to allocate memory for the returned `compressed_values` and other intermediate structures needed for compression.
-      - `method`: Compression method identifier based as specified in `tersets.Method`, e.g., `tersets.Method.SwingFilter`. The supported compression methods are specified in `src/tersets.zig`. 
+      - `method`: Compression method identifier as specified in `tersets.Method`, e.g., `tersets.Method.SwingFilter`. The supported compression methods are specified in `src/tersets.zig`. 
       - `error_bound`: An error bound of type `f32`. 
    - **Returns:** A dynamically allocated `compressed_values: ArrayList`, which must be deallocated with `deinit()`.
 - **`decompress()` Function:** 
