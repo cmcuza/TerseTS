@@ -27,6 +27,6 @@ class TerseTSPythonTest(unittest.TestCase):
             random.uniform(sys.float_info.min, sys.float_info.max)
             for _ in range(0, TEST_VALUE_COUNT)
         ]
-        compressed = compress(uncompressed, 0.0, Method.SwingFilter)
+        compressed = compress(uncompressed, Method.SwingFilter, 0.0)
         decompressed = decompress(compressed)
         self.assertEqual(uncompressed, decompressed)
