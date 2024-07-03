@@ -27,7 +27,7 @@ pub const Error = error{
     UnknownMethod,
     EmptyInput,
     IncorrectInput,
-    NegativeErrorBound,
+    UnsupportedErrorBound,
     OutOfMemory,
 };
 
@@ -69,7 +69,7 @@ pub fn compress(
     error_bound: f32,
 ) Error!ArrayList(u8) {
     if (uncompressed_values.len == 0) return Error.EmptyInput;
-    if (error_bound < 0) return Error.NegativeErrorBound;
+    if (error_bound < 0) return Error.UnsupportedErrorBound;
 
     var compressed_values = ArrayList(u8).init(allocator);
 

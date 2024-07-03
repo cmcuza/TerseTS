@@ -18,30 +18,27 @@
 //! Proc. VLDB Endow. 16, 8 2023.
 //! https://doi.org/10.14778/3594512.3594521".
 //! The implementation is partially based on the authors implementation at
-//! https://github.com/xkitsios/Sim-Piece (accessed on 20-06-24). Few changes were made to support
-//! an error bound equal to zero and to improve numerical stability. This is because Sim-Piece
-//! does not support lossless compression. Setting `error_bound` to zero will cause an error due to
-//! undefined quantization (`b=floor(value/error_bound)*error_bound`). This has a ripple effect
-//! across the algorithm that demands the implementation of special instructions to handle a zero
-//! error bound. Nevertheless, the numerical instabilities inherent to floating point operations
-//! mean that decompressed values will not exactly match the original uncompressed values. To alert
-//! the user, a warning is shown if the `error_bound` equals zero.
+//! https://github.com/xkitsios/Sim-Piece (accessed on 20-06-24).
 
 const std = @import("std");
 const math = std.math;
 const mem = std.mem;
+const rand = std.rand;
+const time = std.time;
 const testing = std.testing;
 const ArrayList = std.ArrayList;
 const HashMap = std.HashMap;
 
 const tersets = @import("../tersets.zig");
-const Error = tersets.Error;
 const DiscretePoint = tersets.DiscretePoint;
+const Method = tersets.Method;
+const Error = tersets.Error;
+const tester = @import("../tester.zig");
 
 /// `SegmentMetadata` stores the information about an approximated segment during the execution
-/// of Sim-Piece. It stores the starting time of the segment in `start_time`, the slopes of
-/// the upper and lower bounds that constraint the linear approximation in that segment and the
-/// `interception` point used to create the linear function approximation.
+/// of Sim-Piece. It stores the starting time of the segment in `start_time`, the
+/// `interception` point used to create the linear function approximation, and the slopes of
+/// the upper and lower bounds that constraint the linear approximation in that segment.
 const SegmentMetadata = struct {
     start_time: usize,
     interception: f64,
@@ -49,7 +46,9 @@ const SegmentMetadata = struct {
     lower_bound_slope: f64,
 };
 
-/// `HashF64Context` is a struct providing context for hashing and comparing `f64` values.
+/// `HashF64Context` provides context for hashing and comparing `f64` values for use in `HashMap`.
+/// This context is essential when using `f64` as keys in a `HashMap`. It defines how the keys are
+/// hashed and compared for equality.
 const HashF64Context = struct {
     /// Hashes an `f64` `value` by bitcasting it to `u64`.
     pub fn hash(_: HashF64Context, value: f64) u64 {
@@ -70,11 +69,11 @@ pub fn compressSimPiece(
     allocator: mem.Allocator,
     error_bound: f32,
 ) Error!void {
-    if (error_bound == 0.0) {
-        std.debug.print("\nWarning: Sim-Piece does not support lossless compression. ", .{});
-        std.debug.print("Expect deviations from the original data of at most 1e-6.\n", .{});
+    if (error_bound <= 0.0) {
+        return Error.UnsupportedErrorBound;
     }
-    // Sim-Piece Phase 1: Compute the segments metadata.
+    // Sim-Piece Phase 1: Compute `SegmentMetadata` for all segments that can be approximated
+    // by the given `error_bound`.
     var segments_metadata = ArrayList(SegmentMetadata).init(allocator);
     defer segments_metadata.deinit();
     try computeSegmentsMetadata(
@@ -83,24 +82,16 @@ pub fn compressSimPiece(
         error_bound,
     );
 
-    // Sim-Piece Phase 2: Merge the segments metadata.
+    // Sim-Piece Phase 2: Merge the `SegmentMetadata` that share the same interception point.
     var merged_segments_metadata = ArrayList(SegmentMetadata).init(allocator);
     defer merged_segments_metadata.deinit();
     try mergeSegmentsMetadata(segments_metadata, &merged_segments_metadata, allocator);
 
-    // Sim-Piece Phase 3: Compute segment metadata hash map.
-    var merged_segments_metadata_map = HashMap(
-        f64,
-        HashMap(
-            f64,
-            ArrayList(usize),
-            HashF64Context,
-            std.hash_map.default_max_load_percentage,
-        ),
-        HashF64Context,
-        std.hash_map.default_max_load_percentage,
-    ).init(allocator);
+    // Sim-Piece Phase 3: Compute the `SegmentMetadata` HashMap based on the interception point.
+    var merged_segments_metadata_map = HashMapf64(HashMapf64(ArrayList(usize))).init(allocator);
     defer {
+        // Deinit all ArrayList instances within the inner HashMaps and then deinit the inner HashMaps
+        // themselves before finally deinit the outer HashMap.
         var hash_to_hash_iterator = merged_segments_metadata_map.iterator();
         while (hash_to_hash_iterator.next()) |hash_to_hash_entry| {
             var hash_to_array_iterator = hash_to_hash_entry.value_ptr.*.iterator();
@@ -119,12 +110,14 @@ pub fn compressSimPiece(
 
     // Sim-Piece Phase 4: Create the final compressed representation and store in compressed values.
     try createCompressedRepresentation(merged_segments_metadata_map, compressed_values);
-    // The last timestamp needs to be stored in the compressed representaiton as well.
+
+    // The last timestamp must be stored, otherwise the end time during decompression is unknown.
     try appendValue(usize, uncompressed_values.len, compressed_values);
 }
 
 /// Decompress `compressed_values` produced by "Sim-Piece" and write the result to
-/// `decompressed_values`. If an error occurs it is returned.
+/// `decompressed_values`. The `allocator` is used for memory allocation of intermediate
+/// data structures. If an error occurs it is returned.
 pub fn decompress(
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
@@ -136,31 +129,31 @@ pub fn decompress(
     defer segments_metadata.deinit();
     const compressed_lines_and_index = mem.bytesAsSlice(f64, compressed_values);
 
-    var general_index: usize = 0;
-    while (general_index < compressed_lines_and_index.len - 1) {
-        const interception: f64 = compressed_lines_and_index[general_index];
-        const slopes_count = @as(usize, @bitCast(compressed_lines_and_index[general_index + 1]));
-        general_index += 2;
+    var compressed_index: usize = 0;
+    while (compressed_index < compressed_lines_and_index.len - 1) {
+        const interception: f64 = compressed_lines_and_index[compressed_index];
+        const slopes_count = @as(usize, @bitCast(compressed_lines_and_index[compressed_index + 1]));
+        compressed_index += 2;
 
         for (0..slopes_count) |_| {
-            const slope = compressed_lines_and_index[general_index];
-            const timestamps_count = @as(usize, @bitCast(compressed_lines_and_index[general_index + 1]));
-            general_index += 2;
+            const slope = compressed_lines_and_index[compressed_index];
+            const timestamps_count = @as(usize, @bitCast(compressed_lines_and_index[compressed_index + 1]));
+            compressed_index += 2;
             var timestamp: usize = 0;
             for (0..timestamps_count) |_| {
-                timestamp += @as(usize, @bitCast(compressed_lines_and_index[general_index]));
+                timestamp += @as(usize, @bitCast(compressed_lines_and_index[compressed_index]));
                 try segments_metadata.append(.{
                     .start_time = timestamp,
                     .interception = interception,
                     .lower_bound_slope = slope,
                     .upper_bound_slope = slope,
                 });
-                general_index += 1;
+                compressed_index += 1;
             }
         }
     }
 
-    const last_timestamp: usize = @as(usize, @bitCast(compressed_lines_and_index[general_index]));
+    const last_timestamp: usize = @as(usize, @bitCast(compressed_lines_and_index[compressed_index]));
 
     mem.sort(
         SegmentMetadata,
@@ -173,35 +166,33 @@ pub fn decompress(
     for (0..segments_metadata.items.len - 1) |index| {
         const current_metadata = segments_metadata.items[index];
         const next_metadata_start_time = segments_metadata.items[index + 1].start_time;
-        while (current_timestamp < next_metadata_start_time) : (current_timestamp += 1) {
-            const approximated_value = current_metadata.upper_bound_slope * @as(f64, @floatFromInt(
-                current_timestamp - current_metadata.start_time,
-            )) + current_metadata.interception;
-            try decompressed_values.append(approximated_value);
-        }
+        try decompressSegment(
+            current_metadata,
+            current_timestamp,
+            next_metadata_start_time,
+            decompressed_values,
+        );
+        current_timestamp = next_metadata_start_time;
     }
 
     const current_metadata = segments_metadata.getLast();
-    while (current_timestamp < last_timestamp) : (current_timestamp += 1) {
-        const approximated_value = current_metadata.upper_bound_slope * @as(f64, @floatFromInt(
-            current_timestamp - current_metadata.start_time,
-        )) + current_metadata.interception;
-        try decompressed_values.append(approximated_value);
-    }
+    try decompressSegment(
+        current_metadata,
+        current_timestamp,
+        last_timestamp,
+        decompressed_values,
+    );
 }
 
-/// Sim-Piece Phase 1: Compute the `segments_metadata` for each segment that can be approximated
-/// by a linear function within the `error_bound` from the `uncompressed_values`.
+/// Sim-Piece Phase 1: Compute `SegmentMetadata` for each segment that can be approximated
+/// by a linear function within the `error_bound` from `uncompressed_values`.
 fn computeSegmentsMetadata(
     uncompressed_values: []const f64,
     segments_metadata: *ArrayList(SegmentMetadata),
     error_bound: f32,
 ) !void {
     // Adjust the error bound to avoid exceeding it during decompression.
-    const adjusted_error_bound = if (error_bound > 0)
-        error_bound - tersets.ErrorBoundMargin
-    else
-        error_bound;
+    const adjusted_error_bound = error_bound - tersets.ErrorBoundMargin;
 
     var upper_bound_slope: f64 = math.floatMax(f64);
     var lower_bound_slope: f64 = -math.floatMax(f64);
@@ -209,17 +200,19 @@ fn computeSegmentsMetadata(
     // Initialize the `start_point` with the first uncompressed value.
     var start_point: DiscretePoint = .{ .time = 0, .value = uncompressed_values[0] };
 
+    // The quantization can only be done using the original error bound. Afterwards, we add
+    // `tersets.ErrorBoundMargin` to avoid exceeding the error bound during decompression.
     var quantized_interception = quantize(uncompressed_values[0], error_bound) +
         tersets.ErrorBoundMargin;
 
-    // First point already part of `current_segment`, next point is at index one.
-    var current_timestamp: usize = 1;
-    while (current_timestamp < uncompressed_values.len) : (current_timestamp += 1) {
+    // The first point is already part of `current_segment`, the next point is at index one.
+    for (1..uncompressed_values.len) |current_timestamp| {
         const end_point: DiscretePoint = .{
             .time = current_timestamp,
             .value = uncompressed_values[current_timestamp],
         };
 
+        // `segment_size` of type f64 to avoid casting from usize when computing other variables.
         const segment_size: f64 = @floatFromInt(current_timestamp - start_point.time);
         const upper_limit: f64 = upper_bound_slope * segment_size + quantized_interception;
         const lower_limit: f64 = lower_bound_slope * segment_size + quantized_interception;
@@ -228,7 +221,7 @@ fn computeSegmentsMetadata(
             ((lower_limit > (end_point.value + adjusted_error_bound))))
         {
             // The new point is outside the upper and lower limit. Record a new segment metadata in
-            // `segments_metadata_map` associated to `quantized_start_value`.
+            // `segments_metadata_map` associated to `interception`.
             try segments_metadata.append(.{
                 .start_time = start_point.time,
                 .interception = quantized_interception,
@@ -255,8 +248,8 @@ fn computeSegmentsMetadata(
         }
     }
 
-    const segment_size = current_timestamp - start_point.time;
-    if (segment_size >= 1) {
+    const segment_size = uncompressed_values.len - start_point.time;
+    if (segment_size > 0) {
         // Append the final segment.
         if (segment_size == 1) {
             upper_bound_slope = 0;
@@ -271,9 +264,9 @@ fn computeSegmentsMetadata(
     }
 }
 
-/// Sim-Piece Phase 2. Merge the elements in `segments_metadata` based on Alg. 2 and store the
-/// results in `merged_segments_metadata`. The `allocator` is used to allocate memory for the
-/// intermediate representations needed.
+/// Sim-Piece Phase 2. Merge the elements in `segments_metadata` using Alg. 2 and store the
+/// results in `merged_segments_metadata`. The segments are merged based on the interception value.
+/// The `allocator` is used to allocate memory for the intermediate representations needed.
 fn mergeSegmentsMetadata(
     segments_metadata: ArrayList(SegmentMetadata),
     merged_segments_metadata: *ArrayList(SegmentMetadata),
@@ -282,13 +275,9 @@ fn mergeSegmentsMetadata(
     var timestamps_array = ArrayList(usize).init(allocator);
     defer timestamps_array.deinit();
 
-    var segments_metadata_map = HashMap(
-        f64,
-        ArrayList(SegmentMetadata),
-        HashF64Context,
-        std.hash_map.default_max_load_percentage,
-    ).init(allocator);
+    var segments_metadata_map = HashMapf64(ArrayList(SegmentMetadata)).init(allocator);
     defer {
+        // Deinit all ArrayList instances within the HashMap before deinit it.
         var iterator = segments_metadata_map.iterator();
         while (iterator.next()) |entry| {
             entry.value_ptr.*.deinit();
@@ -297,8 +286,9 @@ fn mergeSegmentsMetadata(
     }
 
     // Iteratively populate `segments_metadata_map` based on the quantized interception values to
-    // find the common interception between the segments. Segments falling in the same interception
-    // can potentially be merged.
+    // find the common interception between the segments. Segments with the same interception
+    // can be merged if the upper and lower bounds of one segment are contained within the lower
+    // and upper bounds of the other segment.
     for (segments_metadata.items) |segment_metadata| {
         try appendSegmentMetadata(
             &segments_metadata_map,
@@ -311,7 +301,8 @@ fn mergeSegmentsMetadata(
     while (iterator.next()) |entry| {
         const metadata_array = entry.value_ptr.*;
 
-        // Sort in asc order based on the lower bound's slope. Alg 2. Line 5.
+        // Sort in asc order based on the lower bound's slope. Alg 2. Line 5. This allows to find
+        // the segments contained inside other segments and merge them.
         mem.sort(
             SegmentMetadata,
             metadata_array.items,
@@ -365,21 +356,19 @@ fn mergeSegmentsMetadata(
             }
         }
 
-        if (timestamps_array.items.len > 0) {
-            // Append the final merged segment metadata.
-            for (timestamps_array.items) |timestamp| {
-                try merged_segments_metadata.append(.{
-                    .start_time = timestamp,
-                    .interception = merge_metadata.interception,
-                    .lower_bound_slope = merge_metadata.lower_bound_slope,
-                    .upper_bound_slope = merge_metadata.upper_bound_slope,
-                });
-            }
-            timestamps_array.clearRetainingCapacity();
+        // Append the final merged segment metadata.
+        for (timestamps_array.items) |timestamp| {
+            try merged_segments_metadata.append(.{
+                .start_time = timestamp,
+                .interception = merge_metadata.interception,
+                .lower_bound_slope = merge_metadata.lower_bound_slope,
+                .upper_bound_slope = merge_metadata.upper_bound_slope,
+            });
         }
+        timestamps_array.clearRetainingCapacity();
     }
 
-    // This step is needed since the timestamp order is lost due to the hashmap.
+    // This step is needed since the timestamp order is lost due to the HashMap.
     mem.sort(
         SegmentMetadata,
         merged_segments_metadata.items,
@@ -388,17 +377,12 @@ fn mergeSegmentsMetadata(
     );
 }
 
-/// Sim-Piece Phase 3. Compute a hash map from interception points in `merged_segments_metadata`
-/// to a hash map from the approximation slope to an array list of timestamps and store in
+/// Sim-Piece Phase 3. Compute HashMap from interception points in `merged_segments_metadata`
+/// to a HashMap from the approximation slope to an array list of timestamps and store it in
 /// `merged_segments_metadata_map`. The `allocator` is used to allocate memory of intermediates.
 fn computeSegmentsMetadataHashMap(
     merged_segments_metadata: ArrayList(SegmentMetadata),
-    merged_segments_metadata_map: *HashMap(f64, HashMap(
-        f64,
-        ArrayList(usize),
-        HashF64Context,
-        std.hash_map.default_max_load_percentage,
-    ), HashF64Context, std.hash_map.default_max_load_percentage),
+    merged_segments_metadata_map: *HashMapf64(HashMapf64(ArrayList(usize))),
     allocator: mem.Allocator,
 ) !void {
     for (merged_segments_metadata.items) |segment_metadata| {
@@ -406,7 +390,8 @@ fn computeSegmentsMetadataHashMap(
         const slope: f64 = (segment_metadata.lower_bound_slope +
             segment_metadata.upper_bound_slope) / 2;
 
-        // Get or put the outer HashMap entry for the given interception
+        // Get or put the inner HashMap entry for the given `interception` wich will contain the
+        // slopes and timestamps associated to it.
         const hash_to_hash_result = try merged_segments_metadata_map.getOrPut(interception);
         if (!hash_to_hash_result.found_existing) {
             hash_to_hash_result.value_ptr.* = HashMap(
@@ -416,7 +401,8 @@ fn computeSegmentsMetadataHashMap(
                 std.hash_map.default_max_load_percentage,
             ).init(allocator);
         }
-        // Get or put the inner HashMap entry for the given slope
+        // Get or put the ArrayList of timestamps mapped to the given `slope` which is at the same
+        // time associated to the given `interception`.
         const hash_to_array_result = try hash_to_hash_result.value_ptr.*.getOrPut(slope);
         if (!hash_to_array_result.found_existing) {
             hash_to_array_result.value_ptr.* = ArrayList(usize).init(allocator);
@@ -425,37 +411,39 @@ fn computeSegmentsMetadataHashMap(
     }
 }
 
-/// Sim-Piece Phase 4. Create from the `merged_segments_metadata_map` and byte array that can be
-/// decoded during decompression and store it in `compressed_values`.
+/// Sim-Piece Phase 4. Create compressed representation from the `merged_segments_metadata_map`
+/// that can be decoded during decompression and store it in `compressed_values`. The compressed
+/// representation is a byte array containing the intercepts, slopes and timestamps per segment.
+/// Specifically, the compressed representation has the following structure:
+/// [b_1, N_1, a_11, M_11, t_1, t_2, ..., a_12, M_12, t_1, ...., b_2, N_2, a_21, M_21, t1, t2, ...,
+///  b_n, N_n, a_n1, M_n1, t_1, ...], where b_i are the interceptions, N_i are the number of slopes
+/// associated to interception b_i, a_ij are the slopes associated to interception b_i, M_ij are
+/// the number of timestamps associated to the slope a_ij, and t_k are the timestamps.
 fn createCompressedRepresentation(
-    merged_segments_metadata_map: HashMap(f64, HashMap(
-        f64,
-        ArrayList(usize),
-        HashF64Context,
-        std.hash_map.default_max_load_percentage,
-    ), HashF64Context, std.hash_map.default_max_load_percentage),
+    merged_segments_metadata_map: HashMapf64(HashMapf64(ArrayList(usize))),
     compressed_values: *ArrayList(u8),
 ) !void {
-    // Iterate over the hash to hash map.
+    // Iterate over the outer HashMap to append the interceptions b_i.
     var hash_to_hash_iterator = merged_segments_metadata_map.iterator();
     while (hash_to_hash_iterator.next()) |hash_to_hash_entry| {
         const current_interception: f64 = hash_to_hash_entry.key_ptr.*;
-        // Append the `current_interception`.
+
         try appendValue(f64, current_interception, compressed_values);
 
-        // Append the number of slopes hashed by the `current_interception`.
+        // Append the number of slopes N_i associated to `current_interception` b_i.
         try appendValue(usize, hash_to_hash_entry.value_ptr.*.count(), compressed_values);
-        var hash_to_array_iterator = hash_to_hash_entry.value_ptr.*.iterator();
 
+        // Iterate over the inner HashMap to append the slopes a_ij associated to b_i.
+        var hash_to_array_iterator = hash_to_hash_entry.value_ptr.*.iterator();
         while (hash_to_array_iterator.next()) |hash_to_array_entry| {
             const current_slope = hash_to_array_entry.key_ptr.*;
-            // Append the `current_slope` that approximates the segment.
             try appendValue(f64, current_slope, compressed_values);
 
-            // Append the number of timestamps that the `current_slope` is hashing.
+            // Append the number of timestamps M_ij associated to `current_slope` a_ij.
             try appendValue(usize, hash_to_array_entry.value_ptr.*.items.len, compressed_values);
             var previous_timestamp: usize = 0;
-            // Iterate over the timestamps and append them.
+
+            // Iterate over the ArrayList to append the timestamps t_k.
             for (hash_to_array_entry.value_ptr.*.items) |timestamp| {
                 try appendValue(usize, timestamp - previous_timestamp, compressed_values);
                 previous_timestamp = timestamp;
@@ -464,16 +452,22 @@ fn createCompressedRepresentation(
     }
 }
 
+/// Returns a HashMap with key type f64 and `value_type` given by the user.
+fn HashMapf64(comptime value_type: type) type {
+    return HashMap(f64, value_type, HashF64Context, std.hash_map.default_max_load_percentage);
+}
+
 /// Quantizes the given `value` by the specified `error_bound`. This process ensures that
 /// the quantized value remains within the error bound of the original value. If the
 /// `error_bound` is equal to zero, the value is directly returned.
 fn quantize(value: f64, error_bound: f32) f64 {
-    if (error_bound != 0)
+    if (error_bound != 0) {
         return @floor(value / error_bound) * error_bound;
+    }
     return value;
 }
 
-/// Appends the `metadata` to the hash map `metadata_map`. The `allocator` to use for allocating
+/// Appends the `metadata` to the HashMap `metadata_map`. The `allocator` is used for allocating
 /// the memory for a new ArrayList if the `metadata.interception` does not exist.
 fn appendSegmentMetadata(
     metadata_map: *HashMap(
@@ -512,7 +506,6 @@ fn compareMetadataByStartTime() fn (void, SegmentMetadata, SegmentMetadata) bool
 
 /// Append `value` of `type` determined at compile time to `compressed_values`.
 fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)) !void {
-    // Compile-time type check
     switch (@TypeOf(value)) {
         f64, usize => {
             const value_as_bytes: [8]u8 = @bitCast(value);
@@ -523,6 +516,22 @@ fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)
             try compressed_values.appendSlice(value_as_bytes[0..]);
         },
         else => @compileError("Unsupported type for append value function"),
+    }
+}
+
+/// Computes and stores in `decompressed_values` the decompress representation of the points from
+/// the `start_time` to the `end_time` based on the information stored in `segment_metadata`.
+fn decompressSegment(
+    segment_metadata: SegmentMetadata,
+    start_time: usize,
+    end_time: usize,
+    decompressed_values: *ArrayList(f64),
+) !void {
+    for (start_time..end_time) |i| {
+        const decompressed_value = segment_metadata.upper_bound_slope * @as(f64, @floatFromInt(
+            i - segment_metadata.start_time,
+        )) + segment_metadata.interception;
+        try decompressed_values.append(decompressed_value);
     }
 }
 
@@ -537,16 +546,18 @@ test "f64 context can hash" {
     defer f64_hash_map.deinit();
     var rnd = std.rand.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
 
-    // Even a small deviation like this should not impact the ability to hash the numbers.
-    const deviation_margin = 1e-16;
+    // Add 100 elements into the HashMap. For each element, add two more with small deviation of
+    // 1e-16 to test that the numbers are different and a new key is created.
+    const deviation = 1e-16;
     for (0..100) |_| {
         const rand_number = rnd.random().float(f64) - 0.5;
         try f64_hash_map.put(rand_number, rand_number);
-        try f64_hash_map.put(rand_number - deviation_margin, rand_number - deviation_margin);
-        try f64_hash_map.put(rand_number + deviation_margin, rand_number + deviation_margin);
+        try f64_hash_map.put(rand_number - deviation, rand_number - deviation);
+        try f64_hash_map.put(rand_number + deviation, rand_number + deviation);
     }
 
-    // All elements are expected to be hashed independently, without collisions.
+    // All elements are expected to be added with an independent key and without collisions, thus
+    // the size of the HashMap must be 300.
     try testing.expectEqual(300, f64_hash_map.count());
 
     var iterator = f64_hash_map.iterator();
@@ -559,12 +570,7 @@ test "f64 context can hash" {
 
 test "hashmap can map f64 to segment metadata array list" {
     const allocator = testing.allocator;
-    var f64_metadata_hash_map = HashMap(
-        f64,
-        ArrayList(SegmentMetadata),
-        HashF64Context,
-        std.hash_map.default_max_load_percentage,
-    ).init(allocator);
+    var f64_metadata_hash_map = HashMapf64(ArrayList(SegmentMetadata)).init(allocator);
     defer {
         var iterator = f64_metadata_hash_map.iterator();
         while (iterator.next()) |entry| {
@@ -573,12 +579,7 @@ test "hashmap can map f64 to segment metadata array list" {
         f64_metadata_hash_map.deinit();
     }
 
-    var f64_usize_hash_map = HashMap(
-        f64,
-        usize,
-        HashF64Context,
-        std.hash_map.default_max_load_percentage,
-    ).init(allocator);
+    var f64_usize_hash_map = HashMapf64(usize).init(allocator);
     defer f64_usize_hash_map.deinit();
 
     var rnd = std.rand.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
@@ -617,149 +618,92 @@ test "hashmap can map f64 to segment metadata array list" {
 }
 
 test "sim-piece can compress, decompress and merge many segments with non-zero error bound" {
+    const seed: u64 = @bitCast(time.milliTimestamp());
+    var prng = rand.DefaultPrng.init(seed);
+    const random = prng.random();
+    const error_bound = 0.1;
+
     const allocator = testing.allocator;
+    var uncompressed_values = ArrayList(f64).init(allocator);
+    defer uncompressed_values.deinit();
 
-    var list_values = ArrayList(f64).init(allocator);
-    defer list_values.deinit();
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
-    var rnd = std.rand.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
-
-    const error_bound: f32 = @floor(rnd.random().float(f32) * 100) / 10 + 0.1;
-
-    for (0..200) |_| {
-        // Generate floating points between numbers between 0 and 10. This will render many
-        // merged segments by Sim-Piece.
-        try list_values.append(@round(rnd.random().float(f64) * 100) / 10);
+    for (0..20) |_| {
+        // Generate floating points numbers between 0 and 10. This must generate many merged
+        // segments when applying Sim-Piece.
+        try tester.generateBoundedRandomValues(&uncompressed_values, 0, 10, random);
     }
 
-    const uncompressed_values = list_values.items;
-
-    try compressSimPiece(
-        uncompressed_values[0..],
-        &compressed_values,
+    try tester.testCompressAndDecompress(
+        uncompressed_values.items[0..],
         allocator,
+        Method.SimPiece,
         error_bound,
+        tersets.isWithinErrorBound,
     );
+}
 
-    try decompress(compressed_values.items, &decompressed_values, allocator);
+test "sim-piece even size compress and decompress" {
+    const seed: u64 = @bitCast(time.milliTimestamp());
+    var prng = rand.DefaultPrng.init(seed);
+    const random = prng.random();
+    const error_bound = 0.01;
 
-    try testing.expect(tersets.isWithinErrorBound(
-        uncompressed_values,
-        decompressed_values.items,
+    const allocator = testing.allocator;
+    var uncompressed_values = ArrayList(f64).init(allocator);
+    defer uncompressed_values.deinit();
+    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, random);
+
+    try tester.testCompressAndDecompress(
+        uncompressed_values.items[0..],
+        allocator,
+        Method.SimPiece,
         error_bound,
-    ));
+        tersets.isWithinErrorBound,
+    );
 }
 
-test "sim-piece zero error bound and even size compress and decompress" {
+test "sim-piece odd size compress and decompress" {
+    const seed: u64 = @bitCast(time.milliTimestamp());
+    var prng = rand.DefaultPrng.init(seed);
+    const random = prng.random();
+    const error_bound = 0.01;
+
     const allocator = testing.allocator;
+    var uncompressed_values = ArrayList(f64).init(allocator);
+    defer uncompressed_values.deinit();
+    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, random);
 
-    var list_values = ArrayList(f64).init(allocator);
-    defer list_values.deinit();
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
-    const error_bound: f32 = 0.0;
+    // Add another element to make the uncompressed values of odd size.
+    try uncompressed_values.append(random.float(f64));
 
-    var rnd = std.rand.DefaultPrng.init(0);
-
-    var i: usize = 0;
-    while (i < 100) : (i += 1) {
-        const noise = rnd.random().float(f64) * 0.1 - 0.05;
-        try list_values.append(@as(f64, @floatFromInt(i)) + noise);
-    }
-
-    const uncompressed_values = list_values.items;
-
-    try compressSimPiece(uncompressed_values[0..], &compressed_values, allocator, error_bound);
-    try decompress(compressed_values.items, &decompressed_values, allocator);
-
-    try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
-
-    for (0..uncompressed_values.len) |index| {
-        const uncompressed_value = uncompressed_values[index];
-        const decompressed_value = decompressed_values.items[index];
-        // Finding the maximum deviation level. A level lower than 1e-6 is not passing the test.
-        try testing.expect(@abs(uncompressed_value - decompressed_value) < 1e-6);
-    }
-}
-
-test "sim-piece zero error bound and odd size compress and decompress" {
-    const allocator = testing.allocator;
-
-    var list_values = ArrayList(f64).init(allocator);
-    defer list_values.deinit();
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
-    const error_bound: f32 = 0.0;
-
-    var rnd = std.rand.DefaultPrng.init(0);
-
-    var i: usize = 0;
-    while (i < 101) : (i += 1) {
-        const noise = rnd.random().float(f64) * 0.1 - 0.05;
-        try list_values.append(@as(f64, @floatFromInt(i)) + noise);
-    }
-
-    const uncompressed_values = list_values.items;
-
-    try compressSimPiece(uncompressed_values[0..], &compressed_values, allocator, error_bound);
-    try decompress(compressed_values.items, &decompressed_values, allocator);
-
-    try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
-
-    for (0..uncompressed_values.len) |index| {
-        const uncompressed_value = uncompressed_values[index];
-        const decompressed_value = decompressed_values.items[index];
-        // Finding the maximum deviation level. A level lower than 1e-6 is not passing the test.
-        try testing.expect(@abs(uncompressed_value - decompressed_value) < 1e-6);
-    }
+    try tester.testCompressAndDecompress(
+        uncompressed_values.items[0..],
+        allocator,
+        Method.SimPiece,
+        error_bound,
+        tersets.isWithinErrorBound,
+    );
 }
 
 test "sim-piece random lines and error bound compress and decompress" {
+    const seed: u64 = @bitCast(time.milliTimestamp());
+    var prng = rand.DefaultPrng.init(seed);
+    const random = prng.random();
+    const error_bound = 0.01;
+
     const allocator = testing.allocator;
-    var rnd = std.rand.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
+    var uncompressed_values = ArrayList(f64).init(allocator);
+    defer uncompressed_values.deinit();
 
-    var list_values = ArrayList(f64).init(allocator);
-    defer list_values.deinit();
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
-    const error_bound: f32 = rnd.random().float(f32) * 0.1;
-
-    var i: usize = 0;
-    var lineIndex: usize = 0;
-    var slope: f64 = 2 * (rnd.random().float(f64) - 0.5);
-    var intercept: f64 = 2 * (rnd.random().float(f64) - 0.5);
-    while (i < 1000) : (i += 1) {
-        if (i / 250 > lineIndex) {
-            lineIndex = i / 250;
-            slope = 2 * (rnd.random().float(f64) - 0.5);
-            intercept = 2 * (rnd.random().float(f64) - 0.5);
-        }
-        const noise = rnd.random().float(f64) * 0.1 - 0.05;
-        try list_values.append(slope * @as(f64, @floatFromInt(i)) + intercept + noise);
+    for (0..20) |_| {
+        try tester.generateRandomLinearFunction(&uncompressed_values, random);
     }
 
-    const uncompressed_values = list_values.items;
-
-    try compressSimPiece(
-        uncompressed_values[0..],
-        &compressed_values,
+    try tester.testCompressAndDecompress(
+        uncompressed_values.items[0..],
         allocator,
+        Method.SimPiece,
         error_bound,
+        tersets.isWithinErrorBound,
     );
-    try decompress(compressed_values.items, &decompressed_values, allocator);
-
-    try testing.expect(tersets.isWithinErrorBound(
-        uncompressed_values,
-        decompressed_values.items,
-        error_bound,
-    ));
 }

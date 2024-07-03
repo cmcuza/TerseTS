@@ -135,7 +135,6 @@ pub fn testCompressAndDecompress(
     defer compressed_values.deinit();
     const decompressed_values = try tersets.decompress(compressed_values.items, allocator);
     defer decompressed_values.deinit();
-
     try testing.expect(withinErrorBound(
         uncompressed_values,
         decompressed_values.items,
@@ -179,5 +178,42 @@ pub fn generateRandomValues(uncompressed_values: *ArrayList(f64), random: Random
     for (0..number_of_values) |_| {
         // rand can only generate f64 values in the range [0, 1).
         try uncompressed_values.append(@as(f64, @bitCast(rand.int(random, u64))));
+    }
+}
+
+/// Generate `number_of_values` of random `f64` values between `lower_bound` and `upper_bound` for
+/// use in testing using `random` and add them to `uncompressed_values`.
+pub fn generateBoundedRandomValues(
+    uncompressed_values: *ArrayList(f64),
+    lower_bound: f64,
+    upper_bound: f64,
+    random: Random,
+) !void {
+    for (0..number_of_values) |_| {
+        // generate f64 values in the range [0, 1).
+        const rand_value: f64 = random.float(f64);
+        const bounded_value = lower_bound + (upper_bound - lower_bound) * rand_value;
+        try uncompressed_values.append(bounded_value);
+    }
+}
+
+/// Generate `number_of_values` of random `f64` values following a linear function of random slope
+/// and intercept for use in testing using `random`. Random noise is add to the elements and then
+/// add to `uncompressed_values`.
+pub fn generateRandomLinearFunction(uncompressed_values: *ArrayList(f64), random: Random) !void {
+    // Generate a f64 in the range [0, 1) and use it to generate a random `slope` between 0 and 10
+    // with two precision values. This slope enables enough variety while keeping the values within
+    // the acceptable range.
+    var rand_value: f64 = random.float(f64);
+    const slope: f64 = @round(rand_value * 1000) / 100;
+
+    // Repeat to generate a random intercept.
+    rand_value = random.float(f64);
+    const intercept: f64 = @round(rand_value * 1000) / 10;
+
+    for (0..number_of_values) |x| {
+        rand_value = random.float(f64);
+        const linear_function_value = slope * @as(f64, @floatFromInt(x)) + intercept + rand_value;
+        try uncompressed_values.append(linear_function_value);
     }
 }
