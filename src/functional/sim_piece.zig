@@ -87,7 +87,7 @@ pub fn compressSimPiece(
     defer merged_segments_metadata.deinit();
     try mergeSegmentsMetadata(segments_metadata, &merged_segments_metadata, allocator);
 
-    // Sim-Piece Phase 3: Compute the `SegmentMetadata` HashMap based on the interception point.
+    // Sim-Piece Phase 3: Populate the `SegmentMetadata` HashMap based on the interception point.
     var merged_segments_metadata_map = HashMapf64(HashMapf64(ArrayList(usize))).init(allocator);
     defer {
         // Deinit all ArrayList instances within the inner HashMaps and then deinit the inner HashMaps
@@ -102,7 +102,7 @@ pub fn compressSimPiece(
         }
         merged_segments_metadata_map.deinit();
     }
-    try computeSegmentsMetadataHashMap(
+    try populateSegmentsMetadataHashMap(
         merged_segments_metadata,
         &merged_segments_metadata_map,
         allocator,
@@ -159,7 +159,7 @@ pub fn decompress(
         SegmentMetadata,
         segments_metadata.items,
         {},
-        compareMetadataByStartTime(),
+        compareMetadataByStartTime,
     );
 
     var current_timestamp: usize = 0;
@@ -301,13 +301,13 @@ fn mergeSegmentsMetadata(
     while (iterator.next()) |entry| {
         const metadata_array = entry.value_ptr.*;
 
-        // Sort in asc order based on the lower bound's slope. Alg 2. Line 5. This allows to find
+        // Sort in asc order based on the lower bound's slope. Alg 2. Line 5. This enables finding
         // the segments contained inside other segments and merge them.
         mem.sort(
             SegmentMetadata,
             metadata_array.items,
             {},
-            compareMetadataBySlope(),
+            compareMetadataBySlope,
         );
 
         var merge_metadata: SegmentMetadata = .{
@@ -373,14 +373,15 @@ fn mergeSegmentsMetadata(
         SegmentMetadata,
         merged_segments_metadata.items,
         {},
-        compareMetadataByStartTime(),
+        compareMetadataByStartTime,
     );
 }
 
-/// Sim-Piece Phase 3. Compute HashMap from interception points in `merged_segments_metadata`
-/// to a HashMap from the approximation slope to an array list of timestamps and store it in
-/// `merged_segments_metadata_map`. The `allocator` is used to allocate memory of intermediates.
-fn computeSegmentsMetadataHashMap(
+/// Sim-Piece Phase 3. Populate the `SegmentMetadata` HashMap from interception points in
+/// `merged_segments_metadata` to a HashMap from the approximation slope to an array list of
+/// timestamps and store it in `merged_segments_metadata_map`. The `allocator` is used to allocate
+/// memory of intermediates.
+fn populateSegmentsMetadataHashMap(
     merged_segments_metadata: ArrayList(SegmentMetadata),
     merged_segments_metadata_map: *HashMapf64(HashMapf64(ArrayList(usize))),
     allocator: mem.Allocator,
@@ -487,21 +488,21 @@ fn appendSegmentMetadata(
 }
 
 /// Returns a comparator function that compares SegmentMetadata by `lower_bound_slope`.
-fn compareMetadataBySlope() fn (void, SegmentMetadata, SegmentMetadata) bool {
-    return struct {
-        pub fn inner(_: void, metadata_one: SegmentMetadata, metadata_two: SegmentMetadata) bool {
-            return metadata_one.lower_bound_slope < metadata_two.lower_bound_slope;
-        }
-    }.inner;
+fn compareMetadataBySlope(
+    _: void,
+    metadata_one: SegmentMetadata,
+    metadata_two: SegmentMetadata,
+) bool {
+    return metadata_one.lower_bound_slope < metadata_two.lower_bound_slope;
 }
 
 /// Returns a comparator function that compares SegmentMetadata by `start_time`.
-fn compareMetadataByStartTime() fn (void, SegmentMetadata, SegmentMetadata) bool {
-    return struct {
-        pub fn inner(_: void, metadata_one: SegmentMetadata, metadata_two: SegmentMetadata) bool {
-            return metadata_one.start_time < metadata_two.start_time;
-        }
-    }.inner;
+fn compareMetadataByStartTime(
+    _: void,
+    metadata_one: SegmentMetadata,
+    metadata_two: SegmentMetadata,
+) bool {
+    return metadata_one.start_time < metadata_two.start_time;
 }
 
 /// Append `value` of `type` determined at compile time to `compressed_values`.
@@ -556,8 +557,8 @@ test "f64 context can hash" {
         try f64_hash_map.put(rand_number + deviation, rand_number + deviation);
     }
 
-    // All elements are expected to be added with an independent key and without collisions, thus
-    // the size of the HashMap must be 300.
+    // All elements are expected to be added with an independent key, i.e., all be entries in the
+    // for-loop must be stored as separate key-value pairs in the hash map.
     try testing.expectEqual(300, f64_hash_map.count());
 
     var iterator = f64_hash_map.iterator();
@@ -628,13 +629,13 @@ test "sim-piece can compress, decompress and merge many segments with non-zero e
     defer uncompressed_values.deinit();
 
     for (0..20) |_| {
-        // Generate floating points numbers between 0 and 10. This must generate many merged
+        // Generate floating points numbers between 0 and 10. This will generate many merged
         // segments when applying Sim-Piece.
         try tester.generateBoundedRandomValues(&uncompressed_values, 0, 10, random);
     }
 
     try tester.testCompressAndDecompress(
-        uncompressed_values.items[0..],
+        uncompressed_values.items,
         allocator,
         Method.SimPiece,
         error_bound,
@@ -654,7 +655,7 @@ test "sim-piece even size compress and decompress" {
     try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, random);
 
     try tester.testCompressAndDecompress(
-        uncompressed_values.items[0..],
+        uncompressed_values.items,
         allocator,
         Method.SimPiece,
         error_bound,
@@ -677,7 +678,7 @@ test "sim-piece odd size compress and decompress" {
     try uncompressed_values.append(random.float(f64));
 
     try tester.testCompressAndDecompress(
-        uncompressed_values.items[0..],
+        uncompressed_values.items,
         allocator,
         Method.SimPiece,
         error_bound,
@@ -700,7 +701,7 @@ test "sim-piece random lines and error bound compress and decompress" {
     }
 
     try tester.testCompressAndDecompress(
-        uncompressed_values.items[0..],
+        uncompressed_values.items,
         allocator,
         Method.SimPiece,
         error_bound,
