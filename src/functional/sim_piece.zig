@@ -487,7 +487,7 @@ fn appendSegmentMetadata(
     try get_result.value_ptr.*.append(metadata);
 }
 
-/// Returns a comparator function that compares SegmentMetadata by `lower_bound_slope`.
+/// Compares `metadata_one` and `metadata_two` by their lower bound slope.
 fn compareMetadataBySlope(
     _: void,
     metadata_one: SegmentMetadata,
@@ -496,7 +496,7 @@ fn compareMetadataBySlope(
     return metadata_one.lower_bound_slope < metadata_two.lower_bound_slope;
 }
 
-/// Returns a comparator function that compares SegmentMetadata by `start_time`.
+/// Compares `metadata_one` and `metadata_two` by their start time.
 fn compareMetadataByStartTime(
     _: void,
     metadata_one: SegmentMetadata,
