@@ -20,13 +20,14 @@ const ArrayList = std.ArrayList;
 
 const poor_mans_compression = @import("functional/poor_mans_compression.zig");
 const swing_slide_filter = @import("functional/swing_slide_filter.zig");
+const sim_piece = @import("functional/sim_piece.zig");
 
 /// The errors that can occur in TerseTS.
 pub const Error = error{
     UnknownMethod,
     EmptyInput,
     IncorrectInput,
-    NegativeErrorBound,
+    UnsupportedErrorBound,
     OutOfMemory,
 };
 
@@ -36,6 +37,7 @@ pub const Method = enum {
     PoorMansCompressionMean,
     SwingFilter,
     SlideFilter,
+    SimPiece,
 };
 
 /// `Point` with discrete `time` axis.
@@ -67,7 +69,7 @@ pub fn compress(
     error_bound: f32,
 ) Error!ArrayList(u8) {
     if (uncompressed_values.len == 0) return Error.EmptyInput;
-    if (error_bound < 0) return Error.NegativeErrorBound;
+    if (error_bound < 0) return Error.UnsupportedErrorBound;
 
     var compressed_values = ArrayList(u8).init(allocator);
 
@@ -95,6 +97,14 @@ pub fn compress(
         },
         .SlideFilter => {
             try swing_slide_filter.compressSlide(
+                uncompressed_values,
+                &compressed_values,
+                allocator,
+                error_bound,
+            );
+        },
+        .SimPiece => {
+            try sim_piece.compressSimPiece(
                 uncompressed_values,
                 &compressed_values,
                 allocator,
@@ -129,6 +139,9 @@ pub fn decompress(
         },
         .SwingFilter, .SlideFilter => {
             try swing_slide_filter.decompress(compressed_values_slice, &decompressed_values);
+        },
+        .SimPiece => {
+            try sim_piece.decompress(compressed_values_slice, &decompressed_values, allocator);
         },
     }
 

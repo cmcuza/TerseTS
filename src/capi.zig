@@ -102,7 +102,7 @@ fn errorToInt(err: Error) i32 {
     switch (err) {
         Error.UnknownMethod => return 1,
         Error.EmptyInput => return 2,
-        Error.NegativeErrorBound => return 3,
+        Error.UnsupportedErrorBound => return 3,
         Error.IncorrectInput => return 4,
         Error.OutOfMemory => return 5,
     }
