@@ -12,11 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+*.gch
+*.pch
 .idea
 .vscode
-zig-cache
-zig-out
-__pycache__
+.zig-cache
 TerseTS.egg-info
+__pycache__
 build
-*.gch
+zig-out
