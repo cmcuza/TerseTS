@@ -22,7 +22,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const options = .{
         .name = "tersets",
-        .root_source_file = .{ .path = path },
+        .root_source_file = b.path(path),
         .target = target,
         .optimize = optimize,
         .version = .{ .major = 0, .minor = 0, .patch = 1 },
