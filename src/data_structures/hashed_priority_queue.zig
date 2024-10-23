@@ -18,6 +18,7 @@
 //! implementation. This is particularly useful in applications where the priority of elements may
 //! change, or where elements need to be efficiently accessed by key. This Hashed Priority Queue is
 //! used for the compression algorithms implemented in: /src/functional/histogram_compression.zig
+//! and /src/line_simplification/visvalingam–whyatt.zig (upcoming).
 const std = @import("std");
 const rand = std.rand;
 const Allocator = std.mem.Allocator;
@@ -28,12 +29,8 @@ const expectEqual = testing.expectEqual;
 const expectError = testing.expectError;
 
 const tester = @import("../tester.zig");
-// const tersets = @import("../tersets.zig");
-// const Error = tersets.Error;
-
-pub const Error = error{
-    ItemNotFound,
-};
+const tersets = @import("../tersets.zig");
+const Error = tersets.Error;
 
 /// A generic priority queue with hashed indexing for fast updates.
 /// - `T`: The type of elements stored in the queue.

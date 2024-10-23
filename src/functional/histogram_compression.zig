@@ -17,9 +17,11 @@ const mem = std.mem;
 const math = std.math;
 const testing = std.testing;
 const ArrayList = std.ArrayList;
-const HashedPriorityQueue = @import(
-    "../data_structures/hashed_priority_queue.zig",
-).HashedPriorityQueue;
+
+const HashedPriorityQueue = @import("../data_structures/hashed_priority_queue.zig").HashedPriorityQueue;
+const tersets = @import("../tersets.zig");
+const Error = tersets.Error;
+const tester = @import("../tester.zig");
 
 const Bucket = struct {
     begin: usize, // Begin of the bucket (index where the bucket starts in the data stream).
@@ -46,9 +48,9 @@ const MergeError = struct {
 };
 
 const HashMergeErrorContext = struct {
-    /// Hashes an the `index` by bitcasting it to `u64`.
-    pub fn hash(_: HashMergeErrorContext, merge_error: MergeError) usize {
-        return merge_error.index;
+    /// Hashes the `index:usize` by bitcasting it to `u64`.
+    pub fn hash(_: HashMergeErrorContext, merge_error: MergeError) u64 {
+        return @as(u64, @intCast(merge_error.index));
     }
     /// Compares two `index` for equality.
     pub fn eql(_: HashMergeErrorContext, merge_error_one: MergeError, merge_error_two: MergeError) bool {
@@ -65,7 +67,7 @@ fn compareMergeError(_: void, error_1: MergeError, error_2: MergeError) math.Ord
 }
 
 const Histogram = struct {
-    B: usize, // Target number of buckets.
+    max_buckets: usize, // Target number of buckets.
     buckets: ArrayList(Bucket), // List of current buckets.
     // Priority queue of merge errors.
     merge_queue: HashedPriorityQueue(
@@ -78,9 +80,9 @@ const Histogram = struct {
     // Initialize the histogram with a given allocator and target bucket count.
     pub fn init(allocator: mem.Allocator, target_buckets: usize) !Histogram {
         return Histogram{
-            .B = target_buckets,
+            .max_buckets = target_buckets,
             .buckets = ArrayList(Bucket).init(allocator),
-            .merge_queue = PriorityQueue(MergeError, void, compareMergeError).init(allocator, {}),
+            .merge_queue = try HashedPriorityQueue(MergeError, void, compareMergeError, HashMergeErrorContext).init(allocator, {}),
         };
     }
 
@@ -101,19 +103,21 @@ const Histogram = struct {
             try self.merge_queue.add(MergeError{ .index = bucket_last_index - 1, .merge_error = merge_error });
         }
         // If the number of buckets exceeds 2B, merge the least increasing pair (MIN-MERGE).
-        if (self.buckets.items.len > 2 * self.B) {
-            for (self.merge_queue.items) |me| {
-                std.debug.print("Merge Error Inserted {} and {}\n", .{ me.index, me.merge_error });
-            }
+        if (self.buckets.items.len > self.max_buckets) {
             try self.minMerge();
         }
+    }
+
+    // Returns the bucket at `index`.
+    pub fn getBucket(self: *Histogram, index: usize) Bucket {
+        return self.buckets[index];
     }
 
     // Perform the minimum merge by finding the pair with the smallest merge error.
     fn minMerge(self: *Histogram) !void {
 
         // Pop the smallest merge error (the least costly merge).
-        const min_merge_error: MergeError = self.merge_queue.remove();
+        const min_merge_error: MergeError = try self.merge_queue.remove();
         std.debug.print("MinMerge-Error {d} \n", .{min_merge_error.index});
 
         // Merge the buckets at min_merge_error.index and min_merge_error.index + 1.
@@ -160,18 +164,78 @@ const Histogram = struct {
         const merged_max = @max(bucket1.max_val, bucket2.max_val);
         return (merged_max - merged_min) / 2.0;
     }
-
-    // Print the current state of the histogram, showing each bucket's range, min, max, and error.
-    pub fn printHistrogram(self: *Histogram) void {
-        std.debug.print("Mything {}", .{self.merge_queue.mything});
-        // for (self.buckets.items) |b| {
-        //     std.debug.print("Bucket [{} - {}] -> min: {}, max: {}, error: {}\n", .{ b.begin, b.end, b.min_val, b.max_val, b.getError() });
-        // }
-    }
 };
 
+/// Compress `uncompressed_values` with the maximum number of buckets defined by the `error_bound`
+/// using "Piewice Constant Histogram" compression method and write the result to
+/// `compressed_values`. If an error occurs it is returned.
+pub fn compressPWCH(
+    uncompressed_values: []const f64,
+    compressed_values: *ArrayList(u8),
+    allocator: mem.Allocator,
+    error_bound: f32,
+) Error!void {
+    if (error_bound <= 0.0) {
+        return Error.UnsupportedErrorBound;
+    }
+
+    // The original implementation requires the maximum number of buckets which can be represented
+    // by a usize instead of `error_bound: f32`. Changing this requires modifications in
+    // `src/tersets.zig` and `src/capi.zig` files.
+    // TODO: Find the right of passing the maximum number of buckets.
+    const target_buckets: usize = @as(usize, @intFromFloat(@floor(error_bound)));
+    var histogram = try Histogram.init(allocator, target_buckets);
+    defer histogram.deinit();
+
+    for (uncompressed_values.items, 0..) |elem, index| {
+        try histogram.insert(elem, index);
+    }
+
+    for (0..2 * target_buckets) |index| {
+        const bucket: Bucket = histogram.getBucket(index);
+        try appendValueAndIndexToArrayList(bucket.getError(), bucket.end, compressed_values);
+    }
+}
+
+/// Decompress `compressed_values` produced by "Piecewise Constant Histogram" and write the result
+/// to `decompressed_values`. If an error occurs it is returned. The implementation is similar to
+/// "Poor Man’s Compression" decompression function.
+pub fn decompress(
+    compressed_values: []const u8,
+    decompressed_values: *ArrayList(f64),
+) Error!void {
+    // The compressed representation is pairs containing a 64-bit float value and 64-bit end index.
+    if (compressed_values.len % 16 != 0) return Error.IncorrectInput;
+
+    const compressed_values_and_index = mem.bytesAsSlice(f64, compressed_values);
+
+    var compressed_index: usize = 0;
+    var uncompressed_index: usize = 0;
+    while (compressed_index < compressed_values_and_index.len) : (compressed_index += 2) {
+        const value = compressed_values_and_index[compressed_index];
+        const index: usize = @bitCast(compressed_values_and_index[compressed_index + 1]);
+        for (uncompressed_index..index) |_| {
+            try decompressed_values.append(value);
+        }
+        uncompressed_index = index;
+    }
+}
+
+/// Append `compressed_value` and `index` to `compressed_values`.
+fn appendValueAndIndexToArrayList(
+    compressed_value: f64,
+    index: usize,
+    compressed_values: *ArrayList(u8),
+) !void {
+    const value: f64 = @floatCast(compressed_value);
+    const valueAsBytes: [8]u8 = @bitCast(value);
+    try compressed_values.appendSlice(valueAsBytes[0..]);
+    const indexAsBytes: [8]u8 = @bitCast(index); // No -1 due to 0 indexing.
+    try compressed_values.appendSlice(indexAsBytes[0..]);
+}
+
 test "Generic PriorityQueue with Custom HashMap and HashContext for MergeError" {
-    const allocator = std.heap.page_allocator;
+    const allocator = testing.allocator;
 
     var pq = try HashedPriorityQueue(
         MergeError,
@@ -206,16 +270,15 @@ test "histogram insert, and merge test" {
     var histogram = try Histogram.init(allocator, target_buckets);
     defer histogram.deinit();
 
-    histogram.printHistrogram();
     // Initialize a random number generator.
-    // var rnd = std.rand.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
+    var rnd = std.rand.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
 
     // // Insert 200 random numbers into the histogram.
-    // for (0..1000) |i| {
-    //     const rand_number = @floor((rnd.random().float(f64) - 0.5) * 1000) / 10;
-    //     try histogram.insert(rand_number, i);
-    // }
-    // try testing.expectEqual(2 * target_buckets, histogram.buckets.items.len);
+    for (0..1000) |i| {
+        const rand_number = @floor((rnd.random().float(f64) - 0.5) * 1000) / 10;
+        try histogram.insert(rand_number, i);
+    }
+    try testing.expectEqual(2 * target_buckets, histogram.buckets.items.len);
 }
 
 // test "histogram compression algorithm test" {

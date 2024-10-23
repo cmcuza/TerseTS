@@ -21,6 +21,7 @@ const ArrayList = std.ArrayList;
 const poor_mans_compression = @import("functional/poor_mans_compression.zig");
 const swing_slide_filter = @import("functional/swing_slide_filter.zig");
 const sim_piece = @import("functional/sim_piece.zig");
+const pwch = @import("functional/histogram_compression.zig");
 
 /// The errors that can occur in TerseTS.
 pub const Error = error{
@@ -39,6 +40,7 @@ pub const Method = enum {
     SwingFilter,
     SlideFilter,
     SimPiece,
+    PiecewiseConstantHistogram,
 };
 
 /// `Point` with discrete `time` axis.
@@ -112,6 +114,14 @@ pub fn compress(
                 error_bound,
             );
         },
+        .PiecewiseConstantHistogram => {
+            try sim_piece.compressSimPiece(
+                uncompressed_values,
+                &compressed_values,
+                allocator,
+                error_bound,
+            );
+        },
     }
     try compressed_values.append(@intFromEnum(method));
     return compressed_values;
@@ -143,6 +153,9 @@ pub fn decompress(
         },
         .SimPiece => {
             try sim_piece.decompress(compressed_values_slice, &decompressed_values, allocator);
+        },
+        .PiecewiseConstantHistogram => {
+            try pwch.decompress(compressed_values_slice, &decompressed_values);
         },
     }
 
