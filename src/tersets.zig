@@ -29,6 +29,7 @@ pub const Error = error{
     IncorrectInput,
     UnsupportedErrorBound,
     OutOfMemory,
+    ItemNotFound,
 };
 
 /// The compression methods in TerseTS.
