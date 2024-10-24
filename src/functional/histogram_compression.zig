@@ -16,6 +16,7 @@ const std = @import("std");
 const mem = std.mem;
 const math = std.math;
 const testing = std.testing;
+const time = std.time;
 const expectEqual = testing.expectEqual;
 const ArrayList = std.ArrayList;
 
@@ -107,6 +108,7 @@ const Histogram = struct {
         }
         // If the number of buckets exceeds 2B, merge the least increasing pair (MIN-MERGE).
         if (self.buckets.items.len > self.max_buckets) {
+            // self.dump(true);
             try self.minMerge();
         }
     }
@@ -131,6 +133,8 @@ const Histogram = struct {
         // Pop the smallest merge error (the least costly merge).
         const min_merge_error: MergeError = try self.merge_queue.remove();
 
+        // std.debug.print("Min Merge {}\n", .{min_merge_error.index});
+
         // Merge the buckets at min_merge_error.index and min_merge_error.index + 1.
         const index = min_merge_error.index;
         const bucket_one = self.buckets.items[index];
@@ -147,14 +151,19 @@ const Histogram = struct {
         _ = self.buckets.orderedRemove(index + 1); // Remove the merged bucket.
 
         if (index < self.buckets.items.len - 1) {
-            // self.dump(true);
+            // std.debug.print("Before adding\n", .{});
+            // self.dump(false);
             const new_merge_error = self.calculateMergeError(index);
             try self.merge_queue.add(MergeError{ .index = index, .merge_error = new_merge_error });
 
             if (index > 0)
                 try self.merge(index - 1); // Update error for the previous bucket.
 
+            // std.debug.print("Before update\n", .{});
+            // self.dump(false);
             try self.updateAllIndex(index + 1);
+            // std.debug.print("After update\n", .{});
+            // self.dump(true);
         }
     }
 
@@ -176,12 +185,29 @@ const Histogram = struct {
                 .{ .index = i, .merge_error = 0 },
             );
             const old_merge_error: MergeError = try self.merge_queue.getItemAt(merge_error_index);
-            const new_merge_error: MergeError = .{
+            var new_merge_error: MergeError = .{
                 .index = old_merge_error.index - 1,
                 .merge_error = old_merge_error.merge_error,
             };
+
+            if (i == index) {
+                new_merge_error.index = self.max_buckets + 10;
+                new_merge_error.merge_error = 1e16;
+            }
             try self.merge_queue.update(old_merge_error, new_merge_error);
         }
+    }
+
+    fn dump(self: *Self, print_buckets: bool) void {
+        if (print_buckets) {
+            std.debug.print("\nbuckets\n", .{});
+            for (self.buckets.items) |bucket| {
+                std.debug.print("{}\n", .{bucket});
+            }
+        }
+        std.debug.print("queue\n", .{});
+        self.merge_queue.dump();
+        std.debug.print("--------\n", .{});
     }
 };
 
@@ -289,7 +315,8 @@ test "PWCH: histogram insert, and merge test number buckets" {
     defer histogram.deinit();
 
     // Initialize a random number generator.
-    var rnd = std.rand.DefaultPrng.init(0);
+    const seed: u64 = @bitCast(time.milliTimestamp());
+    var rnd = std.rand.DefaultPrng.init(seed);
 
     // // Insert 200 random numbers into the histogram.
     for (0..1000) |i| {
@@ -299,12 +326,12 @@ test "PWCH: histogram insert, and merge test number buckets" {
     try expectEqual(target_buckets, histogram.buckets.items.len);
 }
 
-test "PWCH: histogram compression algorithm test" {
+test "PWCH: simple fixed values test" {
     const allocator = testing.allocator;
 
     // Input data points
     const data_points = [_]f64{
-        0.9, 1.1, 1.0, 0.8, // Cluster 1
+        0.9, 1.1, 0.7, 1.0, 0.8, // Cluster 1
         4.8, 5.2,  4.6, 5.0, 4.7, // Cluster 2
         9.8, 10.2, 9.9, 9.7, 10.0,
         10.1, // Cluster 3
@@ -321,19 +348,168 @@ test "PWCH: histogram compression algorithm test" {
     try expectEqual(@as(usize, @intCast(3)), histogram.buckets.items.len);
 
     const expected_histogram = [_]Bucket{
-        Bucket{ .begin = 0, .end = 3, .min_val = 0.8, .max_val = 1.1 },
-        Bucket{ .begin = 4, .end = 8, .min_val = 4.6, .max_val = 5.2 },
-        Bucket{ .begin = 9, .end = 14, .min_val = 9.7, .max_val = 10.2 },
+        Bucket{ .begin = 0, .end = 4, .min_val = 0.7, .max_val = 1.1 },
+        Bucket{ .begin = 5, .end = 9, .min_val = 4.6, .max_val = 5.2 },
+        Bucket{ .begin = 10, .end = 15, .min_val = 9.7, .max_val = 10.2 },
     };
-
-    for (histogram.buckets.items) |bucket| {
-        std.debug.print("{}\n", .{bucket});
-    }
 
     for (histogram.buckets.items, 0..) |bucket, i| {
         try expectEqual(expected_histogram[i].begin, bucket.begin);
         try expectEqual(expected_histogram[i].end, bucket.end);
         try expectEqual(expected_histogram[i].min_val, bucket.min_val);
         try expectEqual(expected_histogram[i].max_val, bucket.max_val);
+    }
+}
+
+test "PWCH: fixed cluster number with random values" {
+    const allocator = std.testing.allocator;
+    const seed: u64 = @bitCast(time.milliTimestamp());
+    var rnd = std.rand.DefaultPrng.init(seed);
+
+    const cluster_ranges = [_]struct {
+        min: f64,
+        max: f64,
+        count: usize,
+    }{
+        // Cluster 1
+        .{ .min = 0.5, .max = 1.5, .count = 5 },
+        // Cluster 2
+        .{ .min = 4.5, .max = 5.5, .count = 5 },
+        // Cluster 3
+        .{ .min = 9.5, .max = 10.5, .count = 6 },
+        // Cluster 4
+        .{ .min = 1.5, .max = 2.5, .count = 6 },
+        // Cluster 5
+        .{ .min = 11.5, .max = 12.5, .count = 3 },
+    };
+
+    // Collect all data points
+    var data_points = std.ArrayList(f64).init(allocator);
+    defer data_points.deinit();
+
+    // Generate random values for each cluster
+    for (cluster_ranges) |cluster| {
+        for (cluster.count) |_| {
+            const value = rnd.random().float(f64) * (cluster.max - cluster.min) + cluster.min;
+            try data_points.append(value);
+        }
+    }
+
+    // Initialize the histogram with a maximum of 3 buckets
+    var histogram = try Histogram.init(allocator, cluster_ranges.len);
+    defer histogram.deinit();
+
+    // Insert data points into the histogram
+    for (data_points.items, 0..) |value, i| {
+        try histogram.insert(value, i);
+    }
+
+    // Verify the number of buckets
+    try expectEqual(cluster_ranges.len, histogram.buckets.items.len);
+
+    // Build the expected histogram by iterating over cluster_ranges
+    var expected_histogram = std.ArrayList(Bucket).init(allocator);
+    defer expected_histogram.deinit();
+
+    var current_begin: usize = 0;
+    for (cluster_ranges) |cluster| {
+        const bucket = Bucket{
+            .begin = current_begin,
+            .end = current_begin + cluster.count - 1,
+            .min_val = cluster.min,
+            .max_val = cluster.max,
+        };
+        try expected_histogram.append(bucket);
+        current_begin += cluster.count;
+    }
+
+    // Verify that the output histogram matches the expected histogram
+    for (histogram.buckets.items, 0..) |bucket, i| {
+        const expected_bucket = expected_histogram.items[i];
+
+        try expectEqual(expected_bucket.begin, bucket.begin);
+        try expectEqual(expected_bucket.end, bucket.end);
+    }
+}
+
+test "PWCH: random clusters, elements per cluster and values" {
+    const allocator = std.testing.allocator;
+    const seed: u64 = @bitCast(time.milliTimestamp());
+    var rnd = std.rand.DefaultPrng.init(seed);
+    const num_cluster: usize = rnd.random().uintLessThan(usize, 100) + 10;
+
+    var cluster_ranges = std.ArrayList(struct {
+        min: f64,
+        max: f64,
+        count: usize,
+    }).init(allocator);
+    defer cluster_ranges.deinit();
+
+    const min_value: f64 = -1e6;
+    const cluster_width: f64 = rnd.random().float(f64) * 1000 / 10;
+    const gap: f64 = cluster_width + rnd.random().float(f64) * 100 + 20; // min gag
+    const max_counts_per_cluster: usize = 100;
+
+    var current_min_value = min_value;
+    for (0..num_cluster) |i| {
+        const momentum: f64 = if (i < num_cluster / 2) 1.0 else -1.0;
+        const cluster_min = current_min_value + momentum * gap;
+        const cluster_max = cluster_min + cluster_width;
+        const count: usize = rnd.random().uintLessThan(usize, max_counts_per_cluster) + 10;
+        // Append the cluster to cluster_ranges
+        try cluster_ranges.append(.{
+            .min = cluster_min,
+            .max = cluster_max,
+            .count = count,
+        });
+        current_min_value = cluster_min;
+    }
+
+    // Collect all data points
+    var data_points = std.ArrayList(f64).init(allocator);
+    defer data_points.deinit();
+
+    // Generate random values for each cluster
+    for (cluster_ranges.items) |cluster| {
+        for (cluster.count) |_| {
+            const value = rnd.random().float(f64) * (cluster.max - cluster.min) + cluster.min;
+            try data_points.append(value);
+        }
+    }
+
+    // Initialize the histogram with a maximum of  'num_cluster' buckets
+    var histogram = try Histogram.init(allocator, num_cluster);
+    defer histogram.deinit();
+
+    // Insert data points into the histogram
+    for (data_points.items, 0..) |value, i| {
+        try histogram.insert(value, i);
+    }
+
+    // Verify the number of buckets
+    try expectEqual(cluster_ranges.items.len, histogram.buckets.items.len);
+
+    // Build the expected histogram by iterating over cluster_ranges
+    var expected_histogram = std.ArrayList(Bucket).init(allocator);
+    defer expected_histogram.deinit();
+
+    var current_begin: usize = 0;
+    for (cluster_ranges.items) |cluster| {
+        const bucket = Bucket{
+            .begin = current_begin,
+            .end = current_begin + cluster.count - 1,
+            .min_val = cluster.min,
+            .max_val = cluster.max,
+        };
+        try expected_histogram.append(bucket);
+        current_begin += cluster.count;
+    }
+
+    // Verify that the output histogram matches the expected histogram
+    for (histogram.buckets.items, 0..) |bucket, i| {
+        const expected_bucket = expected_histogram.items[i];
+
+        try expectEqual(expected_bucket.begin, bucket.begin);
+        try expectEqual(expected_bucket.end, bucket.end);
     }
 }
