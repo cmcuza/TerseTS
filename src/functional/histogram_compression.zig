@@ -12,6 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Implementation of the Min-Merge algorithm from the paper
+//! "Buragohain, Chiranjeeb, Nisheeth Shrivastava, and Subhash Suri.
+//! Space efficient streaming algorithms for the maximum error histogram.
+//! IEEE ICDE 2006.
+//! https://doi.org/10.1109/ICDE.2007.368961.
+//! Min-Merge find a Piecewise Constant Histogram compressed representation
+//! of the time series. Thus, we called the method PWCH as in the benchmark paper
+//! https://doi.org/10.1109/TKDE.2012.237.
+
 const std = @import("std");
 const mem = std.mem;
 const math = std.math;
@@ -20,35 +29,44 @@ const time = std.time;
 const expectEqual = testing.expectEqual;
 const ArrayList = std.ArrayList;
 
-const HashedPriorityQueue = @import("../data_structures/hashed_priority_queue.zig").HashedPriorityQueue;
+const HashedPriorityQueue = @import(
+    "../data_structures/hashed_priority_queue.zig",
+).HashedPriorityQueue;
 const tersets = @import("../tersets.zig");
 const Error = tersets.Error;
-const tester = @import("../tester.zig");
 
+/// `Bucket` stores the necessary information about the buckets. It stores the
+/// `begin` of the bucket (index where the bucket starts in the data stream).
+/// `end` of the bucket (index where the bucket ends in the data stream).
+///  The minimum value `min_val` and maximum value `max_value` within the bucket.
+/// The structure also contains the function `computeError` which computes and
+/// returns the $L_\inf$ error associated to the bucket.
 const Bucket = struct {
-    begin: usize, // Begin of the bucket (index where the bucket starts in the data stream).
-    end: usize, // End of the bucket (index where the bucket ends in the data stream).
-    min_val: f64, // Minimum value within this bucket.
-    max_val: f64, // Maximum value within this bucket.
+    begin: usize,
+    end: usize,
+    min_val: f64,
+    max_val: f64,
 
-    // Initialize the bucket with the given indices and min/max values.
+    /// Initialize the bucket with the given indices and min/max values.
     pub fn init(begin: usize, end: usize, min_val: f64, max_val: f64) !Bucket {
         return Bucket{ .begin = begin, .end = end, .min_val = min_val, .max_val = max_val };
     }
 
-    // Calculate the error for the bucket. Error is half the difference between max and min values.
-    pub fn getError(self: Bucket) f64 {
+    /// Calculate the error for the bucket. Error is half the difference between max and min values.
+    pub fn computeError(self: Bucket) f64 {
         return (self.max_val - self.min_val) / 2.0;
     }
 };
 
-// Structure for holding merge information.
-// This represents the error that results from merging two adjacent buckets.
+/// Structure for holding merge information. This represents the error that results from merging
+/// two adjacent buckets.
 const MergeError = struct {
     index: usize, // Index of the first bucket in the pair to be merged.
     merge_error: f64, // Error resulting from merging this bucket with the next one.
 };
 
+/// `HashMergeErrorContext` provides context for hashing and comparing `merge_error` items for use
+/// in `HashMap`. It defines how the `merge_error` are hashed and compared for equality.
 const HashMergeErrorContext = struct {
     /// Hashes the `index:usize` by bitcasting it to `u64`.
     pub fn hash(_: HashMergeErrorContext, merge_error: MergeError) u64 {
@@ -60,20 +78,26 @@ const HashMergeErrorContext = struct {
     }
 };
 
-// Comparison function for the priority queue.
-// It compares merge errors, and also considers bucket indices for equality.
+/// Comparison function for the priority queue. It compares merge errors, and also considers
+///  bucket indices for equality.
 fn compareMergeError(_: void, error_1: MergeError, error_2: MergeError) math.Order {
     if (error_1.index == error_2.index)
         return math.Order.eq;
     return math.order(error_1.merge_error, error_2.merge_error);
 }
 
+/// A Histogram structure containing an ArrayList of `buckets` and a HashedPriorityQueue
+/// `merge_queue` that keeps track of the minimum merge error merging two adjacent bucktes.
+/// This structure contains the Min-Merge algorithm from the paper to maintaning the histogram
+/// using only `max_buckets` buckets.
 const Histogram = struct {
     const Self = @This();
 
-    max_buckets: usize, // Target number of buckets.
-    buckets: ArrayList(Bucket), // List of current buckets.
-    // Priority queue of merge errors.
+    /// Target number of buckets.
+    max_buckets: usize,
+    /// List of current buckets.
+    buckets: ArrayList(Bucket),
+    /// Priority queue of merge errors.
     merge_queue: HashedPriorityQueue(
         MergeError,
         void,
@@ -81,7 +105,7 @@ const Histogram = struct {
         HashMergeErrorContext,
     ),
 
-    // Initialize the histogram with a given allocator and target bucket count.
+    /// Initialize the histogram with a given allocator and target bucket count.
     pub fn init(allocator: mem.Allocator, target_buckets: usize) !Histogram {
         return Histogram{
             .max_buckets = target_buckets,
@@ -90,13 +114,13 @@ const Histogram = struct {
         };
     }
 
-    // Deinitialize the histogram and release memory.
+    /// Deinitialize the histogram and release memory.
     pub fn deinit(self: *Self) void {
         self.buckets.deinit();
         self.merge_queue.deinit();
     }
 
-    // Insert a new value into the histogram.
+    /// Insert a new value into the histogram.
     pub fn insert(self: *Self, value: f64, index: usize) !void {
         // Create a new bucket for the incoming value with start and end at 'index'.
         try self.buckets.append(try Bucket.init(index, index, value, value));
@@ -108,17 +132,16 @@ const Histogram = struct {
         }
         // If the number of buckets exceeds 2B, merge the least increasing pair (MIN-MERGE).
         if (self.buckets.items.len > self.max_buckets) {
-            // self.dump(true);
             try self.minMerge();
         }
     }
 
-    // Returns the bucket at `index`.
+    /// Returns the bucket at `index`.
     pub fn getBucket(self: *Self, index: usize) Bucket {
         return self.buckets[index];
     }
 
-    // Calculate the merge error for merging the bucket at `index`  with the next bucket.
+    /// Calculate the merge error for merging the bucket at `index` with the next bucket.
     fn calculateMergeError(self: *Self, index: usize) f64 {
         const bucket1 = self.buckets.items[index];
         const bucket2 = self.buckets.items[index + 1];
@@ -127,13 +150,11 @@ const Histogram = struct {
         return (merged_max - merged_min) / 2.0;
     }
 
-    // Perform the minimum merge by finding the pair with the smallest merge error.
+    /// Perform the minimum merge by finding the pair with the smallest merge error.
     fn minMerge(self: *Self) !void {
 
         // Pop the smallest merge error (the least costly merge).
         const min_merge_error: MergeError = try self.merge_queue.remove();
-
-        // std.debug.print("Min Merge {}\n", .{min_merge_error.index});
 
         // Merge the buckets at min_merge_error.index and min_merge_error.index + 1.
         const index = min_merge_error.index;
@@ -151,23 +172,17 @@ const Histogram = struct {
         _ = self.buckets.orderedRemove(index + 1); // Remove the merged bucket.
 
         if (index < self.buckets.items.len - 1) {
-            // std.debug.print("Before adding\n", .{});
-            // self.dump(false);
             const new_merge_error = self.calculateMergeError(index);
             try self.merge_queue.add(MergeError{ .index = index, .merge_error = new_merge_error });
 
             if (index > 0)
                 try self.merge(index - 1); // Update error for the previous bucket.
 
-            // std.debug.print("Before update\n", .{});
-            // self.dump(false);
             try self.updateAllIndex(index + 1);
-            // std.debug.print("After update\n", .{});
-            // self.dump(true);
         }
     }
 
-    // Update the merge error for the bucket at 'index'.
+    /// Update the merge error for the bucket at 'index'.
     fn merge(self: *Self, index: usize) !void {
         const merge_error = self.calculateMergeError(index);
         const new_merge_error = MergeError{ .index = index, .merge_error = merge_error };
@@ -179,6 +194,7 @@ const Histogram = struct {
         try self.merge_queue.update(old_merge_item, new_merge_error);
     }
 
+    /// Update the indices of all merge error from `index` until `buckets.items.len`.
     fn updateAllIndex(self: *Self, index: usize) !void {
         for (index..self.buckets.items.len) |i| {
             const merge_error_index: usize = try self.merge_queue.getItemPosition(
@@ -196,18 +212,6 @@ const Histogram = struct {
             }
             try self.merge_queue.update(old_merge_error, new_merge_error);
         }
-    }
-
-    fn dump(self: *Self, print_buckets: bool) void {
-        if (print_buckets) {
-            std.debug.print("\nbuckets\n", .{});
-            for (self.buckets.items) |bucket| {
-                std.debug.print("{}\n", .{bucket});
-            }
-        }
-        std.debug.print("queue\n", .{});
-        self.merge_queue.dump();
-        std.debug.print("--------\n", .{});
     }
 };
 
@@ -238,7 +242,7 @@ pub fn compressPWCH(
 
     for (0..2 * target_buckets) |index| {
         const bucket: Bucket = histogram.getBucket(index);
-        try appendValueAndIndexToArrayList(bucket.getError(), bucket.end, compressed_values);
+        try appendValueAndIndexToArrayList(bucket.computeError(), bucket.end, compressed_values);
     }
 }
 
