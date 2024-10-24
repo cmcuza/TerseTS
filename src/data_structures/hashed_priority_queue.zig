@@ -15,10 +15,11 @@
 //! Implementation of a Hashed Priority Queue based on Zig's standard `PriorityQueue` by
 //! incorporating a hash map to track element positions, enabling efficient updates and removals
 //! by key. The main heap operations (`add`, `siftUp`, `siftDown`, `remove`)  are adapted from Zig's
-//! implementation. This is particularly useful in applications where the priority of elements may
-//! change, or where elements need to be efficiently accessed by key. This Hashed Priority Queue is
-//! used for the compression algorithms implemented in: /src/functional/histogram_compression.zig
-//! and /src/line_simplification/visvalingam–whyatt.zig (upcoming).
+//! implementation. Additionally, we have added new utils functions used by the compression algorithms.
+//! This is particularly useful in applications where the priority of elements may change, or where
+//! elements need to be efficiently accessed by key. This Hashed Priority Queue is used for the
+//! compression algorithms implemented in: /src/functional/histogram_compression.zig and
+//! /src/line_simplification/visvalingam–whyatt.zig (upcoming).
 const std = @import("std");
 const rand = std.rand;
 const Allocator = std.mem.Allocator;
@@ -155,6 +156,14 @@ pub fn HashedPriorityQueue(
             return self.index_map.get(elem) orelse Error.ItemNotFound;
         }
 
+        /// Returns the `elem` in the queue that has the same key as the elem added.
+        pub fn getItemAt(self: *Self, index: usize) !T {
+            if (index > self.items.len)
+                return Error.ItemNotFound;
+
+            return self.items[index];
+        }
+
         /// Returns the current capacity of the internal array.
         pub fn capacity(self: *Self) usize {
             return self.items.len;
@@ -225,6 +234,23 @@ pub fn HashedPriorityQueue(
             }
             // Reallocate the array with the new capacity.
             self.items = try self.allocator.realloc(self.items, better_capacity);
+        }
+
+        pub fn dump(self: *Self) void {
+            const print = std.debug.print;
+            print("{{\n", .{});
+            print("items:\n", .{});
+            // Iterate over the valid elements in self.items
+            for (self.items[0..self.len]) |e| {
+                print("{any},\n", .{e});
+            }
+            print("\nhash map:\n", .{});
+            // Use an iterator to traverse the hash map
+            var it = self.index_map.iterator();
+            while (it.next()) |entry| {
+                print("key: {}, value: {},\n", .{ entry.key_ptr.*, entry.value_ptr.* });
+            }
+            print("}}\n", .{});
         }
     };
 }

@@ -16,6 +16,7 @@ const std = @import("std");
 const mem = std.mem;
 const math = std.math;
 const testing = std.testing;
+const expectEqual = testing.expectEqual;
 const ArrayList = std.ArrayList;
 
 const HashedPriorityQueue = @import("../data_structures/hashed_priority_queue.zig").HashedPriorityQueue;
@@ -67,6 +68,8 @@ fn compareMergeError(_: void, error_1: MergeError, error_2: MergeError) math.Ord
 }
 
 const Histogram = struct {
+    const Self = @This();
+
     max_buckets: usize, // Target number of buckets.
     buckets: ArrayList(Bucket), // List of current buckets.
     // Priority queue of merge errors.
@@ -87,13 +90,13 @@ const Histogram = struct {
     }
 
     // Deinitialize the histogram and release memory.
-    pub fn deinit(self: *Histogram) void {
+    pub fn deinit(self: *Self) void {
         self.buckets.deinit();
         self.merge_queue.deinit();
     }
 
     // Insert a new value into the histogram.
-    pub fn insert(self: *Histogram, value: f64, index: usize) !void {
+    pub fn insert(self: *Self, value: f64, index: usize) !void {
         // Create a new bucket for the incoming value with start and end at 'index'.
         try self.buckets.append(try Bucket.init(index, index, value, value));
 
@@ -109,42 +112,54 @@ const Histogram = struct {
     }
 
     // Returns the bucket at `index`.
-    pub fn getBucket(self: *Histogram, index: usize) Bucket {
+    pub fn getBucket(self: *Self, index: usize) Bucket {
         return self.buckets[index];
     }
 
+    // Calculate the merge error for merging the bucket at `index`  with the next bucket.
+    fn calculateMergeError(self: *Self, index: usize) f64 {
+        const bucket1 = self.buckets.items[index];
+        const bucket2 = self.buckets.items[index + 1];
+        const merged_min = @min(bucket1.min_val, bucket2.min_val);
+        const merged_max = @max(bucket1.max_val, bucket2.max_val);
+        return (merged_max - merged_min) / 2.0;
+    }
+
     // Perform the minimum merge by finding the pair with the smallest merge error.
-    fn minMerge(self: *Histogram) !void {
+    fn minMerge(self: *Self) !void {
 
         // Pop the smallest merge error (the least costly merge).
         const min_merge_error: MergeError = try self.merge_queue.remove();
-        std.debug.print("MinMerge-Error {d} \n", .{min_merge_error.index});
 
         // Merge the buckets at min_merge_error.index and min_merge_error.index + 1.
         const index = min_merge_error.index;
-        const bucket1 = self.buckets.items[index];
-        const bucket2 = self.buckets.items[index + 1];
+        const bucket_one = self.buckets.items[index];
+        const bucket_two = self.buckets.items[index + 1];
 
         // Merge the two buckets, updating their range and min/max values.
-        const new_begin = bucket1.begin;
-        const new_end = bucket2.end;
-        const new_min = @min(bucket1.min_val, bucket2.min_val);
-        const new_max = @max(bucket1.max_val, bucket2.max_val);
+        const new_begin = bucket_one.begin;
+        const new_end = bucket_two.end;
+        const new_min = @min(bucket_one.min_val, bucket_two.min_val);
+        const new_max = @max(bucket_one.max_val, bucket_two.max_val);
 
         // Replace the first bucket with the merged result and remove the second.
         self.buckets.items[index] = try Bucket.init(new_begin, new_end, new_min, new_max);
         _ = self.buckets.orderedRemove(index + 1); // Remove the merged bucket.
 
-        const new_merge_error = self.calculateMergeError(index);
-        try self.merge_queue.add(MergeError{ .index = index, .merge_error = new_merge_error });
+        if (index < self.buckets.items.len - 1) {
+            // self.dump(true);
+            const new_merge_error = self.calculateMergeError(index);
+            try self.merge_queue.add(MergeError{ .index = index, .merge_error = new_merge_error });
 
-        // Recompute the errors for the neighbors of the merged bucket.
-        if (index > 0)
-            try self.merge(index - 1); // Update error for the previous bucket.
+            if (index > 0)
+                try self.merge(index - 1); // Update error for the previous bucket.
+
+            try self.updateAllIndex(index + 1);
+        }
     }
 
     // Update the merge error for the bucket at 'index'.
-    fn merge(self: *Histogram, index: usize) !void {
+    fn merge(self: *Self, index: usize) !void {
         const merge_error = self.calculateMergeError(index);
         const new_merge_error = MergeError{ .index = index, .merge_error = merge_error };
 
@@ -155,14 +170,18 @@ const Histogram = struct {
         try self.merge_queue.update(old_merge_item, new_merge_error);
     }
 
-    // Calculate the merge error for merging the bucket at index 'i' with the next bucket.
-    fn calculateMergeError(self: *Histogram, i: usize) f64 {
-        std.debug.print("calculateMergeError-Index {} and {} \n", .{ i, i + 1 });
-        const bucket1 = self.buckets.items[i];
-        const bucket2 = self.buckets.items[i + 1];
-        const merged_min = @min(bucket1.min_val, bucket2.min_val);
-        const merged_max = @max(bucket1.max_val, bucket2.max_val);
-        return (merged_max - merged_min) / 2.0;
+    fn updateAllIndex(self: *Self, index: usize) !void {
+        for (index..self.buckets.items.len) |i| {
+            const merge_error_index: usize = try self.merge_queue.getItemPosition(
+                .{ .index = i, .merge_error = 0 },
+            );
+            const old_merge_error: MergeError = try self.merge_queue.getItemAt(merge_error_index);
+            const new_merge_error: MergeError = .{
+                .index = old_merge_error.index - 1,
+                .merge_error = old_merge_error.merge_error,
+            };
+            try self.merge_queue.update(old_merge_error, new_merge_error);
+        }
     }
 };
 
@@ -234,7 +253,7 @@ fn appendValueAndIndexToArrayList(
     try compressed_values.appendSlice(indexAsBytes[0..]);
 }
 
-test "Generic PriorityQueue with Custom HashMap and HashContext for MergeError" {
+test "PWCH: HashedPriorityQueue with hashcontext for MergeError" {
     const allocator = testing.allocator;
 
     var pq = try HashedPriorityQueue(
@@ -254,7 +273,7 @@ test "Generic PriorityQueue with Custom HashMap and HashContext for MergeError" 
     try pq.add(error3);
 
     const top_value = try pq.remove();
-    try std.testing.expect(top_value.index == 2); // Top element should be index 2 (smallest merge_error)
+    try std.testing.expect(top_value.index == 2);
 
     const next_top = try pq.remove();
     try std.testing.expect(next_top.index == 1);
@@ -263,74 +282,58 @@ test "Generic PriorityQueue with Custom HashMap and HashContext for MergeError" 
     try std.testing.expect(final_top.index == 3);
 }
 
-// Test case to verify that insert and merge operations work as expected.
-test "histogram insert, and merge test" {
+test "PWCH: histogram insert, and merge test number buckets" {
     const allocator = testing.allocator;
-    const target_buckets: usize = 10;
+    const target_buckets: usize = 100;
     var histogram = try Histogram.init(allocator, target_buckets);
     defer histogram.deinit();
 
     // Initialize a random number generator.
-    var rnd = std.rand.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
+    var rnd = std.rand.DefaultPrng.init(0);
 
     // // Insert 200 random numbers into the histogram.
     for (0..1000) |i| {
-        const rand_number = @floor((rnd.random().float(f64) - 0.5) * 1000) / 10;
+        const rand_number = @floor((rnd.random().float(f64)) * 100) / 10;
         try histogram.insert(rand_number, i);
     }
-    try testing.expectEqual(2 * target_buckets, histogram.buckets.items.len);
+    try expectEqual(target_buckets, histogram.buckets.items.len);
 }
 
-// test "histogram compression algorithm test" {
-//     const allocator = testing.allocator;
+test "PWCH: histogram compression algorithm test" {
+    const allocator = testing.allocator;
 
-//     // Define the target number of buckets.
-//     const target_buckets: usize = 10;
-//     var histogram = try Histogram.init(allocator, target_buckets);
-//     defer histogram.deinit();
+    // Input data points
+    const data_points = [_]f64{
+        0.9, 1.1, 1.0, 0.8, // Cluster 1
+        4.8, 5.2,  4.6, 5.0, 4.7, // Cluster 2
+        9.8, 10.2, 9.9, 9.7, 10.0,
+        10.1, // Cluster 3
+    };
 
-//     // Insert a series of values in increasing order.
-//     var values = ArrayList(f64).init(allocator);
+    // Initialize the histogram with a maximum of 3 buckets
+    var histogram = try Histogram.init(allocator, 3);
+    defer histogram.deinit();
 
-//     // Insert values into the histogram.
-//     for (0..20) |i| {
-//         const value = @as(f64, @floatFromInt(i));
-//         try histogram.insert(value, i);
-//         try values.append(value);
-//     }
+    // Insert data points into the histogram
+    for (data_points, 0..) |value, i| {
+        try histogram.insert(value, i);
+    }
+    try expectEqual(@as(usize, @intCast(3)), histogram.buckets.items.len);
 
-//     // Step 1: Check that the total number of buckets does not exceed `2 * B`.
-//     std.debug.assert(histogram.buckets.items.len <= 2 * target_buckets);
+    const expected_histogram = [_]Bucket{
+        Bucket{ .begin = 0, .end = 3, .min_val = 0.8, .max_val = 1.1 },
+        Bucket{ .begin = 4, .end = 8, .min_val = 4.6, .max_val = 5.2 },
+        Bucket{ .begin = 9, .end = 14, .min_val = 9.7, .max_val = 10.2 },
+    };
 
-//     // Step 2: Check that bucket ranges and values are correct after merges.
-//     // We should check that adjacent buckets maintain their min/max properties and have the correct error range.
-//     var last_max_value: f64 = histogram.buckets.items[0].max_val;
-//     for (histogram.buckets.items[1..]) |bucket| {
-//         std.debug.assert(bucket.min_val >= last_max_value); // Ensure the next bucket starts at or above the previous bucket's max value.
-//         last_max_value = bucket.max_val;
-//     }
+    for (histogram.buckets.items) |bucket| {
+        std.debug.print("{}\n", .{bucket});
+    }
 
-//     // Step 3: Verify that no bucket's error exceeds the expected maximum (L∞ norm).
-//     const max_error: f64 = (@as(f64, @floatFromInt(values.items.len - 1))) / (2.0 * @as(
-//         f64,
-//         @floatFromInt(target_buckets),
-//     )); // Expected maximum error.
-
-//     for (histogram.buckets.items) |bucket| {
-//         const merge_error = bucket.getError();
-//         std.debug.assert(merge_error <= max_error); // Check that the error is within the expected bounds.
-//     }
-
-//     // Step 4: Test with random data (to simulate real use cases).
-//     var rnd = std.rand.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
-//     for (0..100) |i| {
-//         const rand_value = rnd.random().float(f64) * 100.0; // Generate a random value between 0 and 100.
-//         try histogram.insert(rand_value, i + values.items.len);
-//     }
-
-//     // After additional random inserts, the total number of buckets should still be <= `2 * B`.
-//     std.debug.assert(histogram.buckets.items.len <= 2 * target_buckets);
-
-//     // Final print of the histogram for manual inspection (optional).
-//     histogram.printHistrogram();
-// }
+    for (histogram.buckets.items, 0..) |bucket, i| {
+        try expectEqual(expected_histogram[i].begin, bucket.begin);
+        try expectEqual(expected_histogram[i].end, bucket.end);
+        try expectEqual(expected_histogram[i].min_val, bucket.min_val);
+        try expectEqual(expected_histogram[i].max_val, bucket.max_val);
+    }
+}
