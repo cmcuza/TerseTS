@@ -14,7 +14,7 @@
 
 //! Implementation of a Hashed Priority Queue based on Zig's standard `PriorityQueue` by
 //! incorporating a hash map to track element positions, enabling efficient updates and removals
-//! by key. The main heap operations (`add`, `siftUp`, `siftDown`, `remove`)  are adapted from Zig's
+//! by key. The main heap operations (`add`, `siftUp`, `siftDown`, `remove`) are adapted from Zig's
 //! implementation. Additionally, we have added new functions used by the compression algorithms.
 //! This is particularly useful in applications where the priority of elements may change, or where
 //! elements need to be efficiently accessed by key. This Hashed Priority Queue is used for the
