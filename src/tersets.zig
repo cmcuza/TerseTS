@@ -25,6 +25,7 @@ const sim_piece = @import("functional/sim_piece.zig");
 /// The errors that can occur in TerseTS.
 pub const Error = error{
     UnknownMethod,
+    ItemNotFound,
     EmptyInput,
     IncorrectInput,
     UnsupportedErrorBound,
@@ -51,6 +52,12 @@ pub const ContinousPoint = Point(f64);
 pub const Segment = struct {
     start_point: DiscretePoint,
     end_point: DiscretePoint,
+};
+
+/// Linear function of the form y = slope*x+intercept. It uses f80 for numerical stability.
+pub const LinearFunction = struct {
+    slope: f80,
+    intercept: f80,
 };
 
 /// Margin to adjust the error bound for numerical stability. Reducing the error bound by this
