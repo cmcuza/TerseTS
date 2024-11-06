@@ -94,22 +94,22 @@ pub const ConvexHull = struct {
     /// Rectangle (MABR) of a Convex Hull. The MABR is computed using the Rotating Calipers
     /// algorithm described in the paper:
     /// Shamos, Michael (1978). "Computational Geometry" (PDF). Yale University. pp. 76–81.
-    /// Our implementation is based mostly on the description found in:
+    /// This implementation is based mostly on the description found in:
     /// https://en.wikipedia.org/wiki/Rotating_calipers.
     pub fn computeMABRLinearFunction(self: *ConvexHull) Error!LinearFunction {
-        const hullPoints: ArrayList(DiscretePoint) = try self.getAllPoints();
-        defer hullPoints.deinit();
-        const convex_hull_len: usize = hullPoints.items.len;
+        const convex_hull_len: usize = self.len();
 
-        // One point in the ConvexHull, the line has `slope=0`.
+        // Check if the Convex Hull has only one point. If so, the linear function is a horizontal
+        // line thus `slope=0` and `intercept` is the value of the first and only point.
         if (convex_hull_len == 1) {
-            const first_point: DiscretePoint = hullPoints.items[0];
+            const first_point: DiscretePoint = self.getItemAt(0);
             return LinearFunction{ .intercept = first_point.value, .slope = 0.0 };
         }
-        // Two points in the ConvexHull, the line passes through these two points.
+        // Check if the Convex Hull has only two points. If so, the linear function passes through
+        // the two points in the Convex Hull.
         if (convex_hull_len == 2) {
-            const first_point = hullPoints.items[0];
-            const second_point = hullPoints.items[1];
+            const first_point = self.getItemAt(0);
+            const second_point = self.getItemAt(1);
             const delta_time: f80 = @floatFromInt(second_point.time - first_point.time);
             const slope = (second_point.value - first_point.value) / delta_time;
             const intercept_value: f80 = first_point.value - slope * @as(f80, @floatFromInt(first_point.time));
@@ -118,29 +118,31 @@ pub const ConvexHull = struct {
                 .intercept = intercept_value,
             };
         }
-        // Initialize variables to track the minimum area and corresponding parameters
-        var min_area: f64 = std.math.floatMax(f64); // Set initial min_area to the maximum possible
-        var min_slope: f64 = 0.0; // Slope of the line corresponding to min_area
-        var min_intercept: f64 = 0.0; // Intercept point corresponding to min_area
 
-        // Iterate over each edge of the convex hull
+        // Initialize variables to track the minimum area and corresponding parameters.
+        var min_area: f64 = std.math.floatMax(f64); // Set initial min_area to the maximum possible.
+        var min_slope: f64 = 0.0; // Slope of the line corresponding to min_area.
+        var min_intercept: f64 = 0.0; // Intercept point corresponding to min_area.
+
+        // Iterate over each edge of the convex hull.
         for (0..convex_hull_len) |i| {
-            // Get the current edge (segment) of the convex hull
-            const first_point: DiscretePoint = hullPoints.items[i];
-            const second_point: DiscretePoint = hullPoints.items[@mod(i + 1, convex_hull_len)];
+            // Get the current edge (segment) of the convex hull.
+            const first_point: DiscretePoint = self.getItemAt(i);
+            const second_point: DiscretePoint = self.getItemAt(i + 1);
             const segment = Segment{ .start_point = first_point, .end_point = second_point };
 
-            // Compute the angle between the current edge and the x-axis
+            // Compute the angle between the current edge and the x-axis.
             const angle = angleToXAxis(segment);
-            // Initialize min/max values for rotated points
-            var minX: f64 = std.math.floatMax(f64); // Minimum x-coordinate after rotation
-            var maxX: f64 = std.math.floatMin(f64); // Maximum x-coordinate after rotation
-            var minY: f64 = std.math.floatMax(f64); // Minimum y-coordinate after rotation
-            var maxY: f64 = std.math.floatMin(f64); // Maximum y-coordinate after rotation
 
-            // Rotate all points and update min/max coordinates
+            // Initialize min/max values for rotated points.
+            var minX: f64 = std.math.floatMax(f64); // Minimum x-coordinate after rotation.
+            var maxX: f64 = std.math.floatMin(f64); // Maximum x-coordinate after rotation.
+            var minY: f64 = std.math.floatMax(f64); // Minimum y-coordinate after rotation.
+            var maxY: f64 = std.math.floatMin(f64); // Maximum y-coordinate after rotation.
+
+            // Rotate all points and update min/max coordinates.
             for (0..convex_hull_len) |j| {
-                const point: DiscretePoint = hullPoints.items[@mod(j, convex_hull_len)];
+                const point: DiscretePoint = self.getItemAt(j);
 
                 // Rotate point by -angle to align the edge with the x-axis
                 const rotated_point: ContinousPoint = rotateToXAxis(DiscretePoint, point, -angle);
@@ -152,27 +154,27 @@ pub const ConvexHull = struct {
                 maxY = @max(maxY, rotated_point.value);
             }
 
-            // Compute the area of the bounding rectangle in the rotated coordinate system
-            const width = maxX - minX; // Width of the bounding rectangle
-            const height = maxY - minY; // Height of the bounding rectangle
-            const area = width * height; // Area of the bounding rectangle
+            // Compute the area of the bounding rectangle in the rotated coordinate system.
+            const width = maxX - minX; // Width of the bounding rectangle.
+            const height = maxY - minY; // Height of the bounding rectangle.
+            const area = width * height; // Area of the bounding rectangle.
 
-            // Update minimum area and corresponding parameters if a smaller area is found
+            // Update minimum area and corresponding parameters if a smaller area is found.
             if (area < min_area) {
                 min_area = area;
 
-                // Compute the slope of the edge (tan(angle))
+                // Compute the slope of the edge (tan(angle)).
                 min_slope = std.math.tan(angle);
 
-                // Compute the center of the bounding rectangle in rotated coordinates
+                // Compute the center of the bounding rectangle in rotated coordinates.
                 const centerX = (minX + maxX) / 2.0;
                 const centerY = (minY + maxY) / 2.0;
                 const center_rotated = ContinousPoint{ .time = centerX, .value = centerY };
 
-                // Rotate the center point back to the original coordinate system
+                // Rotate the center point back to the original coordinate system.
                 const center_point = rotateToXAxis(ContinousPoint, center_rotated, angle);
 
-                // Compute the intercept value using the center point
+                // Compute the intercept value using the center point.
                 const intercept_value = center_point.value - min_slope * center_point.time;
                 min_intercept = intercept_value;
             }
@@ -215,13 +217,29 @@ pub const ConvexHull = struct {
         }
     }
 
-    /// Returns the length of the `ConvexHull`. Since the first and final element are repeated,
-    /// we substract two from the sum of the lower and upper hull length.
+    /// Returns the length of the `ConvexHull`.
     fn len(self: *ConvexHull) usize {
         const lower_hull_len = self.lower_hull.items.len;
         const upper_hull_len = self.upper_hull.items.len;
         const convex_hull_len = lower_hull_len + upper_hull_len;
+        // Since the first and final element are repeated, we substract two from the sum of the
+        // lower and upper hull length.
         return convex_hull_len - 2;
+    }
+
+    /// Returns the item at the given `index` counterclockwise concatenating the lower and upper
+    /// hull and considering the repeated first and last element.
+    fn getItemAt(self: *ConvexHull, index: usize) DiscretePoint {
+        const lower_hull_len = self.lower_hull.items.len;
+        const upper_hull_len = self.upper_hull.items.len;
+        const convex_hull_len = lower_hull_len + upper_hull_len - 2;
+        var new_index = @mod(index, convex_hull_len);
+        if (new_index < lower_hull_len) {
+            return self.lower_hull.items[new_index];
+        } else {
+            new_index = new_index - lower_hull_len + 1;
+            return self.upper_hull.items[new_index];
+        }
     }
 };
 
@@ -346,7 +364,7 @@ test "incremental convex hull random elements" {
     }
 }
 
-test "Compute MABR LinearFunction for known ConvexHull one" {
+test "Compute MABR LinearFunction for known Convex Hull one" {
     const allocator = std.testing.allocator;
 
     // Define a set of points forming a simple rectangle.
@@ -366,15 +384,15 @@ test "Compute MABR LinearFunction for known ConvexHull one" {
         try convex_hull.addPoint(point);
     }
 
-    // Calculate the minimum-area bounding rectangle (MABR).
+    // Calculate the MABR Linear Function.
     const mabr_linear_function = try convex_hull.computeMABRLinearFunction();
 
-    // Known rectangle area and known LinearFunction y=x+1
+    // Known Linear Function with `slope=1` and `intercept=1`.
     try testing.expect(@abs(mabr_linear_function.slope - 1) <= 0.0001);
     try testing.expect(@abs(mabr_linear_function.intercept - 1) <= 0.0001);
 }
 
-test "Compute MABR LinearFunction for known ConvexHull two" {
+test "Compute MABR LinearFunction for known Convex Hull two" {
     const allocator = std.testing.allocator;
 
     // Define a set of points forming a simple rectangle.
@@ -393,15 +411,15 @@ test "Compute MABR LinearFunction for known ConvexHull two" {
         try convex_hull.addPoint(point);
     }
 
-    // Calculate the minimum-area bounding rectangle (MABR).
+    // Calculate MABR Linear Function.
     const mabr_linear_function = try convex_hull.computeMABRLinearFunction();
 
-    // Known rectangle area and known LinearFunction y=x+1
+    // Known Linear Function with `slope=1.5` and `intercept=2.75`.
     try testing.expect(@abs(mabr_linear_function.slope - 1.5) <= 0.0001);
     try testing.expect(@abs(mabr_linear_function.intercept + 2.75) <= 0.0001);
 }
 
-test "Compute MABR LinearFunction for random ConvexHull" {
+test "Compute MABR LinearFunction for random Convex Hull" {
     const num_points: usize = 1000;
     const allocator = testing.allocator;
     var rnd = std.rand.DefaultPrng.init(0);
@@ -413,9 +431,9 @@ test "Compute MABR LinearFunction for random ConvexHull" {
         try convex_hull.addPoint(.{ .time = i, .value = rnd.random().float(f64) });
     }
 
-    // Calculate the minimum-area bounding rectangle (MABR). If dont have way to check if the
-    // result is correct but we can check that no error has happened.
+    // Calculate MABR Linear Function. The exact value of the `intercept` is unknown but it must be
+    // less than 1.0 given that all points lie strictly within [0,1]. This is because the linear function is the height bisector and goes through the midpoint of the rectangle side which has as lower and upper bounds 0 and 1.
     const mabr_linear_function = try convex_hull.computeMABRLinearFunction();
 
-    try testing.expect(mabr_linear_function.intercept < 1.0);
+    try testing.expect(mabr_linear_function.intercept <= 1.0);
 }
