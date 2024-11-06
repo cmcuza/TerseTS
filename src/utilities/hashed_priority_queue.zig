@@ -30,7 +30,6 @@ const testing = std.testing;
 const expectEqual = testing.expectEqual;
 const expectError = testing.expectError;
 
-const tester = @import("../tester.zig");
 const tersets = @import("../tersets.zig");
 const Error = tersets.Error;
 

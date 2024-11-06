@@ -40,11 +40,13 @@ const ArrayList = std.ArrayList;
 
 const tersets = @import("../tersets.zig");
 const Error = tersets.Error;
-const DiscretePoint = tersets.DiscretePoint;
-const ContinousPoint = tersets.ContinousPoint;
-const Segment = tersets.Segment;
 
-const ConvexHull = @import("geometry/convex_hull.zig").ConvexHull;
+const shared = @import("../utilities/shared_structs.zig");
+const DiscretePoint = shared.DiscretePoint;
+const ContinousPoint = shared.ContinousPoint;
+const Segment = shared.Segment;
+
+const ConvexHull = @import("../utilities/convex_hull.zig").ConvexHull;
 
 /// Linear function of the form y = slope*x+intercept. It uses f80 for numerical stability.
 const LinearFunction = struct {
@@ -63,7 +65,7 @@ pub fn compressSwing(
     // inestabilities. This can happen if the linear approximation is equal to one of the
     // upper or lower bounds.
     const adjusted_error_bound = if (error_bound > 0)
-        error_bound - tersets.ErrorBoundMargin
+        error_bound - shared.ErrorBoundMargin
     else
         error_bound;
 
@@ -236,7 +238,7 @@ pub fn compressSlide(
     // inestabilities. This can happen if the linear approximation is equal to one of the
     // upper or lower bounds.
     const adjusted_error_bound = if (error_bound > 0)
-        error_bound - tersets.ErrorBoundMargin
+        error_bound - shared.ErrorBoundMargin
     else
         error_bound;
 

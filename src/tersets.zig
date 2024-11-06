@@ -43,24 +43,6 @@ pub const Method = enum {
     PiecewiseConstantHistogram,
 };
 
-/// `Point` with discrete `time` axis.
-pub const DiscretePoint = Point(usize);
-
-/// `Point` with continous `time` axis.
-pub const ContinousPoint = Point(f64);
-
-/// `Segment` models a straight line segment from `start_point` to `end_point`. All segments
-/// have discrete points.
-pub const Segment = struct {
-    start_point: DiscretePoint,
-    end_point: DiscretePoint,
-};
-
-/// Margin to adjust the error bound for numerical stability. Reducing the error bound by this
-/// margin ensures that all the elements of the decompressed time series are within the error bound
-/// with respect to the uncompressed time series.
-pub const ErrorBoundMargin: f32 = 1e-7;
-
 /// Compress `uncompressed_values` within `error_bound` using `method` and returns the results
 /// as a ArrayList of bytes returned by the compression methods. `allocator` is passed to the
 /// compression functions for memory management. If the compression is sucessful, the `method`
@@ -192,9 +174,4 @@ pub fn getMaxMethodIndex() usize {
     }
 
     return max_index;
-}
-
-/// `Point` is a point represented by `time` and `value`. `time` is of datatype `time_type`.
-fn Point(comptime time_type: type) type {
-    return struct { time: time_type, value: f64 };
 }

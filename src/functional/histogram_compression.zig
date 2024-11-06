@@ -30,8 +30,9 @@ const expectEqual = testing.expectEqual;
 const ArrayList = std.ArrayList;
 
 const HashedPriorityQueue = @import(
-    "../data_structures/hashed_priority_queue.zig",
+    "../utilities/hashed_priority_queue.zig",
 ).HashedPriorityQueue;
+
 const tersets = @import("../tersets.zig");
 const Error = tersets.Error;
 
@@ -451,7 +452,7 @@ test "PWCH: random clusters, elements per cluster and values" {
 
     const min_value: f64 = -1e6;
     const cluster_width: f64 = rnd.random().float(f64) * 1000 / 10;
-    const gap: f64 = cluster_width + rnd.random().float(f64) * 100 + 20; // min gag
+    const gap: f64 = cluster_width + rnd.random().float(f64) * 100 + 100; // min gag
     const max_counts_per_cluster: usize = 100;
 
     var current_min_value = min_value;

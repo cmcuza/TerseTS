@@ -30,9 +30,11 @@ const ArrayList = std.ArrayList;
 const HashMap = std.HashMap;
 
 const tersets = @import("../tersets.zig");
-const DiscretePoint = tersets.DiscretePoint;
 const Method = tersets.Method;
 const Error = tersets.Error;
+const shared = @import("../utilities/shared_structs.zig");
+const DiscretePoint = shared.DiscretePoint;
+
 const tester = @import("../tester.zig");
 
 /// `SegmentMetadata` stores the information about an approximated segment during the execution
@@ -192,7 +194,7 @@ fn computeSegmentsMetadata(
     error_bound: f32,
 ) !void {
     // Adjust the error bound to avoid exceeding it during decompression.
-    const adjusted_error_bound = error_bound - tersets.ErrorBoundMargin;
+    const adjusted_error_bound = error_bound - shared.ErrorBoundMargin;
 
     var upper_bound_slope: f64 = math.floatMax(f64);
     var lower_bound_slope: f64 = -math.floatMax(f64);
@@ -203,7 +205,7 @@ fn computeSegmentsMetadata(
     // The quantization can only be done using the original error bound. Afterwards, we add
     // `tersets.ErrorBoundMargin` to avoid exceeding the error bound during decompression.
     var quantized_interception = quantize(uncompressed_values[0], error_bound) +
-        tersets.ErrorBoundMargin;
+        shared.ErrorBoundMargin;
 
     // The first point is already part of `current_segment`, the next point is at index one.
     for (1..uncompressed_values.len) |current_timestamp| {
@@ -231,7 +233,7 @@ fn computeSegmentsMetadata(
 
             start_point = end_point;
             quantized_interception = quantize(start_point.value, error_bound) +
-                tersets.ErrorBoundMargin;
+                shared.ErrorBoundMargin;
             upper_bound_slope = math.floatMax(f64);
             lower_bound_slope = -math.floatMax(f64);
         } else {
