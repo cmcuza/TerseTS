@@ -102,14 +102,14 @@ pub const ConvexHull = struct {
         // Check if the Convex Hull has only one point. If so, the linear function is a horizontal
         // line thus `slope=0` and `intercept` is the value of the first and only point.
         if (convex_hull_len == 1) {
-            const first_point: DiscretePoint = self.getItemAt(0);
+            const first_point: DiscretePoint = self.at(0);
             return LinearFunction{ .intercept = first_point.value, .slope = 0.0 };
         }
         // Check if the Convex Hull has only two points. If so, the linear function passes through
         // the two points in the Convex Hull.
         if (convex_hull_len == 2) {
-            const first_point = self.getItemAt(0);
-            const second_point = self.getItemAt(1);
+            const first_point = self.at(0);
+            const second_point = self.at(1);
             const delta_time: f80 = @floatFromInt(second_point.time - first_point.time);
             const slope = (second_point.value - first_point.value) / delta_time;
             const intercept_value: f80 = first_point.value - slope * @as(f80, @floatFromInt(first_point.time));
@@ -127,8 +127,8 @@ pub const ConvexHull = struct {
         // Iterate over each edge of the convex hull.
         for (0..convex_hull_len) |i| {
             // Get the current edge (segment) of the convex hull.
-            const first_point: DiscretePoint = self.getItemAt(i);
-            const second_point: DiscretePoint = self.getItemAt(i + 1);
+            const first_point: DiscretePoint = self.at(i);
+            const second_point: DiscretePoint = self.at(i + 1);
             const segment = Segment{ .start_point = first_point, .end_point = second_point };
 
             // Compute the angle between the current edge and the x-axis.
@@ -142,7 +142,7 @@ pub const ConvexHull = struct {
 
             // Rotate all points and update min/max coordinates.
             for (0..convex_hull_len) |j| {
-                const point: DiscretePoint = self.getItemAt(j);
+                const point: DiscretePoint = self.at(j);
 
                 // Rotate point by -angle to align the edge with the x-axis
                 const rotated_point: ContinousPoint = rotateToXAxis(DiscretePoint, point, -angle);
@@ -229,7 +229,7 @@ pub const ConvexHull = struct {
 
     /// Returns the item at the given `index` counterclockwise concatenating the lower and upper
     /// hull and considering the repeated first and last element.
-    fn getItemAt(self: *ConvexHull, index: usize) DiscretePoint {
+    fn at(self: *ConvexHull, index: usize) DiscretePoint {
         const lower_hull_len = self.lower_hull.items.len;
         const upper_hull_len = self.upper_hull.items.len;
         const convex_hull_len = lower_hull_len + upper_hull_len - 2;
