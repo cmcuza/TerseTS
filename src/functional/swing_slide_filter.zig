@@ -45,14 +45,9 @@ const shared = @import("../utilities/shared_structs.zig");
 const DiscretePoint = shared.DiscretePoint;
 const ContinousPoint = shared.ContinousPoint;
 const Segment = shared.Segment;
+const LinearFunction = shared.LinearFunction;
 
 const ConvexHull = @import("../utilities/convex_hull.zig").ConvexHull;
-
-/// Linear function of the form y = slope*x+intercept. It uses f80 for numerical stability.
-const LinearFunction = struct {
-    slope: f80,
-    intercept: f80,
-};
 
 /// Compress `uncompressed_values` within `error_bound` using "Swing Filter" and write the
 /// result to `compressed_values`. If an error occurs it is returned.

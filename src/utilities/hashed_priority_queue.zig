@@ -13,60 +13,65 @@
 // limitations under the License.
 
 //! Implementation of a Hashed Priority Queue based on Zig's standard `PriorityQueue` by
-//! incorporating a hash map to track element positions, enabling efficient updates and removals
-//! by key. The main heap operations (`add`, `siftUp`, `siftDown`, `remove`) are adapted from Zig's
-//! implementation. Additionally, we have added new functions used by the compression algorithms.
-//! This is particularly useful in applications where the priority of elements may change, or where
-//! elements need to be efficiently accessed by key. This Hashed Priority Queue is used for the
-//! compression algorithms implemented in: /src/functional/histogram_compression.zig and
-//! /src/line_simplification/visvalingam–whyatt.zig (upcoming).
+//! adding a hash map to track element positions, enabling efficient updates and removals by key.
+//!
+//! The main heap operations (`add`, `siftUp`, `siftDown`, `remove`) are adapted from Zig's
+//! implementation at `$(ZIG_HOME)/lib/std/priority_queue.zig`. Additionally, we have added new
+//! functions used by the compression algorithms. This is particularly useful in applications
+//! where the priority of elements change, or where elements need to be  accessed by key.
 
 const std = @import("std");
 const rand = std.rand;
-const Allocator = std.mem.Allocator;
-const assert = std.debug.assert;
+const math = std.math;
+const time = std.time;
 const Order = std.math.Order;
 const testing = std.testing;
+const HashMap = std.HashMap;
+const Allocator = std.mem.Allocator;
+const ArrayList = std.ArrayList;
+
+const assert = std.debug.assert;
 const expectEqual = testing.expectEqual;
 const expectError = testing.expectError;
 
 const tersets = @import("../tersets.zig");
 const Error = tersets.Error;
 
-/// A generic priority queue with hashed indexing for fast updates.
-/// `T`: The type of elements stored in the queue.
-/// `Context`: The context type passed to the comparator function.
-/// `compareFn`: A function to compare two elements of type `T`.
-/// `HashContext`: A type providing `hash` and `eql` functions for elements of type `T`.
+/// A generic priority queue for storing generic data with hashed indexing for fast updates.
+/// Similar as with Zig's std.PriorityQueue, initialize with `init`. Provide `compareFn` that
+/// returns an `Order` enum to compare the second and third arguments, e.g., return `Order.lt`
+/// if the second argument should be popped first. Provide `HashContext` to hash the elements in
+/// the queue with their position. `HashContext` should contain a `hash` and `eql` function for
+/// elements of type `T`.
 pub fn HashedPriorityQueue(
     comptime T: type,
     comptime Context: type,
-    comptime compareFn: fn (context: Context, a: T, b: T) std.math.Order,
+    comptime compareFn: fn (context: Context, a: T, b: T) Order,
     comptime HashContext: type,
 ) type {
     return struct {
         const Self = @This();
 
-        /// Dynamic array of elements forming the heap.
+        /// Elements forming the heap.
         items: []T,
         /// Number of elements in the queue.
         len: usize,
         /// Allocator used for memory management.
-        allocator: std.mem.Allocator,
+        allocator: Allocator,
         /// Context passed to the comparator function.
         context: Context,
         /// Hash map for fast indexing and updates of elements.
-        index_map: std.HashMap(T, usize, HashContext, std.hash_map.default_max_load_percentage),
+        index_map: HashMap(T, usize, HashContext, std.hash_map.default_max_load_percentage),
 
         /// Initializes a new `HashedPriorityQueue`.
-        pub fn init(allocator: std.mem.Allocator, context: Context) !Self {
+        pub fn init(allocator: Allocator, context: Context) !Self {
             return Self{
-                .items = &[_]T{}, // Initialize with an empty array.
+                .items = &[_]T{}, // Initialize with an empty slice.
                 .len = 0,
                 .allocator = allocator,
                 .context = context,
                 // Initialize the hash map with the given allocator.
-                .index_map = std.HashMap(
+                .index_map = HashMap(
                     T,
                     usize,
                     HashContext,
@@ -89,7 +94,7 @@ pub fn HashedPriorityQueue(
             try self.addUnchecked(elem);
         }
 
-        /// Removes and returns the element with the highest priority (minimum value).
+        /// Removes and returns the element with the highest priority (at index 0).
         pub fn remove(self: *Self) !T {
             return try self.removeIndex(0);
         }
@@ -151,20 +156,21 @@ pub fn HashedPriorityQueue(
             return self.ensureTotalCapacity(self.len + additional_count);
         }
 
-        /// Returns the `elem` position in the `items` arrays.
-        pub fn getItemPosition(self: *Self, elem: T) !usize {
+        /// Returns the `elem` index in the queue.
+        pub fn getIndex(self: *Self, elem: T) !usize {
             return self.index_map.get(elem) orelse Error.ItemNotFound;
         }
 
-        /// Returns the `elem` in the queue that has the same key as the elem added.
-        pub fn getItemAt(self: *Self, index: usize) !T {
+        /// Returns the `elem` in the queue at `index` in the queue.
+        pub fn get(self: *Self, index: usize) !T {
             if (index > self.items.len)
                 return Error.ItemNotFound;
 
             return self.items[index];
         }
 
-        /// Returns the current capacity of the internal array.
+        /// Returns the current capacity of the queue (elements that can be added without
+        /// reallocation).
         pub fn capacity(self: *Self) usize {
             return self.items.len;
         }
@@ -204,7 +210,7 @@ pub fn HashedPriorityQueue(
             var index = target_index;
             while (true) {
                 // Calculate the left child index.
-                var lesser_child_i = (std.math.mul(usize, index, 2) catch break) | 1;
+                var lesser_child_i = (math.mul(usize, index, 2) catch break) | 1;
                 if (!(lesser_child_i < self.len)) break;
 
                 const next_child_i = lesser_child_i + 1;
@@ -238,45 +244,44 @@ pub fn HashedPriorityQueue(
     };
 }
 
-test "HashedPriorityQueue: add and remove min keys of simple values" {
+test "add and remove min keys of simple values in HashedPriorityQueue" {
     const allocator = testing.allocator;
 
     const CompareContext = struct {
-        fn order(context: void, a: i64, b: i64) Order {
+        fn order(context: void, a: u64, b: u64) Order {
             _ = context;
-            return std.math.order(a, b);
+            return math.order(a, b);
         }
     };
 
     var queue = try HashedPriorityQueue(
-        i64,
+        u64,
         void,
         CompareContext.order,
-        std.hash_map.AutoContext(i64),
+        std.hash_map.AutoContext(u64),
     ).init(allocator, {});
     defer queue.deinit();
 
     // Generate an ArrayList of 100 i64 elements with random values.
-    var list = std.ArrayList(i64).init(allocator);
+    var list = ArrayList(u64).init(allocator);
     defer list.deinit();
 
-    var rng = std.rand.DefaultPrng.init(12345); // Seed for reproducibility
-    const random = rng.random();
+    // Initialize a random number generator.
+    const seed: u64 = @bitCast(time.milliTimestamp());
+    var rnd = std.rand.DefaultPrng.init(seed);
 
     for (0..100) |_| {
         // Generate a random i64 value
-        var value = @mod(random.int(i64), 1000);
-        // Ensure value is positive (optional)
-        value = if (value < 0) -value else value;
+        const value = @abs(@mod((rnd.random().int(i64)), 1000));
         try list.append(value);
         try queue.add(value);
     }
 
     // Create a copy of the list and sort it.
-    var sorted_list = std.ArrayList(i64).init(allocator);
+    var sorted_list = ArrayList(u64).init(allocator);
     defer sorted_list.deinit();
     try sorted_list.appendSlice(list.items);
-    std.mem.sort(i64, sorted_list.items, {}, comptime std.sort.asc(i64));
+    std.mem.sort(u64, sorted_list.items, {}, comptime std.sort.asc(u64));
 
     // Remove elements from the queue and verify the order.
     for (sorted_list.items) |expected_value| {
@@ -285,13 +290,13 @@ test "HashedPriorityQueue: add and remove min keys of simple values" {
     }
 }
 
-test "HashedPriorityQueue: update min heap" {
+test "test update function in HashedPriorityQueue" {
     const allocator = testing.allocator;
 
     const CompareContext = struct {
         fn lessThan(context: void, a: u32, b: u32) Order {
             _ = context;
-            return std.math.order(a, b);
+            return math.order(a, b);
         }
     };
 
@@ -325,7 +330,7 @@ test "HashedPriorityQueue: update min heap" {
     try expectError(Error.ItemNotFound, queue.update(1, 1));
 }
 
-test "HashedPriorityQueue: add and remove min key of structs" {
+test "add and remove min key of custom struct in HashedPriorityQueue" {
     const allocator = testing.allocator;
 
     const S = struct {
@@ -345,7 +350,7 @@ test "HashedPriorityQueue: add and remove min key of structs" {
     const CompareContext = struct {
         fn order(context: void, a: S, b: S) Order {
             _ = context;
-            return std.math.order(a.key, b.key);
+            return math.order(a.key, b.key);
         }
     };
 
@@ -374,7 +379,7 @@ test "HashedPriorityQueue: add and remove min key of structs" {
     try expectEqual(23, (try queue.remove()).key);
 }
 
-test "HashedPriorityQueue: add, remove and element position for key of structs" {
+test "add, remove and element position for key of structs in HashedPriorityQueue" {
     const allocator = testing.allocator;
 
     const S = struct {
@@ -394,7 +399,7 @@ test "HashedPriorityQueue: add, remove and element position for key of structs" 
     const CompareContext = struct {
         fn order(context: void, a: S, b: S) Order {
             _ = context;
-            return std.math.order(a.value, b.value);
+            return math.order(a.value, b.value);
         }
     };
 
@@ -415,13 +420,13 @@ test "HashedPriorityQueue: add, remove and element position for key of structs" 
     try queue.add(.{ .key = 7, .value = 13.0 });
 
     // Remove elements and check if they are in the correct order.
-    try expectEqual(0, (try queue.getItemPosition(.{ .key = 4, .value = 7.0 })));
+    try expectEqual(0, (try queue.getIndex(.{ .key = 4, .value = 7.0 })));
     try expectEqual(4, (try queue.remove()).key);
-    try expectEqual(0, (try queue.getItemPosition(.{ .key = 2, .value = 12.0 })));
+    try expectEqual(0, (try queue.getIndex(.{ .key = 2, .value = 12.0 })));
     try expectEqual(2, (try queue.remove()).key);
 
     try queue.update(.{ .key = 7, .value = 13.0 }, .{ .key = 8, .value = 13.0 });
-    try expectEqual(0, (try queue.getItemPosition(.{ .key = 8, .value = 13.0 })));
+    try expectEqual(0, (try queue.getIndex(.{ .key = 8, .value = 13.0 })));
     try expectEqual(8, (try queue.remove()).key);
 
     try expectError(Error.ItemNotFound, queue.update(
@@ -430,11 +435,11 @@ test "HashedPriorityQueue: add, remove and element position for key of structs" 
     ));
 
     try queue.update(.{ .key = 23, .value = 54.0 }, .{ .key = 23, .value = 5.0 });
-    try expectEqual(0, (try queue.getItemPosition(.{ .key = 23, .value = 5.0 })));
+    try expectEqual(0, (try queue.getIndex(.{ .key = 23, .value = 5.0 })));
     try expectEqual(23, (try queue.remove()).key);
 
     try queue.add(.{ .key = 7, .value = 3.0 });
-    try expectEqual(0, (try queue.getItemPosition(.{ .key = 7, .value = 3.0 })));
+    try expectEqual(0, (try queue.getIndex(.{ .key = 7, .value = 3.0 })));
     try expectEqual(7, (try queue.remove()).key);
     try expectError(Error.ItemNotFound, queue.update(
         .{ .key = 7, .value = 3.0 },
