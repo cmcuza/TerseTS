@@ -558,3 +558,24 @@ test "Random clusters, elements per cluster and values for PWCH" {
         try expectEqual(expected_bucket.end, bucket.end);
     }
 }
+
+test "PWCH can compress and decompress" {
+    const seed: u64 = @bitCast(time.milliTimestamp());
+    var prng = std.rand.DefaultPrng.init(seed);
+    const random = prng.random();
+
+    const allocator = testing.allocator;
+    var uncompressed_values = ArrayList(f64).init(allocator);
+    defer uncompressed_values.deinit();
+    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, random);
+
+    const error_bound: f32 = @floatFromInt(uncompressed_values.items.len);
+
+    try tester.testCompressAndDecompress(
+        uncompressed_values.items,
+        allocator,
+        tersets.Method.PiecewiseConstantHistogram,
+        error_bound,
+        tersets.isWithinErrorBound,
+    );
+}
