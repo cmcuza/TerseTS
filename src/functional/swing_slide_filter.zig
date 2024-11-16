@@ -43,14 +43,9 @@ const Error = tersets.Error;
 const DiscretePoint = tersets.DiscretePoint;
 const ContinousPoint = tersets.ContinousPoint;
 const Segment = tersets.Segment;
+const LinearFunction = tersets.LinearFunction;
 
 const ConvexHull = @import("geometry/convex_hull.zig").ConvexHull;
-
-/// Linear function of the form y = slope*x+intercept. It uses f80 for numerical stability.
-const LinearFunction = struct {
-    slope: f80,
-    intercept: f80,
-};
 
 /// Compress `uncompressed_values` within `error_bound` using "Swing Filter" and write the
 /// result to `compressed_values`. If an error occurs it is returned.
