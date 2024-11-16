@@ -186,7 +186,10 @@ pub const ConvexHull = struct {
     /// Helper function to get all points as an `ArrayList(DiscretePoint)` from the ConvexHull.
     /// If the `ConvexHull` is empty, an empty ArrayList is returned.
     fn getAllPoints(self: *ConvexHull) !ArrayList(DiscretePoint) {
-        var hull: ArrayList(DiscretePoint) = ArrayList(DiscretePoint).init(self.allocator);
+        var hull: ArrayList(DiscretePoint) = ArrayList(DiscretePoint).initCapacity(
+            self.allocator,
+            self.lower_hull.items.len + self.upper_hull.items.len - 2,
+        );
 
         for (self.lower_hull.items) |item| {
             try hull.append(item);
