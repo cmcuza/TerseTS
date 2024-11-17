@@ -16,9 +16,10 @@
 //! adding a hash map to track element positions, enabling efficient updates and removals by key.
 //!
 //! The main heap operations (`add`, `siftUp`, `siftDown`, `remove`) are adapted from Zig's
-//! implementation at `$(ZIG_HOME)/lib/std/priority_queue.zig`. Additionally, we have added new
-//! functions used by the compression algorithms. This is particularly useful in applications
-//! where the priority of elements change, or where elements need to be  accessed by key.
+//! implementation at `$(ZIG_HOME)/lib/std/priority_queue.zig`. Additionally, the function `update`
+//! was modified having now O(log N) complexity instead of O(N). We use the function `get()` to
+//! access in O(1) any element in the queue. This is particularly useful in applications where the
+//! priority of elements change, or where elements need to be accessed by key.
 
 const std = @import("std");
 const rand = std.rand;

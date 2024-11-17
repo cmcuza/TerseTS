@@ -154,7 +154,7 @@ const Histogram = struct {
     }
 
     /// Returns the bucket at `index`.
-    pub fn at(self: *Self, index: usize) Bucket {
+    pub fn get(self: *Self, index: usize) Bucket {
         return self.buckets[index];
     }
 
@@ -355,8 +355,8 @@ test "Histogram insert, and merge test number buckets in PWCH" {
     const random = prng.random();
 
     const allocator = testing.allocator;
-    const target_buckets: usize = 100;
-    var histogram = try Histogram.init(allocator, target_buckets);
+    const max_buckets: usize = 100;
+    var histogram = try Histogram.init(allocator, max_buckets);
     defer histogram.deinit();
 
     // Insert 200 random numbers into the histogram.
@@ -364,7 +364,7 @@ test "Histogram insert, and merge test number buckets in PWCH" {
         const rand_number = tester.generateBoundedRandomValue(0, 1000, random);
         try histogram.insert(rand_number, i);
     }
-    try expectEqual(target_buckets, histogram.buckets.items.len);
+    try expectEqual(max_buckets, histogram.buckets.items.len);
 }
 
 test "Simple fixed values test of PWCH" {
