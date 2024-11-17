@@ -115,7 +115,7 @@ const Histogram = struct {
     ),
 
     /// Initialize the histogram with a given allocator and maximum number of buckets. This
-    /// parameter can be thought as fixing a minimum compression ratio that users wants to achieve.
+    /// parameter can be thought of as fixing a minimum compression ratio that users wants to achieve.
     /// The `minMerge` function will then find the optimal histogram under this constraint.
     /// For example, if `max_buckets=|N|/2`, then the compression ratio will be at least 2x.
     pub fn init(allocator: mem.Allocator, max_buckets: usize) !Histogram {
@@ -478,8 +478,7 @@ test "Fixed cluster number with random values for PWCH" {
 
 test "Random clusters, elements per cluster and values for PWCH" {
     // Initialize a random number generator.
-    const seed: u64 = @bitCast(time.milliTimestamp());
-    var prng = std.rand.DefaultPrng.init(seed);
+    var prng = std.rand.DefaultPrng.init(12345);
     const random = prng.random();
 
     const allocator = std.testing.allocator;
