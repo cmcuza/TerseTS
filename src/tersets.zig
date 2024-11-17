@@ -26,11 +26,11 @@ const pwch = @import("functional/histogram_compression.zig");
 /// The errors that can occur in TerseTS.
 pub const Error = error{
     UnknownMethod,
+    ItemNotFound,
     EmptyInput,
     IncorrectInput,
     UnsupportedErrorBound,
     OutOfMemory,
-    ItemNotFound,
 };
 
 /// The compression methods in TerseTS.
