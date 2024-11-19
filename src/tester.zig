@@ -217,3 +217,11 @@ pub fn generateRandomLinearFunction(uncompressed_values: *ArrayList(f64), random
         try uncompressed_values.append(linear_function_value);
     }
 }
+
+/// Return a random `f64` value between `lower_bound` and `upper_bound` for
+/// use in testing using `random`.
+pub fn generateBoundedRandomValue(lower_bound: f64, upper_bound: f64, random: Random) f64 {
+    const rand_value: f64 = random.float(f64);
+    const bounded_value = lower_bound + (upper_bound - lower_bound) * rand_value;
+    return bounded_value;
+}

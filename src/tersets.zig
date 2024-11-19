@@ -21,6 +21,7 @@ const ArrayList = std.ArrayList;
 const poor_mans_compression = @import("functional/poor_mans_compression.zig");
 const swing_slide_filter = @import("functional/swing_slide_filter.zig");
 const sim_piece = @import("functional/sim_piece.zig");
+const pwch = @import("functional/histogram_compression.zig");
 
 /// The errors that can occur in TerseTS.
 pub const Error = error{
@@ -39,31 +40,8 @@ pub const Method = enum {
     SwingFilter,
     SlideFilter,
     SimPiece,
+    PiecewiseConstantHistogram,
 };
-
-/// `Point` with discrete `time` axis.
-pub const DiscretePoint = Point(usize);
-
-/// `Point` with continous `time` axis.
-pub const ContinousPoint = Point(f64);
-
-/// `Segment` models a straight line segment from `start_point` to `end_point`. All segments
-/// have discrete points.
-pub const Segment = struct {
-    start_point: DiscretePoint,
-    end_point: DiscretePoint,
-};
-
-/// Linear function of the form y = slope*x+intercept. It uses f80 for numerical stability.
-pub const LinearFunction = struct {
-    slope: f80,
-    intercept: f80,
-};
-
-/// Margin to adjust the error bound for numerical stability. Reducing the error bound by this
-/// margin ensures that all the elements of the decompressed time series are within the error bound
-/// with respect to the uncompressed time series.
-pub const ErrorBoundMargin: f32 = 1e-7;
 
 /// Compress `uncompressed_values` within `error_bound` using `method` and returns the results
 /// as a ArrayList of bytes returned by the compression methods. `allocator` is passed to the
@@ -118,6 +96,14 @@ pub fn compress(
                 error_bound,
             );
         },
+        .PiecewiseConstantHistogram => {
+            try sim_piece.compressSimPiece(
+                uncompressed_values,
+                &compressed_values,
+                allocator,
+                error_bound,
+            );
+        },
     }
     try compressed_values.append(@intFromEnum(method));
     return compressed_values;
@@ -149,6 +135,9 @@ pub fn decompress(
         },
         .SimPiece => {
             try sim_piece.decompress(compressed_values_slice, &decompressed_values, allocator);
+        },
+        .PiecewiseConstantHistogram => {
+            try pwch.decompress(compressed_values_slice, &decompressed_values);
         },
     }
 
@@ -185,9 +174,4 @@ pub fn getMaxMethodIndex() usize {
     }
 
     return max_index;
-}
-
-/// `Point` is a point represented by `time` and `value`. `time` is of datatype `time_type`.
-fn Point(comptime time_type: type) type {
-    return struct { time: time_type, value: f64 };
 }

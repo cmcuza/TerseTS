@@ -26,10 +26,12 @@ const testing = std.testing;
 
 const tersets = @import("../../tersets.zig");
 const Error = tersets.Error;
-const DiscretePoint = tersets.DiscretePoint;
-const ContinousPoint = tersets.ContinousPoint;
-const Segment = tersets.Segment;
-const LinearFunction = tersets.LinearFunction;
+
+const shared = @import("../../utilities/shared_structs.zig");
+const DiscretePoint = shared.DiscretePoint;
+const ContinousPoint = shared.ContinousPoint;
+const Segment = shared.Segment;
+const LinearFunction = shared.LinearFunction;
 
 /// Enum for the angle's `Turn` of three consecutive points A, B, and C. Essentially, it describes
 /// whether the path from A to B to C makes a `left` turn, a `right` turn, or continues in a

@@ -40,12 +40,14 @@ const ArrayList = std.ArrayList;
 
 const tersets = @import("../tersets.zig");
 const Error = tersets.Error;
-const DiscretePoint = tersets.DiscretePoint;
-const ContinousPoint = tersets.ContinousPoint;
-const Segment = tersets.Segment;
-const LinearFunction = tersets.LinearFunction;
 
-const ConvexHull = @import("geometry/convex_hull.zig").ConvexHull;
+const shared = @import("../utilities/shared_structs.zig");
+const DiscretePoint = shared.DiscretePoint;
+const ContinousPoint = shared.ContinousPoint;
+const Segment = shared.Segment;
+const LinearFunction = shared.LinearFunction;
+
+const ConvexHull = @import("./geometry/convex_hull.zig").ConvexHull;
 
 /// Compress `uncompressed_values` within `error_bound` using "Swing Filter" and write the
 /// result to `compressed_values`. If an error occurs it is returned.
@@ -58,7 +60,7 @@ pub fn compressSwing(
     // inestabilities. This can happen if the linear approximation is equal to one of the
     // upper or lower bounds.
     const adjusted_error_bound = if (error_bound > 0)
-        error_bound - tersets.ErrorBoundMargin
+        error_bound - shared.ErrorBoundMargin
     else
         error_bound;
 
@@ -231,7 +233,7 @@ pub fn compressSlide(
     // inestabilities. This can happen if the linear approximation is equal to one of the
     // upper or lower bounds.
     const adjusted_error_bound = if (error_bound > 0)
-        error_bound - tersets.ErrorBoundMargin
+        error_bound - shared.ErrorBoundMargin
     else
         error_bound;
 

@@ -30,35 +30,12 @@ const ArrayList = std.ArrayList;
 const HashMap = std.HashMap;
 
 const tersets = @import("../tersets.zig");
-const DiscretePoint = tersets.DiscretePoint;
 const Method = tersets.Method;
 const Error = tersets.Error;
+const shared = @import("../utilities/shared_structs.zig");
+const DiscretePoint = shared.DiscretePoint;
+
 const tester = @import("../tester.zig");
-
-/// `SegmentMetadata` stores the information about an approximated segment during the execution
-/// of Sim-Piece. It stores the starting time of the segment in `start_time`, the
-/// `interception` point used to create the linear function approximation, and the slopes of
-/// the upper and lower bounds that constraint the linear approximation in that segment.
-const SegmentMetadata = struct {
-    start_time: usize,
-    interception: f64,
-    upper_bound_slope: f64,
-    lower_bound_slope: f64,
-};
-
-/// `HashF64Context` provides context for hashing and comparing `f64` values for use in `HashMap`.
-/// This context is essential when using `f64` as keys in a `HashMap`. It defines how the keys are
-/// hashed and compared for equality.
-const HashF64Context = struct {
-    /// Hashes an `f64` `value` by bitcasting it to `u64`.
-    pub fn hash(_: HashF64Context, value: f64) u64 {
-        return @as(u64, @bitCast(value));
-    }
-    /// Compares two `f64` values for equality.
-    pub fn eql(_: HashF64Context, value_one: f64, value_two: f64) bool {
-        return value_one == value_two;
-    }
-};
 
 /// Compresses `uncompressed_values` within `error_bound` using the "Sim-Piece" algorithm, writing
 /// the result to `compressed_values`. The `allocator` is used for memory allocation of intermediate
@@ -184,6 +161,31 @@ pub fn decompress(
     );
 }
 
+/// `SegmentMetadata` stores the information about an approximated segment during the execution
+/// of Sim-Piece. It stores the starting time of the segment in `start_time`, the
+/// `interception` point used to create the linear function approximation, and the slopes of
+/// the upper and lower bounds that constraint the linear approximation in that segment.
+const SegmentMetadata = struct {
+    start_time: usize,
+    interception: f64,
+    upper_bound_slope: f64,
+    lower_bound_slope: f64,
+};
+
+/// `HashF64Context` provides context for hashing and comparing `f64` values for use in `HashMap`.
+/// This context is essential when using `f64` as keys in a `HashMap`. It defines how the keys are
+/// hashed and compared for equality.
+const HashF64Context = struct {
+    /// Hashes an `f64` `value` by bitcasting it to `u64`.
+    pub fn hash(_: HashF64Context, value: f64) u64 {
+        return @as(u64, @bitCast(value));
+    }
+    /// Compares two `f64` values for equality.
+    pub fn eql(_: HashF64Context, value_one: f64, value_two: f64) bool {
+        return value_one == value_two;
+    }
+};
+
 /// Sim-Piece Phase 1: Compute `SegmentMetadata` for each segment that can be approximated
 /// by a linear function within the `error_bound` from `uncompressed_values`.
 fn computeSegmentsMetadata(
@@ -192,7 +194,7 @@ fn computeSegmentsMetadata(
     error_bound: f32,
 ) !void {
     // Adjust the error bound to avoid exceeding it during decompression.
-    const adjusted_error_bound = error_bound - tersets.ErrorBoundMargin;
+    const adjusted_error_bound = error_bound - shared.ErrorBoundMargin;
 
     var upper_bound_slope: f64 = math.floatMax(f64);
     var lower_bound_slope: f64 = -math.floatMax(f64);
@@ -203,7 +205,7 @@ fn computeSegmentsMetadata(
     // The quantization can only be done using the original error bound. Afterwards, we add
     // `tersets.ErrorBoundMargin` to avoid exceeding the error bound during decompression.
     var quantized_interception = quantize(uncompressed_values[0], error_bound) +
-        tersets.ErrorBoundMargin;
+        shared.ErrorBoundMargin;
 
     // The first point is already part of `current_segment`, the next point is at index one.
     for (1..uncompressed_values.len) |current_timestamp| {
@@ -231,7 +233,7 @@ fn computeSegmentsMetadata(
 
             start_point = end_point;
             quantized_interception = quantize(start_point.value, error_bound) +
-                tersets.ErrorBoundMargin;
+                shared.ErrorBoundMargin;
             upper_bound_slope = math.floatMax(f64);
             lower_bound_slope = -math.floatMax(f64);
         } else {
