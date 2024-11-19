@@ -570,6 +570,13 @@ test "PWCH can compress and decompress" {
 
     const error_bound: f32 = @floatFromInt(uncompressed_values.items.len);
 
+    // This test internally calls the functions `compress()` and `decompress()`. However, the line
+    // `testing.expect(withinErrorBound(uncompressed_values,decompressed_values.items,error_bound))`
+    // inside the function, is nonsensical in the context of PWCH. This is because the `error_bound`
+    // represents the number of bins in the histogram and not the maximum decompression error.
+    // To solve this problem, we need to create another type of configuration for compression
+    // algorithms like PWCH, which do not base their compression on a maximum decompression error
+    // but a minimum (or maximum) compression ratio.
     try tester.testCompressAndDecompress(
         uncompressed_values.items,
         allocator,
