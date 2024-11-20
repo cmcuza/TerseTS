@@ -47,7 +47,7 @@ const ContinousPoint = shared.ContinousPoint;
 const Segment = shared.Segment;
 const LinearFunction = shared.LinearFunction;
 
-const ConvexHull = @import("./geometry/convex_hull.zig").ConvexHull;
+const ConvexHull = @import("../utilities/convex_hull.zig").ConvexHull;
 
 /// Compress `uncompressed_values` within `error_bound` using "Swing Filter" and write the
 /// result to `compressed_values`. If an error occurs it is returned.
