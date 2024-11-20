@@ -24,10 +24,10 @@ const mem = std.mem;
 const ArrayList = std.ArrayList;
 const testing = std.testing;
 
-const tersets = @import("../../tersets.zig");
+const tersets = @import("../tersets.zig");
 const Error = tersets.Error;
 
-const shared = @import("../../utilities/shared_structs.zig");
+const shared = @import("shared_structs.zig");
 const DiscretePoint = shared.DiscretePoint;
 const ContinousPoint = shared.ContinousPoint;
 const Segment = shared.Segment;
