@@ -38,6 +38,7 @@ const LinearFunction = shared.LinearFunction;
 /// straight line also called collinear.
 const Turn = enum(i8) { right, left, collinear };
 
+/// Enum to determine the hull in the convex hull.
 const HullType = enum(i8) { upperHull, lowerHull };
 
 /// Convex Hull formed by an upper and lower hull. The hulls are formed by the input data with
@@ -189,30 +190,31 @@ pub const ConvexHull = struct {
 
     /// Merges another `other: ConvexHull` into the current `self: ConvexHull` in place. This
     /// operation modifies the `self` object by appending points from the `other` convex hull.
-    /// The function assumes both convex hulls are valid and sorted. If appending to the lower
-    /// or upper hull fails due to allocation issues, the error is propagated.
+    /// If appending to the hulls fails due to allocation issues, the error is returned.
     pub fn merge(self: *ConvexHull, other: *ConvexHull) !void {
-        // Special case: if `other` has only one point, directly add it to self's hulls
-        if (other.upper_hull.items.len == 1 and other.lower_hull.items.len == 1) {
-            try self.addPoint(other.upper_hull.items[0]);
+        // Special case: if `other` has only one point, directly add it to self's hulls.
+        if (other.len() == 1) {
+            try self.addPoint(other.at(0));
             return;
         }
 
-        // Special case: if `self` has only one point, transfer points from `other` directly
-        if (self.upper_hull.items.len == 1 and self.lower_hull.items.len == 1) {
-            const other_points = try other.getAllPointsSorted(); // Handle the error union
-            defer other_points.deinit(); // Ensure the allocated list is freed
+        // Special case: if `self` has only one point, transfer points from `other` directly.
+        if (self.len() == 1) {
+            const other_points = try other.getAllPointsSorted();
+            defer other_points.deinit(); // Ensure the allocated list is freed.
             for (other_points.items) |point| {
-                try self.addPoint(point); // Add each point to `self`
+                try self.addPoint(point); // Add each point to `self`.
             }
             return;
         }
+
         // Find tangent between the upper hulls.
         const upper_tangent = try findTangent(
             &self.upper_hull,
             &other.upper_hull,
             .upperHull,
         );
+
         // Find tangent between the lower hulls.
         const lower_tangent = try findTangent(
             &self.lower_hull,
@@ -236,6 +238,8 @@ pub const ConvexHull = struct {
     /// Helper function to get all points as an `ArrayList(DiscretePoint)` from the ConvexHull.
     /// If the `ConvexHull` is empty, an empty ArrayList is returned.
     fn getAllPoints(self: *ConvexHull) !ArrayList(DiscretePoint) {
+        // Since the first and final element are repeated, we substract two from the sum of the
+        // lower and upper hull length.
         var hull: ArrayList(DiscretePoint) = try ArrayList(DiscretePoint).initCapacity(
             self.allocator,
             self.lower_hull.items.len + self.upper_hull.items.len - 2,
@@ -254,7 +258,7 @@ pub const ConvexHull = struct {
     /// merges the lower and upper hulls, which are already sorted, in O(N) time. If the
     /// `ConvexHull` is empty, an empty ArrayList is returned.
     pub fn getAllPointsSorted(self: *ConvexHull) !ArrayList(DiscretePoint) {
-        // Initialize the result list with enough capacity for both hulls
+        // Initialize the result list with enough capacity for both hulls.
         var all_points = try ArrayList(DiscretePoint).initCapacity(
             self.allocator,
             self.lower_hull.items.len + self.upper_hull.items.len - 2,
@@ -263,29 +267,31 @@ pub const ConvexHull = struct {
         var lower_idx: usize = 0;
         var upper_idx: usize = 1;
 
-        // Merge lower_hull and upper_hull into all_points
+        // Merge lower_hull and upper_hull into all_points. Since the first and final element are
+        // repeated, we start `upper_idx=1` and only loop until `self.upper_hull.items.len - 1`.
         while (lower_idx < self.lower_hull.items.len and upper_idx < self.upper_hull.items.len - 1) {
             const lower_point = self.lower_hull.items[lower_idx];
             const upper_point = self.upper_hull.items[upper_idx];
 
             if (lower_point.time <= upper_point.time) {
-                // Add the point from the lower hull
+                // Add the point from the lower hull.
                 try all_points.append(lower_point);
                 lower_idx += 1;
             } else {
-                // Add the point from the upper hull
+                // Add the point from the upper hull.
                 try all_points.append(upper_point);
                 upper_idx += 1;
             }
         }
 
-        // Append remaining points from the lower hull, if any
+        // Append remaining points from the lower hull, if any.
         while (lower_idx < self.lower_hull.items.len) {
             try all_points.append(self.lower_hull.items[lower_idx]);
             lower_idx += 1;
         }
 
-        // Append remaining points from the upper hull, if any
+        // Append remaining points from the upper hull, if any. Since the first and final element are
+        // repeated, we start `upper_idx=1` and only loop until `self.upper_hull.items.len - 1`.
         while (upper_idx < self.upper_hull.items.len - 1) {
             try all_points.append(self.upper_hull.items[upper_idx]);
             upper_idx += 1;
@@ -319,6 +325,17 @@ pub const ConvexHull = struct {
         const lower_hull_len = self.lower_hull.items.len;
         const upper_hull_len = self.upper_hull.items.len;
         const convex_hull_len = lower_hull_len + upper_hull_len;
+
+        // There are no elements in the Convex Hull.
+        if (convex_hull_len == 0) {
+            return 0;
+        }
+
+        // There is only one element but since it is repeated `convex_hull_len==2`.
+        if (convex_hull_len == 2) {
+            return 1;
+        }
+
         // Since the first and final element are repeated, we substract two from the sum of the
         // lower and upper hull length.
         return convex_hull_len - 2;
@@ -328,8 +345,7 @@ pub const ConvexHull = struct {
     /// hull and considering the repeated first and last element.
     fn at(self: *ConvexHull, index: usize) DiscretePoint {
         const lower_hull_len = self.lower_hull.items.len;
-        const upper_hull_len = self.upper_hull.items.len;
-        const convex_hull_len = lower_hull_len + upper_hull_len - 2;
+        const convex_hull_len = self.len();
         var new_index = @mod(index, convex_hull_len);
         if (new_index < lower_hull_len) {
             return self.lower_hull.items[new_index];
@@ -362,14 +378,14 @@ fn computeTurn(
         Turn.left;
 }
 
-/// Compute the angle between a segment and the x-axis
+/// Compute the angle between a segment and the x-axis.
 fn angleToXAxis(segment: Segment) f64 {
     const deltaX: f64 = @as(f64, @floatFromInt(segment.end_point.time)) - @as(f64, @floatFromInt(segment.start_point.time));
     const deltaY: f64 = segment.end_point.value - segment.start_point.value;
     return std.math.atan2(deltaY, deltaX);
 }
 
-/// Rotate a point around the origin by a given angle
+/// Rotate a point around the origin by a given angle.
 fn rotateToXAxis(comptime Point: type, point: Point, angle: f64) ContinousPoint {
     if (Point == DiscretePoint) {
         const newX: f64 = @as(f64, @floatFromInt(point.time)) *
@@ -405,84 +421,62 @@ fn findTangent(
     var hull_one_idx: usize = hull_one.items.len - 1; // Rightmost point of hull_one.
     var hull_two_idx: usize = 0; // Leftmost point of hull_two.
 
-    // Iterate until a valid tangent is found
+    // Iterate until a valid tangent is found.
     while (true) {
-        // Check the turn direction at hull_two
+        // Check the turn direction at hull_two.
         const hull_two_turn = computeTurn(
-            hull_one.items[hull_one_idx], // Current point in hull_one
-            hull_two.items[hull_two_idx], // Current point in hull_two
-            hull_two.items[(hull_two_idx + 1) % hull_two.items.len], // Next point in hull_two
+            hull_one.items[hull_one_idx], // Current point in hull_one.
+            hull_two.items[hull_two_idx], // Current point in hull_two.
+            hull_two.items[(hull_two_idx + 1) % hull_two.items.len], // Next point in hull_two.
         );
 
-        // Adjust hull_two_idx based on the turn and hull type
+        // Adjust hull_two_idx based on the turn and hull type.
         switch (hull_type) {
             .upperHull => if (hull_two_turn == Turn.left) {
-                // If the turn is left, the current tangent dips into hull_two
-                // Move to the next point in hull_two (clockwise adjustment)
+                // If the turn is left, the current tangent dips into hull_two.
+                // Move to the next point in hull_two (clockwise adjustment).
                 hull_two_idx = (hull_two_idx + 1) % hull_two.items.len;
                 continue; // Re-evaluate the tangent
             },
             .lowerHull => if (hull_two_turn == Turn.right) {
-                // If the turn is right, the current tangent dips into hull_two
-                // Move to the next point in hull_two (clockwise adjustment)
+                // If the turn is right, the current tangent dips into hull_two.
+                // Move to the next point in hull_two (clockwise adjustment).
                 hull_two_idx = (hull_two_idx + 1) % hull_two.items.len;
-                continue; // Re-evaluate the tangent
+                continue; // Re-evaluate the tangent.
             },
         }
 
-        // Check the turn direction at hull_one
+        // Check the turn direction at hull_one.
         const hull_one_turn = computeTurn(
-            hull_one.items[(hull_one_idx - 1 + hull_one.items.len) % hull_one.items.len], // Previous point in hull_one
-            hull_one.items[hull_one_idx], // Current point in hull_one
-            hull_two.items[hull_two_idx], // Current point in hull_two
+            hull_one.items[(hull_one_idx - 1 + hull_one.items.len) % hull_one.items.len], // Previous point in hull_one.
+            hull_one.items[hull_one_idx], // Current point in hull_one.
+            hull_two.items[hull_two_idx], // Current point in hull_two.
         );
 
-        // Adjust hull_one_idx based on the turn and hull type
+        // Adjust hull_one_idx based on the turn and hull type.
         switch (hull_type) {
             .upperHull => if (hull_one_turn == Turn.left) {
-                // If the turn is left, the current tangent dips into hull_one
-                // Move to the previous point in hull_one (counterclockwise adjustment)
+                // If the turn is left, the current tangent dips into hull_one.
+                // Move to the previous point in hull_one (counterclockwise. adjustment)
                 hull_one_idx = (hull_one_idx - 1 + hull_one.items.len) % hull_one.items.len;
-                _ = hull_one.pop(); // Remove the point that violates convexity
-                continue; // Re-evaluate the tangent
+                _ = hull_one.pop(); // Remove the point that violates convexity.
+                continue; // Re-evaluate the tangent.
             },
             .lowerHull => if (hull_one_turn == Turn.right) {
-                // If the turn is right, the current tangent dips into hull_one
-                // Move to the previous point in hull_one (counterclockwise adjustment)
+                // If the turn is right, the current tangent dips into hull_one.
+                // Move to the previous point in hull_one (counterclockwise adjustment).
                 hull_one_idx = (hull_one_idx - 1 + hull_one.items.len) % hull_one.items.len;
-                _ = hull_one.pop(); // Remove the point that violates convexity
-                continue; // Re-evaluate the tangent
+                _ = hull_one.pop(); // Remove the point that violates convexity.
+                continue; // Re-evaluate the tangent.
             },
         }
 
-        // If neither index needs adjustment, we have found a valid tangent
+        // If neither index needs adjustment, we have found a valid tangent.
         break;
     }
 
-    // Return the indices of the tangent points
+    // Return the indices of the tangent points.
     return .{ .hull_one_idx = hull_one_idx, .hull_two_idx = hull_two_idx };
-}
-
-fn testConvexHullProperty(convex_hull: *ConvexHull) !void {
-    // All points in the Upper Hull should turn to the right.
-    for (1..convex_hull.upper_hull.items.len - 1) |i| {
-        const turn = computeTurn(
-            convex_hull.upper_hull.items[i - 1],
-            convex_hull.upper_hull.items[i],
-            convex_hull.upper_hull.items[i + 1],
-        );
-        try testing.expectEqual(turn, Turn.right);
-    }
-
-    // All points in the Lower Hull should turn to the left.
-    for (1..convex_hull.lower_hull.items.len - 1) |i| {
-        const turn = computeTurn(
-            convex_hull.lower_hull.items[i - 1],
-            convex_hull.lower_hull.items[i],
-            convex_hull.lower_hull.items[i + 1],
-        );
-        try testing.expectEqual(turn, Turn.left);
-    }
 }
 
 test "Create incrementally convex hull with known result" {
@@ -530,7 +524,7 @@ test "Create incrementally convex hull with known result" {
     try testing.expectEqual(20, convex_hull.lower_hull.items[3].time);
 }
 
-test "Create Incrementally convex hull random elements" {
+test "Create incrementally a convex hull with random elements" {
     const num_points: usize = 1000;
     const allocator = testing.allocator;
     var rnd = std.rand.DefaultPrng.init(0);
@@ -695,7 +689,29 @@ test "Merge convex hulls with random elements" {
         try convex_hull_two.addPoint(.{ .time = i, .value = rnd.random().float(f64) });
     }
 
-    // Merge convex_hull_two into convex_hull_one
+    // Merge convex_hull_two into convex_hull_one.
+    try convex_hull_one.merge(&convex_hull_two);
+
+    try testConvexHullProperty(&convex_hull_one);
+}
+
+test "Merge single element's convex hull with other convex hull" {
+    const num_points: usize = 100;
+    const allocator = testing.allocator;
+    var rnd = std.rand.DefaultPrng.init(0);
+
+    var convex_hull_one = try ConvexHull.init(allocator);
+    defer convex_hull_one.deinit();
+
+    try convex_hull_one.addPoint(.{ .time = 0, .value = rnd.random().float(f64) });
+
+    var convex_hull_two = try ConvexHull.init(allocator);
+    defer convex_hull_two.deinit();
+
+    for (1..num_points) |i| {
+        try convex_hull_two.addPoint(.{ .time = i, .value = rnd.random().float(f64) });
+    }
+
     try convex_hull_one.merge(&convex_hull_two);
 
     try testConvexHullProperty(&convex_hull_one);
@@ -723,24 +739,28 @@ test "Merge convex hull with single element's convex hull" {
     try testConvexHullProperty(&convex_hull_one);
 }
 
-test "Merge single element's convex hull with other convex hull" {
-    const num_points: usize = 100;
-    const allocator = testing.allocator;
-    var rnd = std.rand.DefaultPrng.init(0);
-
-    var convex_hull_one = try ConvexHull.init(allocator);
-    defer convex_hull_one.deinit();
-
-    try convex_hull_one.addPoint(.{ .time = 0, .value = rnd.random().float(f64) });
-
-    var convex_hull_two = try ConvexHull.init(allocator);
-    defer convex_hull_two.deinit();
-
-    for (1..num_points) |i| {
-        try convex_hull_two.addPoint(.{ .time = i, .value = rnd.random().float(f64) });
+/// Validates that the Convex Hull `convex_hull` satisfies the required properties:
+/// 1. In the `upper_hull`, every sequence of three consecutive points must turn to the right.
+/// 2. In the `lower_hull`, every sequence of three consecutive points must turn to the left.
+/// If any of these properties are violated, an error is returned.
+fn testConvexHullProperty(convex_hull: *ConvexHull) !void {
+    // All points in the Upper Hull should turn to the right.
+    for (1..convex_hull.upper_hull.items.len - 1) |i| {
+        const turn = computeTurn(
+            convex_hull.upper_hull.items[i - 1],
+            convex_hull.upper_hull.items[i],
+            convex_hull.upper_hull.items[i + 1],
+        );
+        try testing.expectEqual(turn, Turn.right);
     }
 
-    try convex_hull_one.merge(&convex_hull_two);
-
-    try testConvexHullProperty(&convex_hull_one);
+    // All points in the Lower Hull should turn to the left.
+    for (1..convex_hull.lower_hull.items.len - 1) |i| {
+        const turn = computeTurn(
+            convex_hull.lower_hull.items[i - 1],
+            convex_hull.lower_hull.items[i],
+            convex_hull.lower_hull.items[i + 1],
+        );
+        try testing.expectEqual(turn, Turn.left);
+    }
 }
