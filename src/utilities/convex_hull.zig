@@ -431,19 +431,17 @@ fn findTangent(
         );
 
         // Adjust hull_two_idx based on the turn and hull type.
-        switch (hull_type) {
-            .upperHull => if (hull_two_turn == Turn.left) {
-                // If the turn is left, the current tangent dips into hull_two.
-                // Move to the next point in hull_two (clockwise adjustment).
-                hull_two_idx = (hull_two_idx + 1) % hull_two.items.len;
-                continue; // Re-evaluate the tangent
-            },
-            .lowerHull => if (hull_two_turn == Turn.right) {
-                // If the turn is right, the current tangent dips into hull_two.
-                // Move to the next point in hull_two (clockwise adjustment).
-                hull_two_idx = (hull_two_idx + 1) % hull_two.items.len;
-                continue; // Re-evaluate the tangent.
-            },
+        const hull_two_turn_violation = switch (hull_type) {
+            // If the turn is left, the current tangent dips into hull_two.
+            .upperHull => hull_two_turn == Turn.left,
+            // If the turn is right, the current tangent dips into hull_two.
+            .lowerHull => hull_two_turn == Turn.right,
+        };
+
+        if (hull_two_turn_violation) {
+            // Move to the next point in hull_two (clockwise adjustment).
+            hull_two_idx = (hull_two_idx + 1) % hull_two.items.len;
+            continue; // Re-evaluate the tangent.
         }
 
         // Check the turn direction at hull_one.
@@ -454,21 +452,18 @@ fn findTangent(
         );
 
         // Adjust hull_one_idx based on the turn and hull type.
-        switch (hull_type) {
-            .upperHull => if (hull_one_turn == Turn.left) {
-                // If the turn is left, the current tangent dips into hull_one.
-                // Move to the previous point in hull_one (counterclockwise. adjustment)
-                hull_one_idx = (hull_one_idx - 1 + hull_one.items.len) % hull_one.items.len;
-                _ = hull_one.pop(); // Remove the point that violates convexity.
-                continue; // Re-evaluate the tangent.
-            },
-            .lowerHull => if (hull_one_turn == Turn.right) {
-                // If the turn is right, the current tangent dips into hull_one.
-                // Move to the previous point in hull_one (counterclockwise adjustment).
-                hull_one_idx = (hull_one_idx - 1 + hull_one.items.len) % hull_one.items.len;
-                _ = hull_one.pop(); // Remove the point that violates convexity.
-                continue; // Re-evaluate the tangent.
-            },
+        const hull_one_turn_violation = switch (hull_type) {
+            // If the turn is left, the current tangent dips into hull_one.
+            .upperHull => hull_one_turn == Turn.left,
+            // If the turn is right, the current tangent dips into hull_one.
+            .lowerHull => hull_one_turn == Turn.right,
+        };
+
+        if (hull_one_turn_violation) {
+            // Move to the previous point in hull_one (counterclockwise adjustment).
+            hull_one_idx = (hull_one_idx - 1 + hull_one.items.len) % hull_one.items.len;
+            _ = hull_one.pop(); // Remove the point that violates convexity.
+            continue; // Re-evaluate the tangent.
         }
 
         // If neither index needs adjustment, we have found a valid tangent.
