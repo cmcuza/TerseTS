@@ -64,9 +64,9 @@ pub const ConvexHull = struct {
     }
 
     /// Add a new `point` to the convex hull.
-    pub fn addPoint(self: *ConvexHull, point: DiscretePoint) !void {
-        try addPointToHull(&self.upper_hull, Turn.right, point);
-        try addPointToHull(&self.lower_hull, Turn.left, point);
+    pub fn add(self: *ConvexHull, point: DiscretePoint) !void {
+        try addToHull(&self.upper_hull, Turn.right, point);
+        try addToHull(&self.lower_hull, Turn.left, point);
     }
 
     /// Invalidates all element pointers in the upper and lower hull. The capacity is preserved.
@@ -99,8 +99,9 @@ pub const ConvexHull = struct {
     /// Rectangle (MABR) of a Convex Hull. The MABR is computed using the Rotating Calipers
     /// algorithm described in the paper:
     /// Shamos, Michael (1978). "Computational Geometry" (PDF). Yale University. pp. 76–81.
-    /// This implementation is based mostly on the description found in:
-    /// https://en.wikipedia.org/wiki/Rotating_calipers.
+    /// The `LinewarFnction` is computed following the description provided in the paper
+    /// Space Efficient Streaming Algorithms for the Maximum Error Histogram.
+    /// IEEE ICDE 2006. https://doi.org/10.1109/ICDE.2007.368961.
     pub fn computeMABRLinearFunction(self: *ConvexHull) Error!LinearFunction {
         const convex_hull_len: usize = self.len();
 
@@ -188,50 +189,126 @@ pub const ConvexHull = struct {
         return LinearFunction{ .slope = min_slope, .intercept = min_intercept };
     }
 
-    /// Merges another `other: ConvexHull` into the current `self: ConvexHull` in place. This
-    /// operation modifies the `self` object by appending points from the `other` convex hull.
-    /// If appending to the hulls fails due to allocation issues, the error is returned.
-    pub fn merge(self: *ConvexHull, other: *ConvexHull) !void {
-        // Special case: if `other` has only one point, directly add it to self's hulls.
+    /// Merges another `other: ConvexHull` into either the current `self: ConvexHull` (in-place)
+    /// or into the provided `merged` hull (not in-place). If `merged` is `null`, the operation is
+    /// in-place. If appending to the hulls fails due to allocation issues, the error is returned.
+    pub fn merge(self: *ConvexHull, other: *ConvexHull, merged: ?*ConvexHull) !void {
+        // Add points from `self` to `merged` if non-in-place.
+        if (merged) |m| {
+            const self_points = try self.getAllPointsSorted();
+            defer self_points.deinit(); // Free sorted points when done.
+            for (self_points.items) |point| {
+                try m.add(point);
+            }
+        }
+
+        const target = if (merged) |m| m else self;
+
+        // Special case: if `other` has only one point, directly add it to the target.
         if (other.len() == 1) {
-            try self.addPoint(other.at(0));
+            try target.add(other.at(0));
             return;
         }
 
-        // Special case: if `self` has only one point, transfer points from `other` directly.
-        if (self.len() == 1) {
+        // Special case: if `self` has only one point, transfer points from `other`.
+        if (target.len() == 1) {
             const other_points = try other.getAllPointsSorted();
-            defer other_points.deinit(); // Ensure the allocated list is freed.
+            defer other_points.deinit(); // Free sorted points when done.
             for (other_points.items) |point| {
-                try self.addPoint(point); // Add each point to `self`.
+                try target.add(point);
             }
             return;
         }
 
         // Find tangent between the upper hulls.
         const upper_tangent = try findTangent(
-            &self.upper_hull,
+            &target.upper_hull,
             &other.upper_hull,
             .upperHull,
         );
 
         // Find tangent between the lower hulls.
         const lower_tangent = try findTangent(
-            &self.lower_hull,
+            &target.lower_hull,
             &other.lower_hull,
             .lowerHull,
         );
 
-        // Add points to `self`'s upper hull starting from the right-most point
-        // of the `other`s upper hull's tangent.
+        // Add points to the target's upper hull from the right-most point
+        // of the `other`'s upper hull tangent.
         for (upper_tangent.hull_two_idx..other.upper_hull.items.len) |i| {
-            try self.upper_hull.append(other.upper_hull.items[i]);
+            try target.upper_hull.append(other.upper_hull.items[i]);
         }
 
-        // Add points to `self`'s lower hull starting from the right-most point
-        // of the `other`s lower hull's tangent.
+        // Add points to the target's lower hull from the right-most point
+        // of the `other`'s lower hull tangent.
         for (lower_tangent.hull_two_idx..other.lower_hull.items.len) |i| {
-            try self.lower_hull.append(other.lower_hull.items[i]);
+            try target.lower_hull.append(other.lower_hull.items[i]);
+        }
+    }
+
+    // Computes and returns the maximum $L_{\inf}$ error of the `linear_function` with respect to
+    // the points in the convex hull `self`.
+    pub fn computeMaxError(self: *ConvexHull, linear_function: LinearFunction) !f64 {
+        const convex_hull_len = self.len();
+
+        // Handle special case: If the Convex Hull is empty, return an error
+        if (convex_hull_len == 0) {
+            return Error.EmptyConvexHull;
+        }
+
+        var max_error: f80 = 0.0;
+
+        // Iterate over all points in the convex hull
+        for (0..convex_hull_len) |i| {
+            const point = self.at(i);
+
+            // Compute the predicted value using the linear function
+            const predicted_value = linear_function.slope * @as(f80, @floatFromInt(point.time)) + linear_function.intercept;
+
+            // Compute the absolute error
+            const current_error = @abs(predicted_value - point.value);
+
+            // Update max_error if this error is larger
+            max_error = @max(max_error, current_error);
+        }
+
+        // Return the maximum error
+        return @as(f64, @floatCast(max_error));
+    }
+
+    /// Returns the length of the `ConvexHull`.
+    pub fn len(self: *ConvexHull) usize {
+        const lower_hull_len = self.lower_hull.items.len;
+        const upper_hull_len = self.upper_hull.items.len;
+        const convex_hull_len = lower_hull_len + upper_hull_len;
+
+        // There are no elements in the Convex Hull.
+        if (convex_hull_len == 0) {
+            return 0;
+        }
+
+        // There is only one element but since it is repeated `convex_hull_len==2`.
+        if (convex_hull_len == 2) {
+            return 1;
+        }
+
+        // Since the first and final element are repeated, we substract two from the sum of the
+        // lower and upper hull length.
+        return convex_hull_len - 2;
+    }
+
+    /// Returns the item at the given `index` counterclockwise concatenating the lower and upper
+    /// hull and considering the repeated first and last element.
+    pub fn at(self: *ConvexHull, index: usize) DiscretePoint {
+        const lower_hull_len = self.lower_hull.items.len;
+        const convex_hull_len = self.len();
+        var new_index = @mod(index, convex_hull_len);
+        if (new_index < lower_hull_len) {
+            return self.lower_hull.items[new_index];
+        } else {
+            new_index = new_index - lower_hull_len + 1;
+            return self.upper_hull.items[new_index];
         }
     }
 
@@ -257,7 +334,7 @@ pub const ConvexHull = struct {
     /// Helper function to get all points sorted as an `ArrayList(DiscretePoint)`. The function
     /// merges the lower and upper hulls, which are already sorted, in O(N) time. If the
     /// `ConvexHull` is empty, an empty ArrayList is returned.
-    pub fn getAllPointsSorted(self: *ConvexHull) !ArrayList(DiscretePoint) {
+    fn getAllPointsSorted(self: *ConvexHull) !ArrayList(DiscretePoint) {
         // Initialize the result list with enough capacity for both hulls.
         var all_points = try ArrayList(DiscretePoint).initCapacity(
             self.allocator,
@@ -302,7 +379,7 @@ pub const ConvexHull = struct {
 
     /// Auxiliary function to add a new `point` to a given `hull` of the convex hull. The function
     /// uses the given `turn` to correctly add the new point.
-    fn addPointToHull(hull: *ArrayList(DiscretePoint), turn: Turn, point: DiscretePoint) !void {
+    fn addToHull(hull: *ArrayList(DiscretePoint), turn: Turn, point: DiscretePoint) !void {
         if (hull.items.len < 2) {
             // The first two points can be add directly.
             try hull.append(point);
@@ -317,41 +394,6 @@ pub const ConvexHull = struct {
                 _ = hull.pop();
             }
             try hull.append(point);
-        }
-    }
-
-    /// Returns the length of the `ConvexHull`.
-    fn len(self: *ConvexHull) usize {
-        const lower_hull_len = self.lower_hull.items.len;
-        const upper_hull_len = self.upper_hull.items.len;
-        const convex_hull_len = lower_hull_len + upper_hull_len;
-
-        // There are no elements in the Convex Hull.
-        if (convex_hull_len == 0) {
-            return 0;
-        }
-
-        // There is only one element but since it is repeated `convex_hull_len==2`.
-        if (convex_hull_len == 2) {
-            return 1;
-        }
-
-        // Since the first and final element are repeated, we substract two from the sum of the
-        // lower and upper hull length.
-        return convex_hull_len - 2;
-    }
-
-    /// Returns the item at the given `index` counterclockwise concatenating the lower and upper
-    /// hull and considering the repeated first and last element.
-    fn at(self: *ConvexHull, index: usize) DiscretePoint {
-        const lower_hull_len = self.lower_hull.items.len;
-        const convex_hull_len = self.len();
-        var new_index = @mod(index, convex_hull_len);
-        if (new_index < lower_hull_len) {
-            return self.lower_hull.items[new_index];
-        } else {
-            new_index = new_index - lower_hull_len + 1;
-            return self.upper_hull.items[new_index];
         }
     }
 };
@@ -414,7 +456,7 @@ fn findTangent(
 } {
     // Ensure the input hulls are not empty.
     if (hull_one.items.len == 0 or hull_two.items.len == 0) {
-        return Error.EmptyInput;
+        return Error.EmptyConvexHull;
     }
 
     // Start with the rightmost point of hull_one and the leftmost point of hull_two.
@@ -423,47 +465,51 @@ fn findTangent(
 
     // Iterate until a valid tangent is found.
     while (true) {
-        // Check the turn direction at hull_two.
-        const hull_two_turn = computeTurn(
-            hull_one.items[hull_one_idx], // Current point in hull_one.
-            hull_two.items[hull_two_idx], // Current point in hull_two.
-            hull_two.items[(hull_two_idx + 1) % hull_two.items.len], // Next point in hull_two.
-        );
+        if (hull_two_idx != hull_two.items.len - 1) {
+            // Check the turn direction at hull_two.
+            const hull_two_turn = computeTurn(
+                hull_one.items[hull_one_idx], // Current point in hull_one.
+                hull_two.items[hull_two_idx], // Current point in hull_two.
+                hull_two.items[hull_two_idx + 1], // Next point in hull_two.
+            );
 
-        // Adjust hull_two_idx based on the turn and hull type.
-        const hull_two_turn_violation = switch (hull_type) {
-            // If the turn is left, the current tangent dips into hull_two.
-            .upperHull => hull_two_turn == Turn.left,
-            // If the turn is right, the current tangent dips into hull_two.
-            .lowerHull => hull_two_turn == Turn.right,
-        };
+            // Adjust hull_two_idx based on the turn and hull type.
+            const hull_two_turn_violation = switch (hull_type) {
+                // If the turn is left, the current tangent dips into hull_two.
+                .upperHull => hull_two_turn == Turn.left,
+                // If the turn is right, the current tangent dips into hull_two.
+                .lowerHull => hull_two_turn == Turn.right,
+            };
 
-        if (hull_two_turn_violation) {
-            // Move to the next point in hull_two (clockwise adjustment).
-            hull_two_idx = (hull_two_idx + 1) % hull_two.items.len;
-            continue; // Re-evaluate the tangent.
+            if (hull_two_turn_violation) {
+                // Move to the next point in hull_two (clockwise adjustment).
+                hull_two_idx = hull_two_idx + 1;
+                continue; // Re-evaluate the tangent.
+            }
         }
+        // There are no other points to the left on hull one.
+        if (hull_one_idx != 0) {
+            // Check the turn direction at hull_one.
+            const hull_one_turn = computeTurn(
+                hull_one.items[hull_one_idx - 1], // Previous point in hull_one.
+                hull_one.items[hull_one_idx], // Current point in hull_one.
+                hull_two.items[hull_two_idx], // Current point in hull_two.
+            );
 
-        // Check the turn direction at hull_one.
-        const hull_one_turn = computeTurn(
-            hull_one.items[(hull_one_idx - 1 + hull_one.items.len) % hull_one.items.len], // Previous point in hull_one.
-            hull_one.items[hull_one_idx], // Current point in hull_one.
-            hull_two.items[hull_two_idx], // Current point in hull_two.
-        );
+            // Adjust hull_one_idx based on the turn and hull type.
+            const hull_one_turn_violation = switch (hull_type) {
+                // If the turn is left, the current tangent dips into hull_one.
+                .upperHull => hull_one_turn == Turn.left,
+                // If the turn is right, the current tangent dips into hull_one.
+                .lowerHull => hull_one_turn == Turn.right,
+            };
 
-        // Adjust hull_one_idx based on the turn and hull type.
-        const hull_one_turn_violation = switch (hull_type) {
-            // If the turn is left, the current tangent dips into hull_one.
-            .upperHull => hull_one_turn == Turn.left,
-            // If the turn is right, the current tangent dips into hull_one.
-            .lowerHull => hull_one_turn == Turn.right,
-        };
-
-        if (hull_one_turn_violation) {
-            // Move to the previous point in hull_one (counterclockwise adjustment).
-            hull_one_idx = (hull_one_idx - 1 + hull_one.items.len) % hull_one.items.len;
-            _ = hull_one.pop(); // Remove the point that violates convexity.
-            continue; // Re-evaluate the tangent.
+            if (hull_one_turn_violation) {
+                // Move to the previous point in hull_one (counterclockwise adjustment).
+                hull_one_idx = hull_one_idx - 1;
+                _ = hull_one.pop(); // Remove the point that violates convexity.
+                continue; // Re-evaluate the tangent.
+            }
         }
 
         // If neither index needs adjustment, we have found a valid tangent.
@@ -480,27 +526,27 @@ test "Create incrementally convex hull with known result" {
     var convex_hull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
 
-    try convex_hull.addPoint(.{ .time = 0, .value = 3 });
-    try convex_hull.addPoint(.{ .time = 1, .value = 2 });
-    try convex_hull.addPoint(.{ .time = 2, .value = 3.5 });
-    try convex_hull.addPoint(.{ .time = 3, .value = 5 });
-    try convex_hull.addPoint(.{ .time = 4, .value = 3 });
-    try convex_hull.addPoint(.{ .time = 5, .value = 4 });
-    try convex_hull.addPoint(.{ .time = 6, .value = 4 });
-    try convex_hull.addPoint(.{ .time = 7, .value = 3 });
-    try convex_hull.addPoint(.{ .time = 8, .value = 4.5 });
-    try convex_hull.addPoint(.{ .time = 9, .value = 3.5 });
-    try convex_hull.addPoint(.{ .time = 10, .value = 2.5 });
-    try convex_hull.addPoint(.{ .time = 11, .value = 2.5 });
-    try convex_hull.addPoint(.{ .time = 12, .value = 3.5 });
-    try convex_hull.addPoint(.{ .time = 13, .value = 2.5 });
-    try convex_hull.addPoint(.{ .time = 14, .value = 2.5 });
-    try convex_hull.addPoint(.{ .time = 15, .value = 2.5 });
-    try convex_hull.addPoint(.{ .time = 16, .value = 3 });
-    try convex_hull.addPoint(.{ .time = 17, .value = 3 });
-    try convex_hull.addPoint(.{ .time = 18, .value = 3 });
-    try convex_hull.addPoint(.{ .time = 19, .value = 3 });
-    try convex_hull.addPoint(.{ .time = 20, .value = 2.8 });
+    try convex_hull.add(.{ .time = 0, .value = 3 });
+    try convex_hull.add(.{ .time = 1, .value = 2 });
+    try convex_hull.add(.{ .time = 2, .value = 3.5 });
+    try convex_hull.add(.{ .time = 3, .value = 5 });
+    try convex_hull.add(.{ .time = 4, .value = 3 });
+    try convex_hull.add(.{ .time = 5, .value = 4 });
+    try convex_hull.add(.{ .time = 6, .value = 4 });
+    try convex_hull.add(.{ .time = 7, .value = 3 });
+    try convex_hull.add(.{ .time = 8, .value = 4.5 });
+    try convex_hull.add(.{ .time = 9, .value = 3.5 });
+    try convex_hull.add(.{ .time = 10, .value = 2.5 });
+    try convex_hull.add(.{ .time = 11, .value = 2.5 });
+    try convex_hull.add(.{ .time = 12, .value = 3.5 });
+    try convex_hull.add(.{ .time = 13, .value = 2.5 });
+    try convex_hull.add(.{ .time = 14, .value = 2.5 });
+    try convex_hull.add(.{ .time = 15, .value = 2.5 });
+    try convex_hull.add(.{ .time = 16, .value = 3 });
+    try convex_hull.add(.{ .time = 17, .value = 3 });
+    try convex_hull.add(.{ .time = 18, .value = 3 });
+    try convex_hull.add(.{ .time = 19, .value = 3 });
+    try convex_hull.add(.{ .time = 20, .value = 2.8 });
 
     try testing.expectEqual(5, convex_hull.upper_hull.items.len);
     try testing.expectEqual(4, convex_hull.lower_hull.items.len);
@@ -528,7 +574,7 @@ test "Create incrementally a convex hull with random elements" {
     defer convex_hull.deinit();
 
     for (0..num_points) |i| {
-        try convex_hull.addPoint(.{ .time = i, .value = rnd.random().float(f64) });
+        try convex_hull.add(.{ .time = i, .value = rnd.random().float(f64) });
     }
 
     try testConvexHullProperty(&convex_hull);
@@ -551,7 +597,7 @@ test "Compute MABR LinearFunction for known Convex Hull one" {
     defer convex_hull.deinit();
 
     for (points) |point| {
-        try convex_hull.addPoint(point);
+        try convex_hull.add(point);
     }
 
     // Calculate the MABR Linear Function.
@@ -578,7 +624,7 @@ test "Compute MABR LinearFunction for known Convex Hull two" {
     defer convex_hull.deinit();
 
     for (points) |point| {
-        try convex_hull.addPoint(point);
+        try convex_hull.add(point);
     }
 
     // Calculate MABR Linear Function.
@@ -598,7 +644,7 @@ test "Compute MABR LinearFunction for random Convex Hull" {
     defer convex_hull.deinit();
 
     for (0..num_points) |i| {
-        try convex_hull.addPoint(.{ .time = i, .value = rnd.random().float(f64) });
+        try convex_hull.add(.{ .time = i, .value = rnd.random().float(f64) });
     }
 
     // Calculate MABR Linear Function. The exact value of the `intercept` is unknown but it must be
@@ -608,7 +654,7 @@ test "Compute MABR LinearFunction for random Convex Hull" {
     try testing.expect(mabr_linear_function.intercept <= 1.0);
 }
 
-test "Merge convex hulls with known result" {
+test "Merge in-place convex hulls with known result" {
     const allocator = testing.allocator;
 
     var convex_hull_one = try ConvexHull.init(allocator);
@@ -617,40 +663,40 @@ test "Merge convex hulls with known result" {
     var convex_hull_two = try ConvexHull.init(allocator);
     defer convex_hull_two.deinit();
 
-    try convex_hull_one.addPoint(.{ .time = 0, .value = 3 });
-    try convex_hull_one.addPoint(.{ .time = 1, .value = 2 });
-    try convex_hull_one.addPoint(.{ .time = 2, .value = 3.5 });
-    try convex_hull_one.addPoint(.{ .time = 3, .value = 5 });
-    try convex_hull_one.addPoint(.{ .time = 4, .value = 3 });
-    try convex_hull_one.addPoint(.{ .time = 5, .value = 4 });
-    try convex_hull_one.addPoint(.{ .time = 6, .value = 4 });
-    try convex_hull_one.addPoint(.{ .time = 7, .value = 3 });
-    try convex_hull_one.addPoint(.{ .time = 8, .value = 4.5 });
-    try convex_hull_one.addPoint(.{ .time = 9, .value = 3.5 });
-    try convex_hull_one.addPoint(.{ .time = 10, .value = 2.5 });
-    try convex_hull_one.addPoint(.{ .time = 11, .value = 2.5 });
-    try convex_hull_one.addPoint(.{ .time = 12, .value = 3.5 });
-    try convex_hull_one.addPoint(.{ .time = 13, .value = 2.5 });
-    try convex_hull_one.addPoint(.{ .time = 14, .value = 2.5 });
-    try convex_hull_one.addPoint(.{ .time = 15, .value = 2.5 });
-    try convex_hull_one.addPoint(.{ .time = 16, .value = 3 });
-    try convex_hull_one.addPoint(.{ .time = 17, .value = 3 });
-    try convex_hull_one.addPoint(.{ .time = 18, .value = 3 });
-    try convex_hull_one.addPoint(.{ .time = 19, .value = 3 });
-    try convex_hull_one.addPoint(.{ .time = 20, .value = 2.8 });
+    try convex_hull_one.add(.{ .time = 0, .value = 3 });
+    try convex_hull_one.add(.{ .time = 1, .value = 2 });
+    try convex_hull_one.add(.{ .time = 2, .value = 3.5 });
+    try convex_hull_one.add(.{ .time = 3, .value = 5 });
+    try convex_hull_one.add(.{ .time = 4, .value = 3 });
+    try convex_hull_one.add(.{ .time = 5, .value = 4 });
+    try convex_hull_one.add(.{ .time = 6, .value = 4 });
+    try convex_hull_one.add(.{ .time = 7, .value = 3 });
+    try convex_hull_one.add(.{ .time = 8, .value = 4.5 });
+    try convex_hull_one.add(.{ .time = 9, .value = 3.5 });
+    try convex_hull_one.add(.{ .time = 10, .value = 2.5 });
+    try convex_hull_one.add(.{ .time = 11, .value = 2.5 });
+    try convex_hull_one.add(.{ .time = 12, .value = 3.5 });
+    try convex_hull_one.add(.{ .time = 13, .value = 2.5 });
+    try convex_hull_one.add(.{ .time = 14, .value = 2.5 });
+    try convex_hull_one.add(.{ .time = 15, .value = 2.5 });
+    try convex_hull_one.add(.{ .time = 16, .value = 3 });
+    try convex_hull_one.add(.{ .time = 17, .value = 3 });
+    try convex_hull_one.add(.{ .time = 18, .value = 3 });
+    try convex_hull_one.add(.{ .time = 19, .value = 3 });
+    try convex_hull_one.add(.{ .time = 20, .value = 2.8 });
 
-    try convex_hull_two.addPoint(.{ .time = 21, .value = 1 });
-    try convex_hull_two.addPoint(.{ .time = 22, .value = 2.5 });
-    try convex_hull_two.addPoint(.{ .time = 23, .value = 6 });
-    try convex_hull_two.addPoint(.{ .time = 24, .value = 2 });
-    try convex_hull_two.addPoint(.{ .time = 25, .value = 6 });
-    try convex_hull_two.addPoint(.{ .time = 26, .value = 9 });
-    try convex_hull_two.addPoint(.{ .time = 27, .value = 3 });
-    try convex_hull_two.addPoint(.{ .time = 28, .value = 4.5 });
-    try convex_hull_two.addPoint(.{ .time = 29, .value = 10 });
-    try convex_hull_two.addPoint(.{ .time = 30, .value = 1.5 });
+    try convex_hull_two.add(.{ .time = 21, .value = 1 });
+    try convex_hull_two.add(.{ .time = 22, .value = 2.5 });
+    try convex_hull_two.add(.{ .time = 23, .value = 6 });
+    try convex_hull_two.add(.{ .time = 24, .value = 2 });
+    try convex_hull_two.add(.{ .time = 25, .value = 6 });
+    try convex_hull_two.add(.{ .time = 26, .value = 9 });
+    try convex_hull_two.add(.{ .time = 27, .value = 3 });
+    try convex_hull_two.add(.{ .time = 28, .value = 4.5 });
+    try convex_hull_two.add(.{ .time = 29, .value = 10 });
+    try convex_hull_two.add(.{ .time = 30, .value = 1.5 });
 
-    try convex_hull_one.merge(&convex_hull_two);
+    try convex_hull_one.merge(&convex_hull_two, null);
 
     // Expected Upper Hull.
     try testing.expectEqual(0, convex_hull_one.upper_hull.items[0].time);
@@ -665,7 +711,7 @@ test "Merge convex hulls with known result" {
     try testing.expectEqual(30, convex_hull_one.lower_hull.items[3].time);
 }
 
-test "Merge convex hulls with random elements" {
+test "Merge in-place convex hulls with random elements" {
     const num_points: usize = 100;
     const allocator = testing.allocator;
     var rnd = std.rand.DefaultPrng.init(0);
@@ -674,45 +720,23 @@ test "Merge convex hulls with random elements" {
     defer convex_hull_one.deinit();
 
     for (0..num_points) |i| {
-        try convex_hull_one.addPoint(.{ .time = i, .value = rnd.random().float(f64) });
+        try convex_hull_one.add(.{ .time = i, .value = rnd.random().float(f64) });
     }
 
     var convex_hull_two = try ConvexHull.init(allocator);
     defer convex_hull_two.deinit();
 
     for (num_points..2 * num_points) |i| {
-        try convex_hull_two.addPoint(.{ .time = i, .value = rnd.random().float(f64) });
+        try convex_hull_two.add(.{ .time = i, .value = rnd.random().float(f64) });
     }
 
     // Merge convex_hull_two into convex_hull_one.
-    try convex_hull_one.merge(&convex_hull_two);
+    try convex_hull_one.merge(&convex_hull_two, null);
 
     try testConvexHullProperty(&convex_hull_one);
 }
 
-test "Merge single element's convex hull with other convex hull" {
-    const num_points: usize = 100;
-    const allocator = testing.allocator;
-    var rnd = std.rand.DefaultPrng.init(0);
-
-    var convex_hull_one = try ConvexHull.init(allocator);
-    defer convex_hull_one.deinit();
-
-    try convex_hull_one.addPoint(.{ .time = 0, .value = rnd.random().float(f64) });
-
-    var convex_hull_two = try ConvexHull.init(allocator);
-    defer convex_hull_two.deinit();
-
-    for (1..num_points) |i| {
-        try convex_hull_two.addPoint(.{ .time = i, .value = rnd.random().float(f64) });
-    }
-
-    try convex_hull_one.merge(&convex_hull_two);
-
-    try testConvexHullProperty(&convex_hull_one);
-}
-
-test "Merge convex hull with single element's convex hull" {
+test "Merge not-in-place convex hulls with random elements" {
     const num_points: usize = 100;
     const allocator = testing.allocator;
     var rnd = std.rand.DefaultPrng.init(0);
@@ -721,17 +745,252 @@ test "Merge convex hull with single element's convex hull" {
     defer convex_hull_one.deinit();
 
     for (0..num_points) |i| {
-        try convex_hull_one.addPoint(.{ .time = i, .value = rnd.random().float(f64) });
+        try convex_hull_one.add(.{ .time = i, .value = rnd.random().float(f64) });
     }
 
     var convex_hull_two = try ConvexHull.init(allocator);
     defer convex_hull_two.deinit();
 
-    try convex_hull_two.addPoint(.{ .time = num_points, .value = rnd.random().float(f64) });
+    for (num_points..2 * num_points) |i| {
+        try convex_hull_two.add(.{ .time = i, .value = rnd.random().float(f64) });
+    }
 
-    try convex_hull_one.merge(&convex_hull_two);
+    var convex_hull_merged = try ConvexHull.init(allocator);
+    defer convex_hull_merged.deinit();
+
+    // Merge convex_hull_two into convex_hull_one.
+    try convex_hull_one.merge(&convex_hull_two, &convex_hull_merged);
+
+    try testConvexHullProperty(&convex_hull_merged);
+}
+
+test "Merge in-place single element's convex hull with other convex hull" {
+    const num_points: usize = 100;
+    const allocator = testing.allocator;
+    var rnd = std.rand.DefaultPrng.init(0);
+
+    var convex_hull_one = try ConvexHull.init(allocator);
+    defer convex_hull_one.deinit();
+
+    try convex_hull_one.add(.{ .time = 0, .value = rnd.random().float(f64) });
+
+    var convex_hull_two = try ConvexHull.init(allocator);
+    defer convex_hull_two.deinit();
+
+    for (1..num_points) |i| {
+        try convex_hull_two.add(.{ .time = i, .value = rnd.random().float(f64) });
+    }
+
+    try convex_hull_one.merge(&convex_hull_two, null);
 
     try testConvexHullProperty(&convex_hull_one);
+}
+
+test "Merge not-in-place single element's convex hull with other convex hull" {
+    const num_points: usize = 100;
+    const allocator = testing.allocator;
+    var rnd = std.rand.DefaultPrng.init(0);
+
+    var convex_hull_one = try ConvexHull.init(allocator);
+    defer convex_hull_one.deinit();
+
+    try convex_hull_one.add(.{ .time = 0, .value = rnd.random().float(f64) });
+
+    var convex_hull_two = try ConvexHull.init(allocator);
+    defer convex_hull_two.deinit();
+
+    for (1..num_points) |i| {
+        try convex_hull_two.add(.{ .time = i, .value = rnd.random().float(f64) });
+    }
+
+    var convex_hull_merged = try ConvexHull.init(allocator);
+    defer convex_hull_merged.deinit();
+
+    try convex_hull_one.merge(&convex_hull_two, &convex_hull_merged);
+
+    try testConvexHullProperty(&convex_hull_merged);
+}
+
+test "Merge in-place convex hull with single element's convex hull" {
+    const num_points: usize = 100;
+    const allocator = testing.allocator;
+    var rnd = std.rand.DefaultPrng.init(0);
+
+    var convex_hull_one = try ConvexHull.init(allocator);
+    defer convex_hull_one.deinit();
+
+    for (0..num_points) |i| {
+        try convex_hull_one.add(.{ .time = i, .value = rnd.random().float(f64) });
+    }
+
+    var convex_hull_two = try ConvexHull.init(allocator);
+    defer convex_hull_two.deinit();
+
+    try convex_hull_two.add(.{ .time = num_points, .value = rnd.random().float(f64) });
+
+    try convex_hull_one.merge(&convex_hull_two, null);
+
+    try testConvexHullProperty(&convex_hull_one);
+}
+
+test "Merge not-in-place convex hull with single element's convex hull" {
+    const num_points: usize = 100;
+    const allocator = testing.allocator;
+    var rnd = std.rand.DefaultPrng.init(0);
+
+    var convex_hull_one = try ConvexHull.init(allocator);
+    defer convex_hull_one.deinit();
+
+    for (0..num_points) |i| {
+        try convex_hull_one.add(.{ .time = i, .value = rnd.random().float(f64) });
+    }
+
+    var convex_hull_two = try ConvexHull.init(allocator);
+    defer convex_hull_two.deinit();
+
+    try convex_hull_two.add(.{ .time = num_points, .value = rnd.random().float(f64) });
+
+    var convex_hull_merged = try ConvexHull.init(allocator);
+    defer convex_hull_merged.deinit();
+
+    try convex_hull_one.merge(&convex_hull_two, &convex_hull_merged);
+
+    try testConvexHullProperty(&convex_hull_merged);
+}
+
+test "Merge not-in-place does not modify the convex hulls one and two" {
+    const num_points: usize = 100;
+    const allocator = testing.allocator;
+    var rnd = std.rand.DefaultPrng.init(0);
+
+    // Initialize convex_hull_one
+    var convex_hull_one = try ConvexHull.init(allocator);
+    defer convex_hull_one.deinit();
+    for (0..num_points) |i| {
+        try convex_hull_one.add(.{ .time = i, .value = rnd.random().float(f64) });
+    }
+
+    // Capture state of convex_hull_one before merge
+    const convex_hull_one_before = try convex_hull_one.getAllPointsSorted();
+    defer convex_hull_one_before.deinit();
+
+    // Initialize convex_hull_two
+    var convex_hull_two = try ConvexHull.init(allocator);
+    defer convex_hull_two.deinit();
+    for (num_points..2 * num_points) |i| {
+        try convex_hull_two.add(.{ .time = i, .value = rnd.random().float(f64) });
+    }
+
+    // Capture state of convex_hull_two before merge
+    const convex_hull_two_before = try convex_hull_two.getAllPointsSorted();
+    defer convex_hull_two_before.deinit();
+
+    // Initialize the merged convex hull
+    var convex_hull_merged = try ConvexHull.init(allocator);
+    defer convex_hull_merged.deinit();
+
+    // Merge convex_hull_two into convex_hull_one, not in-place
+    try convex_hull_one.merge(&convex_hull_two, &convex_hull_merged);
+
+    // Verify the merged convex hull satisfies its properties
+    try testConvexHullProperty(&convex_hull_merged);
+
+    // Verify convex_hull_one was not modified
+    const convex_hull_one_after = try convex_hull_one.getAllPointsSorted();
+    defer convex_hull_one_after.deinit();
+
+    for (0..convex_hull_one_after.items.len) |i| {
+        try testing.expectApproxEqAbs(
+            convex_hull_one_before.items[i].value,
+            convex_hull_one_after.items[i].value,
+            1e-10,
+        );
+    }
+
+    // Verify convex_hull_two was not modified
+    const convex_hull_two_after = try convex_hull_two.getAllPointsSorted();
+    defer convex_hull_two_after.deinit();
+    for (0..convex_hull_one_after.items.len) |i| {
+        try testing.expectApproxEqAbs(
+            convex_hull_two_before.items[i].value,
+            convex_hull_two_after.items[i].value,
+            1e-10,
+        );
+    }
+}
+
+test "Compute max error with known points and linear function" {
+    const allocator = testing.allocator;
+
+    var convex_hull = try ConvexHull.init(allocator);
+    defer convex_hull.deinit();
+
+    try convex_hull.add(.{ .time = 0, .value = 1 });
+    try convex_hull.add(.{ .time = 1, .value = 3 });
+    try convex_hull.add(.{ .time = 2, .value = 5 });
+    try convex_hull.add(.{ .time = 3, .value = 7.1 });
+    try convex_hull.add(.{ .time = 4, .value = 9 });
+    try convex_hull.add(.{ .time = 5, .value = 11 });
+
+    // Define a linear function (e.g., y = 2x + 1)
+    const linear_function = LinearFunction{ .slope = 2.0, .intercept = 1.0 };
+
+    // Manually compute the expected maximum error
+    // For each point, compute the absolute difference from the line
+    var expected_max_error: f80 = 0.0;
+
+    for (0..6) |i| {
+        const point = convex_hull.at(i);
+        const predicted_value = linear_function.slope *
+            @as(f80, @floatFromInt(point.time)) + linear_function.intercept;
+        const abs_error = @abs(predicted_value - point.value);
+        expected_max_error = @max(expected_max_error, abs_error);
+    }
+
+    // Use computeMaxError to compute the maximum error
+    const computed_max_error = try convex_hull.computeMaxError(linear_function);
+
+    // Assert that the computed error matches the expected error
+    try testing.expectApproxEqAbs(expected_max_error, computed_max_error, 1e-10);
+}
+
+test "Compute max error with random points and linear function" {
+    const num_points: usize = 1000;
+    const allocator = testing.allocator;
+    var rnd = std.rand.DefaultPrng.init(0);
+
+    var convex_hull = try ConvexHull.init(allocator);
+    defer convex_hull.deinit();
+
+    var points = ArrayList(f64).init(allocator);
+    defer points.deinit();
+
+    for (0..num_points) |i| {
+        const rand_value = rnd.random().float(f64);
+        try convex_hull.add(.{ .time = i, .value = rand_value });
+        try points.append(rand_value);
+    }
+
+    // Define a linear function (e.g., y = 2x + 1)
+    const linear_function = LinearFunction{ .slope = rnd.random().float(f64), .intercept = rnd.random().float(f64) };
+
+    // Manually compute the expected maximum error
+    // For each point, compute the absolute difference from the line
+    var expected_max_error: f80 = 0.0;
+
+    for (0..points.items.len) |i| {
+        const point = points.items[i];
+        const predicted_value = linear_function.slope *
+            @as(f80, @floatFromInt(i)) + linear_function.intercept;
+        const abs_error = @abs(predicted_value - point);
+        expected_max_error = @max(expected_max_error, abs_error);
+    }
+
+    // Use computeMaxError to compute the maximum error
+    const computed_max_error = try convex_hull.computeMaxError(linear_function);
+
+    // Assert that the computed error matches the expected error
+    try testing.expectApproxEqAbs(expected_max_error, computed_max_error, 1e-10);
 }
 
 /// Validates that the Convex Hull `convex_hull` satisfies the required properties:

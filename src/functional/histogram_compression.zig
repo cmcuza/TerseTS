@@ -34,16 +34,191 @@ const HashedPriorityQueue = @import(
     "../utilities/hashed_priority_queue.zig",
 ).HashedPriorityQueue;
 
+const ConvexHull = @import(
+    "../utilities/convex_hull.zig",
+).ConvexHull;
+
+const shared = @import("../utilities/shared_structs.zig");
+
+const LinearFunction = shared.LinearFunction;
+const Segment = shared.Segment;
+
 const tersets = @import("../tersets.zig");
 const Error = tersets.Error;
 
 const tester = @import("../tester.zig");
 
-/// `Bucket` stores information about a range of consecutives values in the time series.
-/// The structure stores the indices `begin` and `end` where the bucket starts and ends.
-/// It also stores the minimum and maximum values (`min_val` and `max_value`) in the bucket.
-/// The structure also contains the function `computeError` which computes and returns the
-/// $L_\inf$ error associated to the bucket.
+// Enum to determine the type of approximation of the buckets in the histogram.
+const Approximation = enum(i8) { constant, linear };
+
+/// Compress `uncompressed_values` with the maximum number of buckets defined by the `error_bound`
+/// using "Piecewice Constant Histogram" compression method and write the result to
+/// `compressed_values`. If an error occurs it is returned.
+pub fn compressPWCH(
+    uncompressed_values: []const f64,
+    compressed_values: *ArrayList(u8),
+    allocator: mem.Allocator,
+    error_bound: f32,
+) Error!void {
+    if (error_bound <= 0.0) {
+        return Error.UnsupportedErrorBound;
+    }
+
+    // The original implementation requires the maximum number of buckets which can be represented
+    // by a usize instead of `error_bound: f32`. Changing this requires modifications in
+    // `src/tersets.zig` and `src/capi.zig` files.
+    // TODO: Find the right way of passing the maximum number of buckets.
+    const max_buckets: usize = @as(usize, @intFromFloat(@floor(error_bound)));
+    var histogram = try Histogram.init(allocator, max_buckets, .constant);
+    defer histogram.deinit();
+
+    for (uncompressed_values, 0..) |elem, index| {
+        try histogram.insert(elem, index, .constant);
+    }
+
+    for (0..histogram.len()) |index| {
+        var bucket: Bucket = histogram.at(index);
+        try appendValueAndIndexToArrayList(
+            bucket.computeConstantApproximation(),
+            bucket.end + 1,
+            compressed_values,
+        );
+    }
+}
+
+/// Compress `uncompressed_values` with the maximum number of buckets defined by the `error_bound`
+/// using "Piecewice Linear Histogram" compression method and write the result to
+/// `compressed_values`. If an error occurs it is returned.
+pub fn compressPWLH(
+    uncompressed_values: []const f64,
+    compressed_values: *ArrayList(u8),
+    allocator: mem.Allocator,
+    error_bound: f32,
+) Error!void {
+    if (error_bound <= 0.0) {
+        return Error.UnsupportedErrorBound;
+    }
+
+    // The original implementation requires the maximum number of buckets which can be represented
+    // by a usize instead of `error_bound: f32`. Changing this requires modifications in
+    // `src/tersets.zig` and `src/capi.zig` files.
+    // TODO: Find the right way of passing the maximum number of buckets.
+    const max_buckets: usize = @as(usize, @intFromFloat(@floor(error_bound)));
+    var histogram = try Histogram.init(allocator, max_buckets, .linear);
+    defer histogram.deinit();
+
+    for (uncompressed_values, 0..) |elem, index| {
+        try histogram.insert(elem, index, .linear);
+    }
+
+    for (0..histogram.len()) |index| {
+        var bucket: Bucket = histogram.at(index);
+        const linear_approximation = try bucket.computeLinearApproximation();
+
+        if (bucket.end - bucket.begin > 1) {
+            const begin_value: f64 = @floatCast(linear_approximation.slope *
+                @as(f64, @floatFromInt(bucket.begin)) +
+                linear_approximation.intercept);
+            try appendValue(f64, begin_value, compressed_values);
+
+            const end_value: f64 = @floatCast(linear_approximation.slope *
+                @as(f64, @floatFromInt(bucket.end)) +
+                linear_approximation.intercept);
+
+            try appendValue(f64, end_value, compressed_values);
+        } else {
+            try appendValue(f64, uncompressed_values[bucket.begin], compressed_values);
+            try appendValue(f64, uncompressed_values[bucket.end], compressed_values);
+        }
+
+        try appendValue(usize, bucket.end, compressed_values);
+    }
+}
+
+/// Decompress `compressed_values` produced by "Piecewise Constant Histogram" and write the result
+/// to `decompressed_values`. If an error occurs it is returned.
+pub fn decompressPWCH(
+    compressed_values: []const u8,
+    decompressed_values: *ArrayList(f64),
+) Error!void {
+    // The compressed representation is pairs containing a 64-bit float value and 64-bit end index.
+    if (compressed_values.len % 16 != 0) return Error.IncorrectInput;
+
+    const compressed_values_and_index = mem.bytesAsSlice(f64, compressed_values);
+
+    var compressed_index: usize = 0;
+    var uncompressed_index: usize = 0;
+    while (compressed_index < compressed_values_and_index.len) : (compressed_index += 2) {
+        const value = compressed_values_and_index[compressed_index];
+        const index: usize = @bitCast(compressed_values_and_index[compressed_index + 1]);
+        for (uncompressed_index..index) |_| {
+            try decompressed_values.append(value);
+        }
+        uncompressed_index = index;
+    }
+}
+
+/// Decompress `compressed_values` produced by "Swing Filter" and "Slide Filter" and write the
+/// result to `decompressed_values`. If an error occurs it is returned.
+pub fn decompressPWLH(
+    compressed_values: []const u8,
+    decompressed_values: *ArrayList(f64),
+) Error!void {
+    // The compressed representation is composed of three values: (start_value, end_value, end_time)
+    // all of type 64-bit float.
+    if (compressed_values.len % 24 != 0) return Error.IncorrectInput;
+
+    const compressed_lines_and_index = mem.bytesAsSlice(f64, compressed_values);
+
+    var linear_approximation: LinearFunction = .{ .slope = undefined, .intercept = undefined };
+
+    var first_timestamp: usize = 0;
+    var index: usize = 0;
+    while (index < compressed_lines_and_index.len) : (index += 3) {
+        const current_segment: Segment = .{
+            .start_point = .{ .time = first_timestamp, .value = compressed_lines_and_index[index] },
+            .end_point = .{
+                .time = @as(usize, @bitCast(compressed_lines_and_index[index + 2])) - 1,
+                .value = compressed_lines_and_index[index + 1],
+            },
+        };
+
+        if (current_segment.start_point.time < current_segment.end_point.time) {
+            if (current_segment.end_point.time != current_segment.start_point.time) {
+                const duration: f80 = @floatFromInt(current_segment.end_point.time - current_segment.start_point.time);
+                linear_approximation.slope = (current_segment.end_point.value - current_segment.start_point.value) / duration;
+                linear_approximation.intercept = current_segment.start_point.value - linear_approximation.slope *
+                    @as(f64, @floatFromInt(current_segment.start_point.time));
+            } else {
+                linear_approximation.slope = 0.0;
+                linear_approximation.intercept = current_segment.start_point.value;
+            }
+            try decompressed_values.append(current_segment.start_point.value);
+            var current_timestamp: usize = current_segment.start_point.time + 1;
+            while (current_timestamp < current_segment.end_point.time) : (current_timestamp += 1) {
+                const y: f64 = @floatCast(linear_approximation.slope *
+                    @as(f64, @floatFromInt(current_timestamp)) +
+                    linear_approximation.intercept);
+                try decompressed_values.append(y);
+            }
+            try decompressed_values.append(current_segment.end_point.value);
+            first_timestamp = current_timestamp + 1;
+        } else {
+            try decompressed_values.append(current_segment.start_point.value);
+            first_timestamp += 1;
+        }
+    }
+}
+
+/// `Bucket` stores information about a range of consecutives values in the time series. The
+/// structure stores the indices `begin` and `end` where the bucket starts and ends. It stores the
+/// minimum and maximum values (`min_val` and `max_value`) in the bucket. Additionally, it stores
+/// the `convex_hull` of type `ConvexHull` that represents the elements in the bucket. The
+/// `convex_hull` is utilized when a linear approximation of the elements is required. The
+/// structure contains the function `computeConstantApproximation` which computes and returns the
+/// constant approximation that minimizes the $L_\inf$ error associated to the bucket. Likewise,
+/// it contains the function `computeLinearApproximation` which computes and returns the linear
+/// approximation that minimizes the $L_\inf$ error associated to the bucket.
 const Bucket = struct {
     // Begining of the bucket.
     begin: usize,
@@ -53,15 +228,32 @@ const Bucket = struct {
     min_val: f64,
     // Max value of the bucket.
     max_val: f64,
+    // Convex Hull of the elements in the bucket.
+    convex_hull: ConvexHull,
 
     /// Initialize the bucket with the given indices and min/max values.
-    pub fn init(begin: usize, end: usize, min_val: f64, max_val: f64) !Bucket {
-        return Bucket{ .begin = begin, .end = end, .min_val = min_val, .max_val = max_val };
+    pub fn init(begin: usize, end: usize, min_val: f64, max_val: f64, allocator: mem.Allocator) !Bucket {
+        return Bucket{
+            .begin = begin,
+            .end = end,
+            .min_val = min_val,
+            .max_val = max_val,
+            .convex_hull = try ConvexHull.init(allocator),
+        };
+    }
+
+    /// Deinitialize the bucket.
+    pub fn deinit(self: *Bucket) void {
+        self.convex_hull.deinit();
     }
 
     /// Returns the absolute error of the values in the bucket.
-    pub fn computeError(self: Bucket) f64 {
+    pub fn computeConstantApproximation(self: *Bucket) f64 {
         return (self.max_val - self.min_val) / 2.0;
+    }
+
+    pub fn computeLinearApproximation(self: *Bucket) Error!LinearFunction {
+        return try self.convex_hull.computeMABRLinearFunction();
     }
 };
 
@@ -102,6 +294,10 @@ fn compareMergeError(_: void, error_1: MergeError, error_2: MergeError) math.Ord
 const Histogram = struct {
     const Self = @This();
 
+    // Enum to determine the approximation type.
+    approximation: Approximation,
+    // Memory allocator for the convex hull in the buckets.
+    allocator: mem.Allocator,
     // Target number of buckets.
     max_buckets: usize,
     // List of current buckets.
@@ -118,8 +314,10 @@ const Histogram = struct {
     /// parameter can be thought of as fixing a minimum compression ratio that users wants to achieve.
     /// The `minMerge` function will then find the optimal histogram under this constraint.
     /// For example, if `max_buckets=|N|/2`, then the compression ratio will be at least 2x.
-    pub fn init(allocator: mem.Allocator, max_buckets: usize) !Histogram {
+    pub fn init(allocator: mem.Allocator, max_buckets: usize, approximation: Approximation) !Histogram {
         return Histogram{
+            .approximation = approximation,
+            .allocator = allocator,
             .max_buckets = max_buckets,
             .buckets = ArrayList(Bucket).init(allocator),
             .merge_queue = try HashedPriorityQueue(
@@ -138,13 +336,22 @@ const Histogram = struct {
     }
 
     /// Insert a new value into the histogram.
-    pub fn insert(self: *Self, value: f64, index: usize) !void {
+    pub fn insert(self: *Self, value: f64, index: usize, approximation: Approximation) !void {
+        var bucket: Bucket = try Bucket.init(index, index, value, value, self.allocator);
+        defer bucket.deinit();
+
+        try bucket.convex_hull.add(.{ .time = index, .value = value });
+
         // Create a new bucket for the incoming value with start and end at 'index'.
-        try self.buckets.append(try Bucket.init(index, index, value, value));
+        try self.buckets.append(bucket);
 
         if (self.buckets.items.len > 1) {
             const bucket_last_index: usize = self.buckets.items.len - 1;
-            const merge_error: f64 = try self.calculateMergeError(bucket_last_index - 1);
+
+            const merge_error: f64 = switch (approximation) {
+                .constant => try self.calculateConstantApproximationMergeError(bucket_last_index - 1),
+                .linear => try self.calculateLinearApproximationMergeError(bucket_last_index - 1),
+            };
             try self.merge_queue.add(MergeError{ .index = bucket_last_index - 1, .merge_error = merge_error });
         }
         // If the number of buckets exceeds `max_buckets`, merge the least increasing pair.
@@ -154,8 +361,8 @@ const Histogram = struct {
     }
 
     /// Returns the bucket at `index`.
-    pub fn get(self: *Self, index: usize) Bucket {
-        return self.buckets[index];
+    pub fn at(self: *Self, index: usize) Bucket {
+        return self.buckets.items[index];
     }
 
     /// Returns the len of the histogram.
@@ -163,16 +370,52 @@ const Histogram = struct {
         return self.buckets.items.len;
     }
 
-    /// Perform the minimum merge by finding the pair with the smallest merge error.
-    fn minMerge(self: *Self) !void {
+    /// Calculate the merge error for merging the bucket at `index` with the next bucket when
+    /// a `constant` approximation is required. Returns `Error.ItemNotFound` if `index+1` does
+    /// not exists.
+    fn calculateConstantApproximationMergeError(self: *Self, index: usize) Error!f64 {
+        if (index + 1 > self.buckets.items.len) {
+            return Error.ItemNotFound;
+        }
 
+        const bucket_one = self.buckets.items[index];
+        const bucket_two = self.buckets.items[index + 1];
+        const merged_min = @min(bucket_one.min_val, bucket_two.min_val);
+        const merged_max = @max(bucket_one.max_val, bucket_two.max_val);
+        return (merged_max - merged_min) / 2.0;
+    }
+
+    /// Calculate the merge error for merging the bucket at `index` with the next bucket when
+    /// a `linear` approximation is required. Returns `Error.ItemNotFound` if `index+1` does
+    /// not exists.
+    fn calculateLinearApproximationMergeError(self: *Self, index: usize) Error!f64 {
+        if (index + 1 > self.buckets.items.len) {
+            return Error.ItemNotFound;
+        }
+
+        var convex_hull_one = self.buckets.items[index].convex_hull;
+        var convex_hull_two = self.buckets.items[index + 1].convex_hull;
+
+        var convex_hull_merged: ConvexHull = try ConvexHull.init(self.allocator);
+        defer convex_hull_merged.deinit();
+
+        try convex_hull_one.merge(&convex_hull_two, &convex_hull_merged);
+        const linear_approximation = try convex_hull_merged.computeMABRLinearFunction();
+        const max_error = convex_hull_merged.computeMaxError(linear_approximation);
+
+        return max_error;
+    }
+
+    /// Perform the minimum merge by finding the pair with the smallest merge error when a `constant`
+    /// approximations is required.
+    fn minMerge(self: *Self) !void {
         // Pop the smallest merge error (the least costly merge).
         const min_merge_error: MergeError = try self.merge_queue.remove();
 
         // Merge the buckets at min_merge_error.index and min_merge_error.index + 1.
         const index = min_merge_error.index;
-        const bucket_one = self.buckets.items[index];
-        const bucket_two = self.buckets.items[index + 1];
+        var bucket_one = self.buckets.items[index];
+        var bucket_two = self.buckets.items[index + 1];
 
         // Merge the two buckets, updating their range and min/max values.
         const new_begin = bucket_one.begin;
@@ -181,11 +424,27 @@ const Histogram = struct {
         const new_max = @max(bucket_one.max_val, bucket_two.max_val);
 
         // Replace the first bucket with the merged result and remove the second.
-        self.buckets.items[index] = try Bucket.init(new_begin, new_end, new_min, new_max);
+        self.buckets.items[index] = try Bucket.init(
+            new_begin,
+            new_end,
+            new_min,
+            new_max,
+            self.allocator,
+        );
+
+        if (self.approximation == .linear) {
+            // Merge the convex hulls.
+            try bucket_one.convex_hull.merge(&bucket_two.convex_hull, &self.buckets.items[index].convex_hull);
+        }
+
         _ = self.buckets.orderedRemove(index + 1); // Remove the merged bucket.
 
         if (index < self.buckets.items.len - 1) {
-            const new_merge_error = try self.calculateMergeError(index);
+            const new_merge_error = switch (self.approximation) {
+                .constant => try self.calculateConstantApproximationMergeError(index),
+                .linear => try self.calculateLinearApproximationMergeError(index),
+            };
+
             try self.merge_queue.add(MergeError{ .index = index, .merge_error = new_merge_error });
 
             if (index > 0) {
@@ -201,28 +460,18 @@ const Histogram = struct {
     /// Update the merge error for the bucket at 'index'.
     /// Return `Error.ItemNotFound` if `index+1` does not exists.
     fn merge(self: *Self, index: usize) !void {
-        const merge_error = try self.calculateMergeError(index);
+        const merge_error = switch (self.approximation) {
+            .constant => try self.calculateConstantApproximationMergeError(index),
+            .linear => try self.calculateLinearApproximationMergeError(index),
+        };
+
         const new_merge_error = MergeError{ .index = index, .merge_error = merge_error };
 
-        // Placeholder for the old merge.
-        const old_merge_item: MergeError = MergeError{ .index = index, .merge_error = merge_error };
+        // Placeholder for the old merge, only the index is relevant.
+        const old_merge_item: MergeError = MergeError{ .index = index, .merge_error = 0 };
 
         // Update the priority queue with the new merge error using the 'update' method.
         try self.merge_queue.update(old_merge_item, new_merge_error);
-    }
-
-    /// Calculate the merge error for merging the bucket at `index` with the next bucket.
-    /// Return `Error.ItemNotFound` if `index+1` does not exists.
-    fn calculateMergeError(self: *Self, index: usize) Error!f64 {
-        if (index + 1 > self.buckets.items.len) {
-            return Error.ItemNotFound;
-        }
-
-        const bucket1 = self.buckets.items[index];
-        const bucket2 = self.buckets.items[index + 1];
-        const merged_min = @min(bucket1.min_val, bucket2.min_val);
-        const merged_max = @max(bucket1.max_val, bucket2.max_val);
-        return (merged_max - merged_min) / 2.0;
     }
 
     /// Update the indices of all merge error from `index` until `buckets.items.len`.
@@ -252,71 +501,29 @@ const Histogram = struct {
     }
 };
 
-/// Compress `uncompressed_values` with the maximum number of buckets defined by the `error_bound`
-/// using "Piecewice Constant Histogram" compression method and write the result to
-/// `compressed_values`. If an error occurs it is returned.
-pub fn compressPWCH(
-    uncompressed_values: []const f64,
-    compressed_values: *ArrayList(u8),
-    allocator: mem.Allocator,
-    error_bound: f32,
-) Error!void {
-    if (error_bound <= 0.0) {
-        return Error.UnsupportedErrorBound;
-    }
-
-    // The original implementation requires the maximum number of buckets which can be represented
-    // by a usize instead of `error_bound: f32`. Changing this requires modifications in
-    // `src/tersets.zig` and `src/capi.zig` files.
-    // TODO: Find the right way of passing the maximum number of buckets.
-    const max_buckets: usize = @as(usize, @intFromFloat(@floor(error_bound)));
-    var histogram = try Histogram.init(allocator, max_buckets);
-    defer histogram.deinit();
-
-    for (uncompressed_values.items, 0..) |elem, index| {
-        try histogram.insert(elem, index);
-    }
-
-    for (0..histogram.len()) |index| {
-        const bucket: Bucket = histogram.at(index);
-        try appendValueAndIndexToArrayList(bucket.computeError(), bucket.end, compressed_values);
-    }
-}
-
-/// Decompress `compressed_values` produced by "Piecewise Constant Histogram" and write the result
-/// to `decompressed_values`. If an error occurs it is returned.
-pub fn decompress(
-    compressed_values: []const u8,
-    decompressed_values: *ArrayList(f64),
-) Error!void {
-    // The compressed representation is pairs containing a 64-bit float value and 64-bit end index.
-    if (compressed_values.len % 16 != 0) return Error.IncorrectInput;
-
-    const compressed_values_and_index = mem.bytesAsSlice(f64, compressed_values);
-
-    var compressed_index: usize = 0;
-    var uncompressed_index: usize = 0;
-    while (compressed_index < compressed_values_and_index.len) : (compressed_index += 2) {
-        const value = compressed_values_and_index[compressed_index];
-        const index: usize = @bitCast(compressed_values_and_index[compressed_index + 1]);
-        for (uncompressed_index..index) |_| {
-            try decompressed_values.append(value);
-        }
-        uncompressed_index = index;
-    }
-}
-
 /// Append `compressed_value` and `index` to `compressed_values`.
 fn appendValueAndIndexToArrayList(
     compressed_value: f64,
     index: usize,
     compressed_values: *ArrayList(u8),
 ) !void {
-    const value: f64 = @floatCast(compressed_value);
+    const value: f64 = compressed_value;
     const valueAsBytes: [8]u8 = @bitCast(value);
     try compressed_values.appendSlice(valueAsBytes[0..]);
     const indexAsBytes: [8]u8 = @bitCast(index); // No -1 due to 0 indexing.
     try compressed_values.appendSlice(indexAsBytes[0..]);
+}
+
+/// Append `value` of `type` determined at compile time to `compressed_values`.
+fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)) !void {
+    // Compile-time type check
+    switch (@TypeOf(value)) {
+        f64, usize => {
+            const value_as_bytes: [8]u8 = @bitCast(value);
+            try compressed_values.appendSlice(value_as_bytes[0..]);
+        },
+        else => @compileError("Unsupported type for append value function"),
+    }
 }
 
 test "HashedPriorityQueue with hashcontext for MergeError in PWCH" {
@@ -356,13 +563,13 @@ test "Histogram insert, and merge test number buckets in PWCH" {
 
     const allocator = testing.allocator;
     const max_buckets: usize = 100;
-    var histogram = try Histogram.init(allocator, max_buckets);
+    var histogram = try Histogram.init(allocator, max_buckets, .constant);
     defer histogram.deinit();
 
     // Insert 200 random numbers into the histogram.
     for (0..1000) |i| {
         const rand_number = tester.generateBoundedRandomValue(0, 1000, random);
-        try histogram.insert(rand_number, i);
+        try histogram.insert(rand_number, i, .constant);
     }
     try expectEqual(max_buckets, histogram.buckets.items.len);
 }
@@ -382,19 +589,22 @@ test "Simple fixed values test of PWCH" {
     };
 
     // Initialize the histogram with a maximum of 3 buckets.
-    var histogram = try Histogram.init(allocator, 3);
+    var histogram = try Histogram.init(allocator, 3, .constant);
     defer histogram.deinit();
 
     // Insert data points into the histogram.
     for (data_points, 0..) |value, i| {
-        try histogram.insert(value, i);
+        try histogram.insert(value, i, .constant);
     }
     try expectEqual(@as(usize, @intCast(3)), histogram.buckets.items.len);
 
+    var convex_hull: ConvexHull = try ConvexHull.init(allocator);
+    defer convex_hull.deinit();
+
     const expected_histogram = [_]Bucket{
-        Bucket{ .begin = 0, .end = 4, .min_val = 0.7, .max_val = 1.1 },
-        Bucket{ .begin = 5, .end = 9, .min_val = 4.6, .max_val = 5.2 },
-        Bucket{ .begin = 10, .end = 15, .min_val = 9.7, .max_val = 10.2 },
+        Bucket{ .begin = 0, .end = 4, .min_val = 0.7, .max_val = 1.1, .convex_hull = convex_hull },
+        Bucket{ .begin = 5, .end = 9, .min_val = 4.6, .max_val = 5.2, .convex_hull = convex_hull },
+        Bucket{ .begin = 10, .end = 15, .min_val = 9.7, .max_val = 10.2, .convex_hull = convex_hull },
     };
 
     for (histogram.buckets.items, 0..) |bucket, i| {
@@ -443,17 +653,20 @@ test "Fixed cluster number with random values for PWCH" {
     }
 
     // Initialize the histogram with a maximum of 3 buckets.
-    var histogram = try Histogram.init(allocator, cluster_ranges.len);
+    var histogram = try Histogram.init(allocator, cluster_ranges.len, .constant);
     defer histogram.deinit();
 
     // Insert data points into the histogram.
     for (data_points.items, 0..) |value, i| {
-        try histogram.insert(value, i);
+        try histogram.insert(value, i, .constant);
     }
 
     // Build the expected histogram by iterating over cluster_ranges.
     var expected_histogram = std.ArrayList(Bucket).init(allocator);
     defer expected_histogram.deinit();
+
+    var convex_hull: ConvexHull = try ConvexHull.init(allocator);
+    defer convex_hull.deinit();
 
     var current_begin: usize = 0;
     for (cluster_ranges) |cluster| {
@@ -462,6 +675,7 @@ test "Fixed cluster number with random values for PWCH" {
             .end = current_begin + cluster.count - 1,
             .min_val = cluster.min,
             .max_val = cluster.max,
+            .convex_hull = convex_hull,
         };
         try expected_histogram.append(bucket);
         current_begin += cluster.count;
@@ -525,17 +739,20 @@ test "Random clusters, elements per cluster and values for PWCH" {
     }
 
     // Initialize the histogram with a maximum of 'num_cluster' buckets.
-    var histogram = try Histogram.init(allocator, num_cluster);
+    var histogram = try Histogram.init(allocator, num_cluster, .constant);
     defer histogram.deinit();
 
     // Insert data points into the histogram.
     for (data_points.items, 0..) |value, i| {
-        try histogram.insert(value, i);
+        try histogram.insert(value, i, .constant);
     }
 
     // Build the expected histogram by iterating over cluster_ranges.
     var expected_histogram = std.ArrayList(Bucket).init(allocator);
     defer expected_histogram.deinit();
+
+    var convex_hull: ConvexHull = try ConvexHull.init(allocator);
+    defer convex_hull.deinit();
 
     var current_begin: usize = 0;
     for (cluster_ranges.items) |cluster| {
@@ -544,6 +761,7 @@ test "Random clusters, elements per cluster and values for PWCH" {
             .end = current_begin + cluster.count - 1,
             .min_val = cluster.min,
             .max_val = cluster.max,
+            .convex_hull = convex_hull,
         };
         try expected_histogram.append(bucket);
         current_begin += cluster.count;
@@ -566,9 +784,9 @@ test "PWCH can compress and decompress" {
     const allocator = testing.allocator;
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, random);
+    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 10.0, random);
 
-    const error_bound: f32 = @floatFromInt(uncompressed_values.items.len);
+    const error_bound: f32 = 10;
 
     // This test internally calls the functions `compress()` and `decompress()`. However, the line
     // `testing.expect(withinErrorBound(uncompressed_values,decompressed_values.items,error_bound))`
@@ -577,6 +795,8 @@ test "PWCH can compress and decompress" {
     // To solve this problem, we need to create another type of configuration for compression
     // algorithms like PWCH, which do not base their compression on a maximum decompression error
     // but a minimum (or maximum) compression ratio.
+    // Nevertheless, since all `uncompressed_values` are between 0 and 10, the `error_bound=10`
+    // should be fulfilled as the PWCH finds the mean value over the buckets.
     try tester.testCompressAndDecompress(
         uncompressed_values.items,
         allocator,
@@ -584,4 +804,80 @@ test "PWCH can compress and decompress" {
         error_bound,
         tersets.isWithinErrorBound,
     );
+}
+
+test "Compute simple linear approximation merge error with known results" {
+    const allocator = std.testing.allocator;
+
+    // Step 1: Create Convex Hulls for the buckets
+    var convex_hull_one = try ConvexHull.init(allocator);
+    defer convex_hull_one.deinit();
+    try convex_hull_one.add(.{ .time = 0.0, .value = 0.0 });
+    try convex_hull_one.add(.{ .time = 1.0, .value = 1.0 });
+
+    var convex_hull_two = try ConvexHull.init(allocator);
+    defer convex_hull_two.deinit();
+    try convex_hull_two.add(.{ .time = 2.0, .value = 2.0 });
+    try convex_hull_two.add(.{ .time = 3.0, .value = 3.0 });
+
+    // Step 2: Insert into buckets
+    var histogram = try Histogram.init(allocator, 2, .linear);
+    defer histogram.deinit();
+
+    try histogram.buckets.append(.{
+        .begin = 0,
+        .end = 0,
+        .min_val = 0,
+        .max_val = 0,
+        .convex_hull = convex_hull_one,
+    });
+    try histogram.buckets.append(.{
+        .begin = 0,
+        .end = 0,
+        .min_val = 0,
+        .max_val = 0,
+        .convex_hull = convex_hull_two,
+    });
+
+    const merge_error = try histogram.calculateLinearApproximationMergeError(0);
+
+    try std.testing.expectApproxEqAbs(0.0, merge_error, 1e-15);
+}
+
+test "Compute divergent linear approximation merge error with known results" {
+    const allocator = std.testing.allocator;
+
+    // Step 1: Create Convex Hulls for the buckets
+    var convex_hull_one = try ConvexHull.init(allocator);
+    defer convex_hull_one.deinit();
+    try convex_hull_one.add(.{ .time = 0.0, .value = 0.0 });
+    try convex_hull_one.add(.{ .time = 1.0, .value = 1.0 });
+
+    var convex_hull_two = try ConvexHull.init(allocator);
+    defer convex_hull_two.deinit();
+    try convex_hull_two.add(.{ .time = 2.0, .value = 3.0 });
+    try convex_hull_two.add(.{ .time = 3.0, .value = 4.0 });
+
+    // Step 2: Insert into buckets
+    var histogram = try Histogram.init(allocator, 2, .linear);
+    defer histogram.deinit();
+
+    try histogram.buckets.append(.{
+        .begin = 0,
+        .end = 0,
+        .min_val = 0,
+        .max_val = 0,
+        .convex_hull = convex_hull_one,
+    });
+    try histogram.buckets.append(.{
+        .begin = 0,
+        .end = 0,
+        .min_val = 0,
+        .max_val = 0,
+        .convex_hull = convex_hull_two,
+    });
+
+    const merge_error = try histogram.calculateLinearApproximationMergeError(0);
+
+    try std.testing.expectApproxEqAbs(0.25, merge_error, 1e-10);
 }
