@@ -133,8 +133,10 @@ pub fn testCompressAndDecompress(
         error_bound,
     );
     defer compressed_values.deinit();
+
     const decompressed_values = try tersets.decompress(compressed_values.items, allocator);
     defer decompressed_values.deinit();
+
     try testing.expect(withinErrorBound(
         uncompressed_values,
         decompressed_values.items,

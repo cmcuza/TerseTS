@@ -257,8 +257,8 @@ pub fn compressSlide(
         .end_point = .{ .time = 1, .value = uncompressed_values[1] },
     };
 
-    try convex_hull.addPoint(current_segment.start_point);
-    try convex_hull.addPoint(current_segment.end_point);
+    try convex_hull.add(current_segment.start_point);
+    try convex_hull.add(current_segment.end_point);
 
     updateSlideLinearFunction(
         current_segment,
@@ -345,8 +345,8 @@ pub fn compressSlide(
                 updateSlideLinearFunction(current_segment, &lower_bound, -adjusted_error_bound);
 
                 convex_hull.clean();
-                try convex_hull.addPoint(current_segment.start_point);
-                try convex_hull.addPoint(current_segment.end_point);
+                try convex_hull.add(current_segment.start_point);
+                try convex_hull.add(current_segment.end_point);
 
                 current_timestamp += 1;
             } else {
@@ -359,7 +359,7 @@ pub fn compressSlide(
             current_segment.end_point.time = current_timestamp;
             current_segment.end_point.value = uncompressed_values[current_timestamp];
 
-            try convex_hull.addPoint(current_segment.end_point);
+            try convex_hull.add(current_segment.end_point);
 
             // The new upper bound can be found on the upper hull. Lemma (4.3).
             for (convex_hull.getUpperHullExceptLast()) |hull_point| {
