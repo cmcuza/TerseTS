@@ -886,6 +886,29 @@ test "Compute divergent linear approximation merge error with known results" {
     try std.testing.expectApproxEqAbs(0.25, merge_error, 1e-10);
 }
 
+test "Simple fixed values test of PWLH" {
+    const allocator = std.testing.allocator;
+
+    var histogram = try Histogram.init(allocator, 2, .linear);
+    defer histogram.deinit();
+
+    try histogram.insert(0, 0);
+    try histogram.insert(1, 1);
+    try histogram.insert(2, 3);
+    try histogram.insert(3, 4);
+
+    var convex_hull_one = histogram.at(0).convex_hull;
+    const linear_approximation_one = try convex_hull_one.computeMABRLinearFunction();
+    var convex_hull_two = histogram.at(1).convex_hull;
+    const linear_approximation_two = try convex_hull_two.computeMABRLinearFunction();
+
+    try testing.expectEqual(linear_approximation_one.slope, 1);
+    try testing.expectEqual(linear_approximation_one.intercept, 0);
+
+    try testing.expectEqual(linear_approximation_two.slope, 1);
+    try testing.expectEqual(linear_approximation_two.intercept, 1);
+}
+
 test "Histogram insert, and merge test number buckets in PWLH" {
     // Initialize a random number generator.
     const seed: u64 = @bitCast(time.milliTimestamp());
