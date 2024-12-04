@@ -17,8 +17,8 @@
 //! Space Efficient Streaming Algorithms for the Maximum Error Histogram.
 //! IEEE ICDE 2006.
 //! https://doi.org/10.1109/ICDE.2007.368961.
-//! Min-Merge find a Piecewise Constant Histogram compressed representation of the time series.
-//! Thus, the abbreviation PWCH is used for the method as in the paper:
+//! Min-Merge find a Piecewise Constant and Linear Histogram compressed representation of the
+//! time series. Thus, the abbreviation PWCH and PWLH is used for the methods as in the paper:
 //! https://doi.org/10.1109/TKDE.2012.237.
 
 const std = @import("std");
@@ -125,13 +125,13 @@ pub fn compressPWLH(
                 @as(f64, @floatFromInt(bucket.end)) +
                 linear_approximation.intercept);
 
-            try appendValue(f64, end_value, compressed_values);
+            try appendValue(f64, end_value + 1, compressed_values);
         } else {
             try appendValue(f64, uncompressed_values[bucket.begin], compressed_values);
             try appendValue(f64, uncompressed_values[bucket.end], compressed_values);
         }
 
-        try appendValue(usize, bucket.end, compressed_values);
+        try appendValue(usize, bucket.end + 1, compressed_values);
     }
 }
 
@@ -158,8 +158,8 @@ pub fn decompressPWCH(
     }
 }
 
-/// Decompress `compressed_values` produced by "Swing Filter" and "Slide Filter" and write the
-/// result to `decompressed_values`. If an error occurs it is returned.
+/// Decompress `compressed_values` produced by "PWLH" and write the result to `decompressed_values`.
+/// If an error occurs it is returned.
 pub fn decompressPWLH(
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
@@ -185,8 +185,10 @@ pub fn decompressPWLH(
 
         if (current_segment.start_point.time < current_segment.end_point.time) {
             if (current_segment.end_point.time != current_segment.start_point.time) {
-                const duration: f80 = @floatFromInt(current_segment.end_point.time - current_segment.start_point.time);
-                linear_approximation.slope = (current_segment.end_point.value - current_segment.start_point.value) / duration;
+                const duration: f80 = @floatFromInt(current_segment.end_point.time -
+                    current_segment.start_point.time);
+                linear_approximation.slope = (current_segment.end_point.value -
+                    current_segment.start_point.value) / duration;
                 linear_approximation.intercept = current_segment.start_point.value - linear_approximation.slope *
                     @as(f64, @floatFromInt(current_segment.start_point.time));
             } else {
@@ -926,4 +928,34 @@ test "Histogram insert, and merge test number buckets in PWLH" {
         try histogram.insert(i, rand_number);
     }
     try expectEqual(max_buckets, histogram.buckets.items.len);
+}
+
+test "PWLH can compress and decompress simple example" {
+    const seed: u64 = @bitCast(time.milliTimestamp());
+    var prng = std.rand.DefaultPrng.init(seed);
+    const random = prng.random();
+
+    const allocator = testing.allocator;
+    var uncompressed_values = ArrayList(f64).init(allocator);
+    defer uncompressed_values.deinit();
+    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 10.0, random);
+
+    const error_bound: f32 = 10;
+
+    // This test internally calls the functions `compress()` and `decompress()`. However, the line
+    // `testing.expect(withinErrorBound(uncompressed_values,decompressed_values.items,error_bound))`
+    // inside the function, is nonsensical in the context of PWCH. This is because the `error_bound`
+    // represents the number of bins in the histogram and not the maximum decompression error.
+    // To solve this problem, we need to create another type of configuration for compression
+    // algorithms like PWCH, which do not base their compression on a maximum decompression error
+    // but a minimum (or maximum) compression ratio.
+    // Nevertheless, since all `uncompressed_values` are between 0 and 10, the `error_bound=10`
+    // should be fulfilled as the PWLH finds the mean value over the buckets.
+    try tester.testCompressAndDecompress(
+        uncompressed_values.items,
+        allocator,
+        tersets.Method.PiecewiseLinearHistogram,
+        error_bound,
+        tersets.isWithinErrorBound,
+    );
 }
