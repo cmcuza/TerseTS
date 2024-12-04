@@ -73,7 +73,7 @@ pub fn compressPWCH(
     defer histogram.deinit();
 
     for (uncompressed_values, 0..) |elem, index| {
-        try histogram.insert(elem, index, .constant);
+        try histogram.insert(index, elem);
     }
 
     for (0..histogram.len()) |index| {
@@ -108,7 +108,7 @@ pub fn compressPWLH(
     defer histogram.deinit();
 
     for (uncompressed_values, 0..) |elem, index| {
-        try histogram.insert(elem, index, .linear);
+        try histogram.insert(index, elem);
     }
 
     for (0..histogram.len()) |index| {
@@ -331,14 +331,16 @@ const Histogram = struct {
 
     /// Deinitialize the histogram.
     pub fn deinit(self: *Self) void {
+        for (self.buckets.items) |*bucket| {
+            bucket.deinit();
+        }
         self.buckets.deinit();
         self.merge_queue.deinit();
     }
 
     /// Insert a new value into the histogram.
-    pub fn insert(self: *Self, value: f64, index: usize, approximation: Approximation) !void {
+    pub fn insert(self: *Self, index: usize, value: f64) !void {
         var bucket: Bucket = try Bucket.init(index, index, value, value, self.allocator);
-        defer bucket.deinit();
 
         try bucket.convex_hull.add(.{ .time = index, .value = value });
 
@@ -348,7 +350,7 @@ const Histogram = struct {
         if (self.buckets.items.len > 1) {
             const bucket_last_index: usize = self.buckets.items.len - 1;
 
-            const merge_error: f64 = switch (approximation) {
+            const merge_error: f64 = switch (self.approximation) {
                 .constant => try self.calculateConstantApproximationMergeError(bucket_last_index - 1),
                 .linear => try self.calculateLinearApproximationMergeError(bucket_last_index - 1),
             };
@@ -400,6 +402,7 @@ const Histogram = struct {
         defer convex_hull_merged.deinit();
 
         try convex_hull_one.merge(&convex_hull_two, &convex_hull_merged);
+
         const linear_approximation = try convex_hull_merged.computeMABRLinearFunction();
         const max_error = convex_hull_merged.computeMaxError(linear_approximation);
 
@@ -414,8 +417,8 @@ const Histogram = struct {
 
         // Merge the buckets at min_merge_error.index and min_merge_error.index + 1.
         const index = min_merge_error.index;
-        var bucket_one = self.buckets.items[index];
-        var bucket_two = self.buckets.items[index + 1];
+        var bucket_one = &self.buckets.items[index];
+        var bucket_two = &self.buckets.items[index + 1];
 
         // Merge the two buckets, updating their range and min/max values.
         const new_begin = bucket_one.begin;
@@ -424,20 +427,18 @@ const Histogram = struct {
         const new_max = @max(bucket_one.max_val, bucket_two.max_val);
 
         // Replace the first bucket with the merged result and remove the second.
-        self.buckets.items[index] = try Bucket.init(
-            new_begin,
-            new_end,
-            new_min,
-            new_max,
-            self.allocator,
-        );
+        bucket_one.begin = new_begin;
+        bucket_one.end = new_end;
+        bucket_one.min_val = new_min;
+        bucket_one.max_val = new_max;
 
         if (self.approximation == .linear) {
             // Merge the convex hulls.
-            try bucket_one.convex_hull.merge(&bucket_two.convex_hull, &self.buckets.items[index].convex_hull);
+            try bucket_one.convex_hull.merge(&bucket_two.convex_hull, null);
         }
 
-        _ = self.buckets.orderedRemove(index + 1); // Remove the merged bucket.
+        var bucket = self.buckets.orderedRemove(index + 1); // Remove the merged bucket.
+        bucket.deinit();
 
         if (index < self.buckets.items.len - 1) {
             const new_merge_error = switch (self.approximation) {
@@ -526,7 +527,7 @@ fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)
     }
 }
 
-test "HashedPriorityQueue with hashcontext for MergeError in PWCH" {
+test "Hash PriorityQueue with hash_context for MergeError" {
     const allocator = testing.allocator;
 
     var pq = try HashedPriorityQueue(
@@ -566,10 +567,10 @@ test "Histogram insert, and merge test number buckets in PWCH" {
     var histogram = try Histogram.init(allocator, max_buckets, .constant);
     defer histogram.deinit();
 
-    // Insert 200 random numbers into the histogram.
+    // Insert 1000 random numbers into the histogram.
     for (0..1000) |i| {
         const rand_number = tester.generateBoundedRandomValue(0, 1000, random);
-        try histogram.insert(rand_number, i, .constant);
+        try histogram.insert(i, rand_number);
     }
     try expectEqual(max_buckets, histogram.buckets.items.len);
 }
@@ -594,7 +595,7 @@ test "Simple fixed values test of PWCH" {
 
     // Insert data points into the histogram.
     for (data_points, 0..) |value, i| {
-        try histogram.insert(value, i, .constant);
+        try histogram.insert(i, value);
     }
     try expectEqual(@as(usize, @intCast(3)), histogram.buckets.items.len);
 
@@ -658,7 +659,7 @@ test "Fixed cluster number with random values for PWCH" {
 
     // Insert data points into the histogram.
     for (data_points.items, 0..) |value, i| {
-        try histogram.insert(value, i, .constant);
+        try histogram.insert(i, value);
     }
 
     // Build the expected histogram by iterating over cluster_ranges.
@@ -744,7 +745,7 @@ test "Random clusters, elements per cluster and values for PWCH" {
 
     // Insert data points into the histogram.
     for (data_points.items, 0..) |value, i| {
-        try histogram.insert(value, i, .constant);
+        try histogram.insert(i, value);
     }
 
     // Build the expected histogram by iterating over cluster_ranges.
@@ -810,13 +811,15 @@ test "Compute simple linear approximation merge error with known results" {
     const allocator = std.testing.allocator;
 
     // Step 1: Create Convex Hulls for the buckets
+    // No need to deallocate memory because histogram will do it.
     var convex_hull_one = try ConvexHull.init(allocator);
-    defer convex_hull_one.deinit();
+
     try convex_hull_one.add(.{ .time = 0.0, .value = 0.0 });
     try convex_hull_one.add(.{ .time = 1.0, .value = 1.0 });
 
+    // No need to deallocate memory because histogram will do it.
     var convex_hull_two = try ConvexHull.init(allocator);
-    defer convex_hull_two.deinit();
+
     try convex_hull_two.add(.{ .time = 2.0, .value = 2.0 });
     try convex_hull_two.add(.{ .time = 3.0, .value = 3.0 });
 
@@ -847,14 +850,15 @@ test "Compute simple linear approximation merge error with known results" {
 test "Compute divergent linear approximation merge error with known results" {
     const allocator = std.testing.allocator;
 
-    // Step 1: Create Convex Hulls for the buckets
+    // No need to deallocate memory because `histogram` will do it.
     var convex_hull_one = try ConvexHull.init(allocator);
-    defer convex_hull_one.deinit();
+
     try convex_hull_one.add(.{ .time = 0.0, .value = 0.0 });
     try convex_hull_one.add(.{ .time = 1.0, .value = 1.0 });
 
+    // No need to deallocate memory because histogram will do it.
     var convex_hull_two = try ConvexHull.init(allocator);
-    defer convex_hull_two.deinit();
+
     try convex_hull_two.add(.{ .time = 2.0, .value = 3.0 });
     try convex_hull_two.add(.{ .time = 3.0, .value = 4.0 });
 
@@ -880,4 +884,23 @@ test "Compute divergent linear approximation merge error with known results" {
     const merge_error = try histogram.calculateLinearApproximationMergeError(0);
 
     try std.testing.expectApproxEqAbs(0.25, merge_error, 1e-10);
+}
+
+test "Histogram insert, and merge test number buckets in PWLH" {
+    // Initialize a random number generator.
+    const seed: u64 = @bitCast(time.milliTimestamp());
+    var prng = std.rand.DefaultPrng.init(seed);
+    const random = prng.random();
+
+    const allocator = testing.allocator;
+    const max_buckets: usize = 100;
+    var histogram = try Histogram.init(allocator, max_buckets, .linear);
+    defer histogram.deinit();
+
+    // Insert 1000 random numbers into the histogram.
+    for (0..1000) |i| {
+        const rand_number = tester.generateBoundedRandomValue(0, 1000, random);
+        try histogram.insert(i, rand_number);
+    }
+    try expectEqual(max_buckets, histogram.buckets.items.len);
 }
