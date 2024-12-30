@@ -938,7 +938,7 @@ test "PWLH can compress and decompress with bounded values and expected maximum 
     const allocator = testing.allocator;
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, random);
+    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, error_bound / 4.0, random);
 
     // This test internally calls the functions `compress()` and `decompress()`. However, the line
     // `testing.expect(withinErrorBound(uncompressed_values,decompressed_values.items,error_bound))`
