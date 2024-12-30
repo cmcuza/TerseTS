@@ -489,7 +489,7 @@ fn findTangent(
                 continue; // Re-evaluate the tangent.
             }
         }
-        // There are no other points to the left on hull one.
+        // There are no other points to the left on hull_one.
         if (hull_one_idx != 0) {
             // Check the turn direction when moving backwards in hull_one.
             const hull_one_turn = computeTurn(
@@ -820,7 +820,7 @@ test "Merge not-in-place does not modify the convex hulls one and two" {
         try convex_hull_one.add(.{ .time = i, .value = rnd.random().float(f64) });
     }
 
-    // Capture state of convex_hull_one before merge.
+    // Capture the state of convex_hull_one before merging.
     const convex_hull_one_before = try convex_hull_one.getAllPointsSorted();
     defer convex_hull_one_before.deinit();
 

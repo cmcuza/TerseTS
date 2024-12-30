@@ -219,9 +219,9 @@ pub fn decompressPWLH(
 /// the `convex_hull` of type `ConvexHull` that represents the elements in the bucket. The
 /// `convex_hull` is utilized when a linear approximation of the data points in the bucket is required. The
 /// structure contains the function `computeConstantApproximation` which computes and returns the
-/// constant approximation that minimizes the $L_\inf$ error associated to the bucket. Likewise,
+/// constant approximation that minimizes the $L_\inf$ error of the data points in the bucket. Likewise,
 /// it contains the function `computeLinearApproximation` which computes and returns the linear
-/// approximation that minimizes the $L_\inf$ error associated to the bucket.
+/// approximation that minimizes the $L_\inf$ error of the data points in the bucket.
 const Bucket = struct {
     // Begining of the bucket.
     begin: usize,
