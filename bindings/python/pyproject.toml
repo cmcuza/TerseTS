@@ -16,6 +16,7 @@
 [project]
 name = "TerseTS"
 description = "Python interface for the TerseTS time series compression library"
+readme = "README.md"
 version = "0.0.1"
 license = { text="Apache-2.0" }
 authors = [
