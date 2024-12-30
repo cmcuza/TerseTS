@@ -60,7 +60,7 @@ pub fn compressPWCH(
     allocator: mem.Allocator,
     error_bound: f32,
 ) Error!void {
-    if (error_bound <= 0.0) {
+    if (error_bound <= 1.0) {
         return Error.UnsupportedErrorBound;
     }
 
@@ -95,7 +95,7 @@ pub fn compressPWLH(
     allocator: mem.Allocator,
     error_bound: f32,
 ) Error!void {
-    if (error_bound <= 0.0) {
+    if (error_bound <= 1.0) {
         return Error.UnsupportedErrorBound;
     }
 
@@ -141,7 +141,8 @@ pub fn decompressPWCH(
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
 ) Error!void {
-    // The compressed representation is pairs containing a 64-bit float value and 64-bit end index.
+    // The compressed representation is pairs containing a 64-bit float value
+    // and 64-bit integer end index.
     if (compressed_values.len % 16 != 0) return Error.IncorrectInput;
 
     const compressed_values_and_index = mem.bytesAsSlice(f64, compressed_values);
@@ -213,10 +214,10 @@ pub fn decompressPWLH(
 }
 
 /// `Bucket` stores information about a range of consecutives values in the time series. The
-/// structure stores the indices `begin` and `end` where the bucket starts and ends. It stores the
-/// minimum and maximum values (`min_val` and `max_value`) in the bucket. Additionally, it stores
+/// structure stores the indices `begin` and `end` indexing where the bucket starts and ends. It stores the
+/// minimum and maximum values (`min_val` and `max_val`) in the bucket. Additionally, it stores
 /// the `convex_hull` of type `ConvexHull` that represents the elements in the bucket. The
-/// `convex_hull` is utilized when a linear approximation of the elements is required. The
+/// `convex_hull` is utilized when a linear approximation of the data points in the bucket is required. The
 /// structure contains the function `computeConstantApproximation` which computes and returns the
 /// constant approximation that minimizes the $L_\inf$ error associated to the bucket. Likewise,
 /// it contains the function `computeLinearApproximation` which computes and returns the linear
@@ -333,6 +334,7 @@ const Histogram = struct {
 
     /// Deinitialize the histogram.
     pub fn deinit(self: *Self) void {
+        // Deinitialize all buckets. Necessary to deinitialize the convex hulls within.
         for (self.buckets.items) |*bucket| {
             bucket.deinit();
         }
@@ -342,11 +344,11 @@ const Histogram = struct {
 
     /// Insert a new value into the histogram.
     pub fn insert(self: *Self, index: usize, value: f64) !void {
+        // Create a new bucket for the incoming value with start and end at 'index'.
         var bucket: Bucket = try Bucket.init(index, index, value, value, self.allocator);
 
         try bucket.convex_hull.add(.{ .time = index, .value = value });
 
-        // Create a new bucket for the incoming value with start and end at 'index'.
         try self.buckets.append(bucket);
 
         if (self.buckets.items.len > 1) {
@@ -378,7 +380,7 @@ const Histogram = struct {
     /// a `constant` approximation is required. Returns `Error.ItemNotFound` if `index+1` does
     /// not exists.
     fn calculateConstantApproximationMergeError(self: *Self, index: usize) Error!f64 {
-        if (index + 1 > self.buckets.items.len) {
+        if (index + 1 >= self.buckets.items.len) {
             return Error.ItemNotFound;
         }
 
@@ -393,7 +395,7 @@ const Histogram = struct {
     /// a `linear` approximation is required. Returns `Error.ItemNotFound` if `index+1` does
     /// not exists.
     fn calculateLinearApproximationMergeError(self: *Self, index: usize) Error!f64 {
-        if (index + 1 > self.buckets.items.len) {
+        if (index + 1 >= self.buckets.items.len) {
             return Error.ItemNotFound;
         }
 
@@ -412,7 +414,9 @@ const Histogram = struct {
     }
 
     /// Perform the minimum merge by finding the pair with the smallest merge error when a `constant`
-    /// approximations is required.
+    /// approximations is required. This function is only called when the number of buckets exceeds the
+    /// `max_buckets`, which is always higher than 1. Thus, this function is only called with 2 or more
+    /// elements in the `buckets` list.
     fn minMerge(self: *Self) !void {
         // Pop the smallest merge error (the least costly merge).
         const min_merge_error: MergeError = try self.merge_queue.remove();
@@ -471,7 +475,7 @@ const Histogram = struct {
         const new_merge_error = MergeError{ .index = index, .merge_error = merge_error };
 
         // Placeholder for the old merge, only the index is relevant.
-        const old_merge_item: MergeError = MergeError{ .index = index, .merge_error = 0 };
+        const old_merge_item: MergeError = MergeError{ .index = index, .merge_error = -1.0 };
 
         // Update the priority queue with the new merge error using the 'update' method.
         try self.merge_queue.update(old_merge_item, new_merge_error);
@@ -519,7 +523,7 @@ fn appendValueAndIndexToArrayList(
 
 /// Append `value` of `type` determined at compile time to `compressed_values`.
 fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)) !void {
-    // Compile-time type check
+    // Compile-time type check.
     switch (@TypeOf(value)) {
         f64, usize => {
             const value_as_bytes: [8]u8 = @bitCast(value);
@@ -780,16 +784,14 @@ test "Random clusters, elements per cluster and values for PWCH" {
 }
 
 test "PWCH can compress and decompress" {
-    const seed: u64 = @bitCast(time.milliTimestamp());
-    var prng = std.rand.DefaultPrng.init(seed);
+    var prng = std.rand.DefaultPrng.init(0);
     const random = prng.random();
+    const error_bound: f32 = 10;
 
     const allocator = testing.allocator;
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 10.0, random);
-
-    const error_bound: f32 = 10;
+    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, error_bound, random);
 
     // This test internally calls the functions `compress()` and `decompress()`. However, the line
     // `testing.expect(withinErrorBound(uncompressed_values,decompressed_values.items,error_bound))`
@@ -812,7 +814,7 @@ test "PWCH can compress and decompress" {
 test "Compute simple linear approximation merge error with known results" {
     const allocator = std.testing.allocator;
 
-    // Step 1: Create Convex Hulls for the buckets
+    // Create Convex Hulls for the buckets.
     // No need to deallocate memory because histogram will do it.
     var convex_hull_one = try ConvexHull.init(allocator);
 
@@ -825,7 +827,7 @@ test "Compute simple linear approximation merge error with known results" {
     try convex_hull_two.add(.{ .time = 2.0, .value = 2.0 });
     try convex_hull_two.add(.{ .time = 3.0, .value = 3.0 });
 
-    // Step 2: Insert into buckets
+    // Insert into buckets.
     var histogram = try Histogram.init(allocator, 2, .linear);
     defer histogram.deinit();
 
@@ -864,7 +866,7 @@ test "Compute divergent linear approximation merge error with known results" {
     try convex_hull_two.add(.{ .time = 2.0, .value = 3.0 });
     try convex_hull_two.add(.{ .time = 3.0, .value = 4.0 });
 
-    // Step 2: Insert into buckets
+    // Step 2: Insert into buckets.
     var histogram = try Histogram.init(allocator, 2, .linear);
     defer histogram.deinit();
 
@@ -888,7 +890,7 @@ test "Compute divergent linear approximation merge error with known results" {
     try std.testing.expectApproxEqAbs(0.25, merge_error, 1e-10);
 }
 
-test "Simple fixed values test of PWLH" {
+test "Compute PWLH with a simple set of values with known results" {
     const allocator = std.testing.allocator;
 
     var histogram = try Histogram.init(allocator, 2, .linear);
@@ -911,7 +913,7 @@ test "Simple fixed values test of PWLH" {
     try testing.expectEqual(linear_approximation_two.intercept, 1);
 }
 
-test "Histogram insert, and merge test number buckets in PWLH" {
+test "Insert random values in an Histogram with expected number of buckets" {
     // Initialize a random number generator.
     const seed: u64 = @bitCast(time.milliTimestamp());
     var prng = std.rand.DefaultPrng.init(seed);
@@ -930,24 +932,22 @@ test "Histogram insert, and merge test number buckets in PWLH" {
     try expectEqual(max_buckets, histogram.buckets.items.len);
 }
 
-test "PWLH can compress and decompress simple example" {
-    const seed: u64 = @bitCast(time.milliTimestamp());
-    var prng = std.rand.DefaultPrng.init(seed);
+test "PWLH can compress and decompress with bounded values and expected maximum error" {
+    var prng = std.rand.DefaultPrng.init(0);
     const random = prng.random();
+    const error_bound: f32 = 10;
 
     const allocator = testing.allocator;
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 10.0, random);
-
-    const error_bound: f32 = 10;
+    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, error_bound, random);
 
     // This test internally calls the functions `compress()` and `decompress()`. However, the line
     // `testing.expect(withinErrorBound(uncompressed_values,decompressed_values.items,error_bound))`
-    // inside the function, is nonsensical in the context of PWCH. This is because the `error_bound`
+    // inside the function, is nonsensical in the context of PWLH. This is because the `error_bound`
     // represents the number of bins in the histogram and not the maximum decompression error.
     // To solve this problem, we need to create another type of configuration for compression
-    // algorithms like PWCH, which do not base their compression on a maximum decompression error
+    // algorithms like PWLH, which do not base their compression on a maximum decompression error
     // but a minimum (or maximum) compression ratio.
     // Nevertheless, since all `uncompressed_values` are between 0 and 10, the `error_bound=10`
     // should be fulfilled as the PWLH finds the mean value over the buckets.
