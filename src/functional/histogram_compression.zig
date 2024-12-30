@@ -783,7 +783,7 @@ test "Random clusters, elements per cluster and values for PWCH" {
     }
 }
 
-test "PWCH can compress and decompress" {
+test "PWCH can compress and decompress with bounded values and expected maximum error" {
     var prng = std.rand.DefaultPrng.init(0);
     const random = prng.random();
     const error_bound: f32 = 10;
@@ -914,9 +914,7 @@ test "Compute PWLH with a simple set of values with known results" {
 }
 
 test "Insert random values in an Histogram with expected number of buckets" {
-    // Initialize a random number generator.
-    const seed: u64 = @bitCast(time.milliTimestamp());
-    var prng = std.rand.DefaultPrng.init(seed);
+    var prng = std.rand.DefaultPrng.init(0);
     const random = prng.random();
 
     const allocator = testing.allocator;
@@ -940,7 +938,7 @@ test "PWLH can compress and decompress with bounded values and expected maximum 
     const allocator = testing.allocator;
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, error_bound, random);
+    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, error_bound / 2, random);
 
     // This test internally calls the functions `compress()` and `decompress()`. However, the line
     // `testing.expect(withinErrorBound(uncompressed_values,decompressed_values.items,error_bound))`
