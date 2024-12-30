@@ -930,30 +930,30 @@ test "Insert random values in an Histogram with expected number of buckets" {
     try expectEqual(max_buckets, histogram.buckets.items.len);
 }
 
-// test "PWLH can compress and decompress with bounded values and expected maximum error" {
-//     var prng = std.rand.DefaultPrng.init(0);
-//     const random = prng.random();
-//     const error_bound: f32 = 10;
+test "PWLH can compress and decompress with bounded values and expected maximum error" {
+    var prng = std.rand.DefaultPrng.init(0);
+    const random = prng.random();
+    const error_bound: f32 = 10;
 
-//     const allocator = testing.allocator;
-//     var uncompressed_values = ArrayList(f64).init(allocator);
-//     defer uncompressed_values.deinit();
-//     try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, error_bound / 2, random);
+    const allocator = testing.allocator;
+    var uncompressed_values = ArrayList(f64).init(allocator);
+    defer uncompressed_values.deinit();
+    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, random);
 
-//     // This test internally calls the functions `compress()` and `decompress()`. However, the line
-//     // `testing.expect(withinErrorBound(uncompressed_values,decompressed_values.items,error_bound))`
-//     // inside the function, is nonsensical in the context of PWLH. This is because the `error_bound`
-//     // represents the number of bins in the histogram and not the maximum decompression error.
-//     // To solve this problem, we need to create another type of configuration for compression
-//     // algorithms like PWLH, which do not base their compression on a maximum decompression error
-//     // but a minimum (or maximum) compression ratio.
-//     // Nevertheless, since all `uncompressed_values` are between 0 and 10, the `error_bound=10`
-//     // should be fulfilled as the PWLH finds the mean value over the buckets.
-//     try tester.testCompressAndDecompress(
-//         uncompressed_values.items,
-//         allocator,
-//         tersets.Method.PiecewiseLinearHistogram,
-//         error_bound,
-//         tersets.isWithinErrorBound,
-//     );
-// }
+    // This test internally calls the functions `compress()` and `decompress()`. However, the line
+    // `testing.expect(withinErrorBound(uncompressed_values,decompressed_values.items,error_bound))`
+    // inside the function, is nonsensical in the context of PWLH. This is because the `error_bound`
+    // represents the number of bins in the histogram and not the maximum decompression error.
+    // To solve this problem, we need to create another type of configuration for compression
+    // algorithms like PWLH, which do not base their compression on a maximum decompression error
+    // but a minimum (or maximum) compression ratio.
+    // Nevertheless, since all `uncompressed_values` are between 0 and 10, the `error_bound=10`
+    // should be fulfilled as the PWLH finds the mean value over the buckets.
+    try tester.testCompressAndDecompress(
+        uncompressed_values.items,
+        allocator,
+        tersets.Method.PiecewiseLinearHistogram,
+        error_bound,
+        tersets.isWithinErrorBound,
+    );
+}
