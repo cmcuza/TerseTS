@@ -947,7 +947,7 @@ test "PWLH can compress and decompress with bounded values and expected maximum 
     // To solve this problem, we need to create another type of configuration for compression
     // algorithms like PWLH, which do not base their compression on a maximum decompression error
     // but a minimum (or maximum) compression ratio.
-    // Nevertheless, since all `uncompressed_values` are between 0 and 10, the `error_bound=10`
+    // Nevertheless, since all `uncompressed_values` are between 0 and error_bound/4.0, the `error_bound=10`
     // should be fulfilled as the PWLH finds the mean value over the buckets.
     try tester.testCompressAndDecompress(
         uncompressed_values.items,
