@@ -17,7 +17,7 @@ import sys
 import shutil
 import subprocess
 
-from setuptools import setup
+from setuptools import setup, find_packages, Extension
 from setuptools.command.sdist import sdist
 from setuptools.command.build_ext import build_ext
 
@@ -32,14 +32,24 @@ class ZigSDistExt(sdist):
 
 
 class ZigBuildExt(build_ext):
-    def run(self):
+    # TODO: Make setuptools copy the library to the wheel.
+    def build_extension(self, ext):
         subprocess.check_call(
-            [sys.executable, "-m", "ziglang", "build", "-Doptimize=ReleaseFast"],
+            [sys.executable, "-m", "ziglang", "build", "--release=fast"],
             cwd=os.path.join(os.path.dirname(__file__), "src"),
         )
-        super().run()
+
+    def get_ext_filename(self, ext_name):
+        # Removes the CPython part of ext_name as the library is not linked to
+        # CPython and it simplifies the code for loading the library in Python.
+        filename = super().get_ext_filename(ext_name)
+        start = filename.find(".")
+        end = filename.rfind(".")
+        return filename[:start] + filename[end:]
 
 
 setup(
+    packages=find_packages(),
+    ext_modules=[Extension('tersets', sources=['build.zig'])],
     cmdclass={"sdist": ZigSDistExt, "build_ext": ZigBuildExt},
 )
