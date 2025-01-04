@@ -15,7 +15,7 @@
 
 [project]
 name = "TerseTS"
-description = "Python interface for the TerseTS time series compression library"
+description = "TerseTS Python bindings"
 readme = "README.md"
 version = "0.0.1"
 license = { text="Apache-2.0" }
@@ -37,3 +37,7 @@ classifiers = [
     "Topic :: Scientific/Engineering",
     "Topic :: System :: Archiving :: Compression",
 ]
+
+[build-system]
+requires = ["setuptools", "ziglang"]
+build-backend = "setuptools.build_meta"
