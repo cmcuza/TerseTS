@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import sys
 import pathlib
 import sysconfig
 from typing import List
@@ -36,6 +37,8 @@ def __load_library():
     # Attempt to load the library compiled in the development repository.
     repository_root = pathlib.Path(__file__).parent.parent.parent.parent.resolve()
     library_folder = repository_root / "zig-out" / "lib"
+    if sys.platform == "darwin":
+        library_name = "tersets.dylib" # macOS does generally not use .so.
     library_path = next(library_folder.glob("*" + library_name))
     if library_path.exists():
         return cdll.LoadLibrary(library_path)
