@@ -1,4 +1,4 @@
-""" Python bindings for the TerseTS library. """
+"""Python bindings for the TerseTS library."""
 
 # Copyright 2024 TerseTS Contributors
 #
@@ -14,9 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
-import os
-import platform
+import pathlib
+import sysconfig
 from typing import List
 from enum import Enum, unique
 from ctypes import cdll, Structure, c_byte, c_float, c_double, c_size_t, POINTER, byref
@@ -26,28 +25,20 @@ from ctypes import cdll, Structure, c_byte, c_float, c_double, c_size_t, POINTER
 def __load_library():
     """Locates the correct library for this system and loads it."""
 
-    # Compute the path to the current working directory to locate the library.
-    script_folder = os.path.dirname(os.path.abspath(__file__))
+    library_name = "tersets" + sysconfig.get_config_var("SHLIB_SUFFIX")
 
-    # Determine the architecture and operating system of the system.
-    cpu_architecture = platform.machine()
-    operating_system = platform.system()
+    # Attempt to load the library installed as part of the Python package.
+    library_folder = pathlib.Path(__file__).parent.parent.resolve()
+    library_path = library_folder / library_name
+    if library_path.exists():
+        return cdll.LoadLibrary(library_path)
 
-    # Load the correct shared library for the operating system.
-    if cpu_architecture == "x86_64" and operating_system == "Linux":
-        library_path = script_folder + "/../../../zig-out/lib/libtersets.so.0.0.1"
-    elif cpu_architecture == "arm64" and operating_system == "Darwin":
-        library_path = script_folder + "/../../../zig-out/lib/libtersets.0.0.1.dylib"
-    elif cpu_architecture == "x86_64" and operating_system == "Darwin":
-        library_path = script_folder + "/../../../zig-out/lib/libtersets.0.0.1.dylib"
-    elif cpu_architecture == "AMD64" and operating_system == "Windows":
-        library_path = script_folder + "\\..\\..\\..\\zig-out\\lib\\tersets.dll"
-    elif cpu_architecture == "x86_64" and operating_system == "Windows":
-        library_path = script_folder + "\\..\\..\\..\\zig-out\\lib\\tersets.dll"
-    else:
-        raise ValueError(f"{operating_system} on {cpu_architecture} is not supported")
-
-    return cdll.LoadLibrary(library_path)
+    # Attempt to load the library compiled in the development repository.
+    repository_root = pathlib.Path(__file__).parent.parent.parent.parent.resolve()
+    library_folder = repository_root / "zig-out" / "lib"
+    library_path = next(library_folder.glob("*" + library_name))
+    if library_path.exists():
+        return cdll.LoadLibrary(library_path)
 
 
 # A global variable is used for the library so it is only initialized once and
@@ -86,10 +77,12 @@ def compress(values: List[float], method: Method, error_bound: float) -> bytes:
 
     compressed_values = __CompressedValues()
 
-    if (type(method) != Method):
+    if type(method) != Method:
         # Method does not exists, raise error, and show available options.
         available_methods = ", ".join([member.name for member in Method])
-        raise TypeError(f"'{method}' is not a valid TerseTS Method. Available method names are: {available_methods}")
+        raise TypeError(
+            f"'{method}' is not a valid TerseTS Method. Available method names are: {available_methods}"
+        )
 
     configuration = __Configuration(method.value, error_bound)
 
