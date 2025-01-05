@@ -37,22 +37,25 @@ class ZigBuildExt(build_ext):
             os.makedirs(self.build_lib)
 
         self.spawn(
-            [
+           [
                 sys.executable,
                 "-m",
                 "ziglang",
                 "build-lib",
                 ext.sources[0],
                 f"-femit-bin={self.get_ext_fullpath(ext.name)}",
-                "-fallow-shlib-undefined",
                 "-dynamic",
                 "-O",
                 "ReleaseFast",
-            ],
-        )
+             ],
+         )
 
-        # Zig generates tersets.so and tersets.so.o, but *.o is not needed.
-        os.remove(self.get_ext_fullpath(ext.name) + ".o")
+        # Zig generates files that are not needed and can be removed.
+        if sys.platform == "darwin" or sys.platform == "linux":
+            os.remove(self.get_ext_fullpath(ext.name) + ".o")
+        elif sys.platform == "win32":
+            for name in ["capi.lib", "tersets.pdb", "tersets.pyd.obj"]:
+                os.remove(self.build_lib + "\\" + name)
 
     def get_ext_filename(self, ext_name):
         # Removes the CPython part of ext_name as the library is not linked to

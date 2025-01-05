@@ -26,7 +26,10 @@ from ctypes import cdll, Structure, c_byte, c_float, c_double, c_size_t, POINTER
 def __load_library():
     """Locates the correct library for this system and loads it."""
 
-    library_name = "tersets" + sysconfig.get_config_var("SHLIB_SUFFIX")
+    library_suffix = sysconfig.get_config_var("SHLIB_SUFFIX")
+    if library_suffix is None and sys.platform == "win32":
+        library_suffix = ".pyd" # SHLIB_SUFFIX is not set and .pyd is used by build.
+    library_name = "tersets" + library_suffix
 
     # Attempt to load the library installed as part of the Python package.
     library_folder = pathlib.Path(__file__).parent.parent.resolve()
@@ -37,8 +40,14 @@ def __load_library():
     # Attempt to load the library compiled in the development repository.
     repository_root = pathlib.Path(__file__).parent.parent.parent.parent.resolve()
     library_folder = repository_root / "zig-out" / "lib"
-    if sys.platform == "darwin":
+
+    if sys.platform == "win32":
+        # Zig writes .dll files to the bin folder and SHLIB_SUFFIX is not set.
+        library_folder = repository_root / "zig-out" / "bin"
+        library_suffix = ".dll"
+    elif sys.platform == "darwin":
         library_name = "tersets.dylib" # macOS does generally not use .so.
+
     library_path = next(library_folder.glob("*" + library_name))
     if library_path.exists():
         return cdll.LoadLibrary(library_path)
