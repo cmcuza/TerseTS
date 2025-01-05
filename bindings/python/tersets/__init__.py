@@ -36,22 +36,22 @@ def __load_library():
     library_folder = pathlib.Path(__file__).parent.parent.resolve()
     library_path = library_folder / library_name
     if library_path.exists():
-        return cdll.LoadLibrary(library_path)
+        return cdll.LoadLibrary(str(library_path))
 
     # Attempt to load the library compiled in the development repository.
     repository_root = pathlib.Path(__file__).parent.parent.parent.parent.resolve()
     library_folder = repository_root / "zig-out" / "lib"
 
     if sys.platform == "win32":
-        # Zig writes .dll files to the bin folder and SHLIB_SUFFIX is not set.
-        library_folder = repository_root / "zig-out" / "bin"
+        # SHLIB_SUFFIX is not set and .dll is used by Zig.
         library_name = "tersets.dll"
     elif sys.platform == "darwin":
-        library_name = "tersets.dylib" # macOS does generally not use .so.
+        # SHLIB_SUFFIX is set to .so but macOS uses .dylib.
+        library_name = "tersets.dylib"
 
     library_path = next(library_folder.glob("*" + library_name))
     if library_path.exists():
-        return cdll.LoadLibrary(library_path)
+        return cdll.LoadLibrary(str(library_path))
 
 
 # A global variable is used for the library so it is only initialized once and
