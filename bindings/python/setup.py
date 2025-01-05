@@ -15,7 +15,6 @@
 import os
 import sys
 import shutil
-import subprocess
 
 from setuptools import setup, find_packages, Extension
 from setuptools.command.sdist import sdist
@@ -25,19 +24,35 @@ from setuptools.command.build_ext import build_ext
 class ZigSDistExt(sdist):
     def run(self):
         shutil.copytree("../../src", "src")
-        shutil.copyfile("../../build.zig", "build.zig")
         super().run()
         shutil.rmtree("src")
-        os.remove("build.zig")
 
 
 class ZigBuildExt(build_ext):
-    # TODO: Make setuptools copy the library to the wheel.
     def build_extension(self, ext):
-        subprocess.check_call(
-            [sys.executable, "-m", "ziglang", "build", "--release=fast"],
-            cwd=os.path.join(os.path.dirname(__file__), "src"),
+        assert len(ext.sources) == 1
+
+        # Zig requires that the directories exists.
+        if not os.path.exists(self.build_lib):
+            os.makedirs(self.build_lib)
+
+        self.spawn(
+            [
+                sys.executable,
+                "-m",
+                "ziglang",
+                "build-lib",
+                ext.sources[0],
+                f"-femit-bin={self.get_ext_fullpath(ext.name)}",
+                "-fallow-shlib-undefined",
+                "-dynamic",
+                "-O",
+                "ReleaseFast",
+            ],
         )
+
+        # Zig generates tersets.so and tersets.so.o, but *.o is not needed.
+        os.remove(self.get_ext_fullpath(ext.name) + ".o")
 
     def get_ext_filename(self, ext_name):
         # Removes the CPython part of ext_name as the library is not linked to
@@ -50,6 +65,6 @@ class ZigBuildExt(build_ext):
 
 setup(
     packages=find_packages(),
-    ext_modules=[Extension('tersets', sources=['build.zig'])],
+    ext_modules=[Extension("tersets", sources=["src/capi.zig"])],
     cmdclass={"sdist": ZigSDistExt, "build_ext": ZigBuildExt},
 )
