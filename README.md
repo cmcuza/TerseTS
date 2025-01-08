@@ -160,7 +160,7 @@ print("Uncompressed data length: ", len(uncompressed_values))
 # The supported compression methods are specified in tersets.zig.
 # The Python-API provides a `Method` enum to access the available methods.
 # Compress the data.
-compressed_values = compress(uncompressed, method, error_bound)
+compressed_values = compress(uncompressed_values, method, error_bound)
 
 print("Compression successful. Compressed data length: ", len(compressed_values))
 

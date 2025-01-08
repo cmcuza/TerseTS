@@ -15,6 +15,7 @@
 import os
 import sys
 import shutil
+from pathlib import Path
 
 from setuptools import setup, find_packages, Extension
 from setuptools.command.sdist import sdist
@@ -23,7 +24,9 @@ from setuptools.command.build_ext import build_ext
 
 class ZigSDistExt(sdist):
     def run(self):
-        shutil.copytree("../../src", "src")
+        cwd = pathlib.Path.cwd()
+        root = cwd.parent.parent
+        shutil.copytree(root, "src")
         super().run()
         shutil.rmtree("src")
 
@@ -55,7 +58,7 @@ class ZigBuildExt(build_ext):
             os.remove(self.get_ext_fullpath(ext.name) + ".o")
         elif sys.platform == "win32":
             for name in ["capi.lib", "tersets.pdb", "tersets.pyd.obj"]:
-                os.remove(self.build_lib + "\\" + name)
+                os.remove(os.path.join(self.build_lib, name))
 
     def get_ext_filename(self, ext_name):
         # Removes the CPython part of ext_name as the library is not linked to
