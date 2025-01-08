@@ -21,3 +21,4 @@ TerseTS.egg-info
 __pycache__
 build
 zig-out
+dist
