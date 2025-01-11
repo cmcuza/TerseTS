@@ -17,7 +17,7 @@
 .idea
 .vscode
 .zig-cache
-TerseTS.egg-info
+tersets.egg-info
 __pycache__
 build
 zig-out
