@@ -7,7 +7,7 @@ The TerseTS Python package and native Zig library can be installed from source:
 2. Install the Python `setuptools` package:
    - `python -m pip install setuptools`
 3. Install the TerseTS Python package and native Zig library:
-   - `python -m install .`
+   - `python -m pip install .`
 
 ## Distribution
 The TerseTS Python package and native Zig library can be build from source:
