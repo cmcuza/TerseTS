@@ -20,15 +20,52 @@ from pathlib import Path
 from setuptools import setup, find_packages, Extension
 from setuptools.command.sdist import sdist
 from setuptools.command.build_ext import build_ext
+from setuptools.command.bdist_wheel import bdist_wheel
+
+def copy_src_if_repository():
+    """Copies the Zig source code to the current directory if in the repository."""
+    cwd = Path.cwd()
+
+    target_src_folder = cwd / "src"
+    if target_src_folder.exists():
+        return
+
+    repository_root = cwd.parent.parent
+    git_folder = repository_root / ".git"
+    if git_folder.exists():
+        input_src_folder = repository_root / "src"
+        shutil.copytree(input_src_folder, target_src_folder)
+        return
+
+    raise FileNotFoundError("Failed to locate Zig source code.")
 
 
-class ZigSDistExt(sdist):
+def delete_src_if_repository():
+    """Deletes the Zig source code in the current directory if in the repository."""
+    cwd = Path.cwd()
+
+    src_folder = cwd / "src"
+    if not src_folder.exists():
+        return
+
+    repository_root = cwd.parent.parent
+    git_folder = repository_root / ".git"
+    if git_folder.exists():
+        shutil.rmtree(src_folder)
+
+
+class ZigSDist(sdist):
     def run(self):
-        cwd = pathlib.Path.cwd()
-        root = cwd.parent.parent
-        shutil.copytree(root, "src")
+        copy_src_if_repository()
         super().run()
-        shutil.rmtree("src")
+        delete_src_if_repository()
+
+
+class ZigBDistWheel(bdist_wheel):
+    def run(self):
+        copy_src_if_repository()
+        super().run()
+        delete_src_if_repository()
 
 
 class ZigBuildExt(build_ext):
@@ -47,6 +84,8 @@ class ZigBuildExt(build_ext):
                 "build-lib",
                 ext.sources[0],
                 f"-femit-bin={self.get_ext_fullpath(ext.name)}",
+                "-mcpu",
+                "native",
                 "-dynamic",
                 "-O",
                 "ReleaseFast",
@@ -72,5 +111,5 @@ class ZigBuildExt(build_ext):
 setup(
     packages=find_packages(),
     ext_modules=[Extension("tersets", sources=["src/capi.zig"])],
-    cmdclass={"sdist": ZigSDistExt, "build_ext": ZigBuildExt},
+    cmdclass={"sdist": ZigSDist, "bdist_wheel": ZigBDistWheel, "build_ext": ZigBuildExt},
 )
