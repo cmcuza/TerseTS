@@ -565,7 +565,7 @@ test "Hash PriorityQueue with hash_context for MergeError" {
 test "Histogram insert, and merge test number buckets in PWCH" {
     // Initialize a random number generator.
     const seed: u64 = @bitCast(time.milliTimestamp());
-    var prng = std.rand.DefaultPrng.init(seed);
+    var prng = std.Random.DefaultPrng.init(seed);
     const random = prng.random();
 
     const allocator = testing.allocator;
@@ -625,7 +625,7 @@ test "Simple fixed values test of PWCH" {
 test "Fixed cluster number with random values for PWCH" {
     // Initialize a random number generator.
     const seed: u64 = @bitCast(time.milliTimestamp());
-    var prng = std.rand.DefaultPrng.init(seed);
+    var prng = std.Random.DefaultPrng.init(seed);
     const random = prng.random();
 
     const allocator = std.testing.allocator;
@@ -653,7 +653,7 @@ test "Fixed cluster number with random values for PWCH" {
 
     // Generate random values for each cluster.
     for (cluster_ranges) |cluster| {
-        for (cluster.count) |_| {
+        for (0..cluster.count) |_| {
             const value = tester.generateBoundedRandomValue(cluster.min, cluster.max, random);
             try data_points.append(value);
         }
@@ -699,7 +699,7 @@ test "Fixed cluster number with random values for PWCH" {
 
 test "Random clusters, elements per cluster and values for PWCH" {
     // Initialize a random number generator.
-    var prng = std.rand.DefaultPrng.init(12345);
+    var prng = std.Random.DefaultPrng.init(12345);
     const random = prng.random();
 
     const allocator = std.testing.allocator;
@@ -739,7 +739,7 @@ test "Random clusters, elements per cluster and values for PWCH" {
 
     // Generate random values for each cluster.
     for (cluster_ranges.items) |cluster| {
-        for (cluster.count) |_| {
+        for (0..cluster.count) |_| {
             const value = tester.generateBoundedRandomValue(cluster.min, cluster.max, random);
             try data_points.append(value);
         }
@@ -784,7 +784,7 @@ test "Random clusters, elements per cluster and values for PWCH" {
 }
 
 test "PWCH can compress and decompress with bounded values and expected maximum error" {
-    var prng = std.rand.DefaultPrng.init(0);
+    var prng = std.Random.DefaultPrng.init(0);
     const random = prng.random();
     const error_bound: f32 = 10;
 
@@ -914,7 +914,7 @@ test "Compute PWLH with a simple set of values with known results" {
 }
 
 test "Insert random values in an Histogram with expected number of buckets" {
-    var prng = std.rand.DefaultPrng.init(0);
+    var prng = std.Random.DefaultPrng.init(0);
     const random = prng.random();
 
     const allocator = testing.allocator;
@@ -931,7 +931,7 @@ test "Insert random values in an Histogram with expected number of buckets" {
 }
 
 test "PWLH can compress and decompress with bounded values and expected maximum error" {
-    var prng = std.rand.DefaultPrng.init(0);
+    var prng = std.Random.DefaultPrng.init(0);
     const random = prng.random();
     const error_bound: f32 = 10;
 

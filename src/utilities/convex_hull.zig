@@ -569,7 +569,7 @@ test "Create incrementally convex hull with known result" {
 
 test "Create incrementally a convex hull with random elements" {
     const allocator = testing.allocator;
-    var rnd = std.rand.DefaultPrng.init(0);
+    var rnd = std.Random.DefaultPrng.init(0);
 
     var convex_hull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
@@ -638,7 +638,7 @@ test "Compute MABR LinearFunction for known Convex Hull two" {
 
 test "Compute MABR LinearFunction for random Convex Hull" {
     const allocator = testing.allocator;
-    var rnd = std.rand.DefaultPrng.init(0);
+    var rnd = std.Random.DefaultPrng.init(0);
 
     var convex_hull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
@@ -721,7 +721,7 @@ test "Merge not-in-place convex hulls with random elements" {
 
 test "Merge in-place single element's convex hull with other convex hull" {
     const allocator = testing.allocator;
-    var rnd = std.rand.DefaultPrng.init(0);
+    var rnd = std.Random.DefaultPrng.init(0);
 
     var convex_hull_one = try ConvexHull.init(allocator);
     defer convex_hull_one.deinit();
@@ -742,7 +742,7 @@ test "Merge in-place single element's convex hull with other convex hull" {
 
 test "Merge not-in-place single element's convex hull with other convex hull" {
     const allocator = testing.allocator;
-    var rnd = std.rand.DefaultPrng.init(0);
+    var rnd = std.Random.DefaultPrng.init(0);
 
     var convex_hull_one = try ConvexHull.init(allocator);
     defer convex_hull_one.deinit();
@@ -766,7 +766,7 @@ test "Merge not-in-place single element's convex hull with other convex hull" {
 
 test "Merge in-place convex hull with single element's convex hull" {
     const allocator = testing.allocator;
-    var rnd = std.rand.DefaultPrng.init(0);
+    var rnd = std.Random.DefaultPrng.init(0);
 
     var convex_hull_one = try ConvexHull.init(allocator);
     defer convex_hull_one.deinit();
@@ -787,7 +787,7 @@ test "Merge in-place convex hull with single element's convex hull" {
 
 test "Merge not-in-place convex hull with single element's convex hull" {
     const allocator = testing.allocator;
-    var rnd = std.rand.DefaultPrng.init(0);
+    var rnd = std.Random.DefaultPrng.init(0);
 
     var convex_hull_one = try ConvexHull.init(allocator);
     defer convex_hull_one.deinit();
@@ -811,7 +811,7 @@ test "Merge not-in-place convex hull with single element's convex hull" {
 
 test "Merge not-in-place does not modify the convex hulls one and two" {
     const allocator = testing.allocator;
-    var rnd = std.rand.DefaultPrng.init(0);
+    var rnd = std.Random.DefaultPrng.init(0);
 
     // Initialize convex_hull_one.
     var convex_hull_one = try ConvexHull.init(allocator);
@@ -886,7 +886,7 @@ test "Compute max error with known points and linear function" {
 
 test "Compute max error with random points and linear function" {
     const allocator = testing.allocator;
-    var rnd = std.rand.DefaultPrng.init(0);
+    var rnd = std.Random.DefaultPrng.init(0);
 
     var convex_hull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
@@ -953,7 +953,7 @@ fn testConvexHullProperty(convex_hull: *ConvexHull) !void {
 /// flag. After merging, it validates the properties of the resulting convex hull.
 fn mergeConvexHullsTestHelper(in_place: bool) !void {
     const allocator = testing.allocator;
-    var rnd = std.rand.DefaultPrng.init(0);
+    var rnd = std.Random.DefaultPrng.init(0);
 
     // Initialize the first convex hull with random points.
     var convex_hull_one = try ConvexHull.init(allocator);

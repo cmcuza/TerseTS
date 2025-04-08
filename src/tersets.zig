@@ -179,7 +179,7 @@ pub fn isWithinErrorBound(
 
 /// Get the maximum index of the available methods in TerseTS.
 pub fn getMaxMethodIndex() usize {
-    const method_info = @typeInfo(Method).Enum;
+    const method_info = @typeInfo(Method).@"enum";
 
     var max_index: usize = 0;
     for (method_info.fields, 0..) |_, i| {

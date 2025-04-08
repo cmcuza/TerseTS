@@ -16,8 +16,7 @@
 
 const std = @import("std");
 const ArrayList = std.ArrayList;
-const rand = std.rand;
-const Random = rand.Random;
+const Random = std.Random;
 const Allocator = std.mem.Allocator;
 const Error = std.mem.Allocator.Error;
 const math = std.math;
@@ -51,7 +50,7 @@ pub fn testGenerateCompressAndDecompress(
     ) bool,
 ) !void {
     const seed: u64 = @bitCast(time.milliTimestamp());
-    var prng = rand.DefaultPrng.init(seed);
+    var prng = Random.DefaultPrng.init(seed);
     const random = prng.random();
 
     var uncompressed_values = ArrayList(f64).init(allocator);
@@ -69,8 +68,8 @@ pub fn testGenerateCompressAndDecompress(
 
     while (subsequenceStack.items.len != 0) {
         // subsequenceStack contains start and end as separate integers of usize.
-        const end = subsequenceStack.pop();
-        const start = subsequenceStack.pop();
+        const end = subsequenceStack.pop().?;
+        const start = subsequenceStack.pop().?;
         const uncompressed_values_subsequence = uncompressed_values.items[start..end];
 
         testCompressAndDecompress(
@@ -181,7 +180,7 @@ pub fn replaceNormalValues(
 pub fn generateRandomValues(uncompressed_values: *ArrayList(f64), random: Random) !void {
     for (0..number_of_values) |_| {
         // rand can only generate f64 values in the range [0, 1).
-        try uncompressed_values.append(@as(f64, @bitCast(rand.int(random, u64))));
+        try uncompressed_values.append(@as(f64, @bitCast(random.int(u64))));
     }
 }
 
