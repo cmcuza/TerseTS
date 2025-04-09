@@ -45,6 +45,7 @@ def __load_library():
     if sys.platform == "win32":
         # SHLIB_SUFFIX is not set and .dll is used by Zig.
         library_name = "tersets.dll"
+        library_folder = repository_root / "zig-out" / "bin"
     elif sys.platform == "darwin":
         # SHLIB_SUFFIX is set to .so but macOS uses .dylib.
         library_name = "tersets.dylib"

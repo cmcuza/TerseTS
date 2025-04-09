@@ -23,7 +23,7 @@
 const std = @import("std");
 const math = std.math;
 const mem = std.mem;
-const rand = std.rand;
+const rand = std.Random;
 const time = std.time;
 const testing = std.testing;
 const ArrayList = std.ArrayList;
@@ -547,7 +547,7 @@ test "f64 context can hash" {
         std.hash_map.default_max_load_percentage,
     ).init(allocator);
     defer f64_hash_map.deinit();
-    var rnd = std.rand.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
+    var rnd = std.Random.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
 
     // Add 100 elements into the HashMap. For each element, add two more with small deviation of
     // 1e-16 to test that the numbers are different and a new key is created.
@@ -585,7 +585,7 @@ test "hashmap can map f64 to segment metadata array list" {
     var f64_usize_hash_map = HashMapf64(usize).init(allocator);
     defer f64_usize_hash_map.deinit();
 
-    var rnd = std.rand.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
+    var rnd = std.Random.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
 
     for (0..200) |_| {
         const rand_number = @floor((rnd.random().float(f64) - 0.5) * 100) / 10;

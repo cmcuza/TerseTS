@@ -293,7 +293,7 @@ pub fn compressSlide(
             // crosses the interception point of the upper and lower bounds.
             computeInterceptionPoint(lower_bound, upper_bound, &intercept_point);
 
-            const current_linear_approximation = .{
+            const current_linear_approximation = LinearFunction{
                 .slope = (lower_bound.slope + upper_bound.slope) / 2,
                 .intercept = computeInterceptCoefficient(
                     (lower_bound.slope + upper_bound.slope) / 2,
@@ -395,7 +395,7 @@ pub fn compressSlide(
 
     if (segment_size > 1) {
         computeInterceptionPoint(lower_bound, upper_bound, &intercept_point);
-        const linear_approximation = .{
+        const linear_approximation = LinearFunction{
             .slope = (lower_bound.slope + upper_bound.slope) / 2,
             .intercept = computeInterceptCoefficient(
                 (lower_bound.slope + upper_bound.slope) / 2,
@@ -591,7 +591,7 @@ test "swing filter zero error bound and even size compress and decompress" {
     defer decompressed_values.deinit();
     const error_bound: f32 = 0.0;
 
-    var rnd = std.rand.DefaultPrng.init(0);
+    var rnd = std.Random.DefaultPrng.init(0);
 
     var i: usize = 0;
     while (i < 100) : (i += 1) {
@@ -624,7 +624,7 @@ test "swing filter zero error bound and odd size compress and decompress" {
     defer decompressed_values.deinit();
     const error_bound: f32 = 0.0;
 
-    var rnd = std.rand.DefaultPrng.init(0);
+    var rnd = std.Random.DefaultPrng.init(0);
 
     var i: usize = 0;
     while (i < 101) : (i += 1) {
@@ -646,7 +646,7 @@ test "swing filter zero error bound and odd size compress and decompress" {
 
 test "swing filter four random lines and random error bound compress and decompress" {
     const allocator = testing.allocator;
-    var rnd = std.rand.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
+    var rnd = std.Random.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
 
     const linear_functions = [_]LinearFunction{
         LinearFunction{
@@ -711,7 +711,7 @@ test "slide filter zero error bound and even size compress and decompress" {
     defer decompressed_values.deinit();
     const error_bound: f32 = 0.0;
 
-    var rnd = std.rand.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
+    var rnd = std.Random.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
 
     var i: usize = 0;
     while (i < 100) : (i += 1) {
@@ -749,7 +749,7 @@ test "slide filter zero error bound and odd size compress and decompress" {
     defer decompressed_values.deinit();
     const error_bound: f32 = 0.0;
 
-    var rnd = std.rand.DefaultPrng.init(0);
+    var rnd = std.Random.DefaultPrng.init(0);
 
     var i: usize = 0;
     while (i < 101) : (i += 1) {
@@ -776,7 +776,7 @@ test "slide filter zero error bound and odd size compress and decompress" {
 
 test "slide filter four random lines and random error bound compress and decompress" {
     const allocator = testing.allocator;
-    var rnd = std.rand.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
+    var rnd = std.Random.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
 
     const linear_functions = [_]LinearFunction{
         LinearFunction{

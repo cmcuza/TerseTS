@@ -22,7 +22,7 @@
 //! priority of elements change, or where elements need to be accessed by key.
 
 const std = @import("std");
-const rand = std.rand;
+const rand = std.Random;
 const math = std.math;
 const time = std.time;
 const Order = std.math.Order;
@@ -269,7 +269,7 @@ test "add and remove min keys of simple values in HashedPriorityQueue" {
 
     // Initialize a random number generator.
     const seed: u64 = @bitCast(time.milliTimestamp());
-    var rnd = std.rand.DefaultPrng.init(seed);
+    var rnd = std.Random.DefaultPrng.init(seed);
 
     for (0..100) |_| {
         // Generate a random i64 value

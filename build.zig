@@ -17,23 +17,25 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
 
     // Configuration.
-    const path = "src/capi.zig";
+    const path = b.path("src/capi.zig");
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const options = .{
-        .name = "tersets",
-        .root_source_file = b.path(path),
-        .target = target,
-        .optimize = optimize,
-        .version = .{ .major = 0, .minor = 0, .patch = 1 },
-    };
 
     // Task for compilation.
-    const lib = b.addSharedLibrary(options);
+    const lib = b.addSharedLibrary(.{
+        .name = "tersets",
+        .version = .{ .major = 0, .minor = 0, .patch = 1 },
+        .root_source_file = path,
+        .target = target,
+        .optimize = optimize,
+    });
     b.installArtifact(lib);
 
     // Task for running tests.
-    const tests = b.addTest(options);
+    const tests = b.addTest(.{
+        .root_source_file = path,
+        .optimize = optimize,
+    });
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&run_tests.step);
