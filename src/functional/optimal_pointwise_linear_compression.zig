@@ -114,8 +114,6 @@ pub fn compress(
     allocator: mem.Allocator,
     error_bound: f32,
 ) Error!void {
-    std.debug.print("New test: uncompressed = {d}\n", .{uncompressed_values});
-
     if (uncompressed_values.len < 2) return Error.IncorrectInput;
     if (error_bound <= 0.0) return Error.UnsupportedErrorBound;
 
@@ -173,8 +171,6 @@ pub fn compress(
         // Calculate slope and intercept for final segment
         const slope = (p1_val - p0_val) / @as(f64, @floatFromInt(p1 - p0));
         const intercept = p0_val - slope * @as(f64, @floatFromInt(p0));
-
-        std.debug.print("Compressing segment: start = {}, end = {}, slope = {}, intercept = {}\n", .{ p0, p1, slope, intercept });
 
         // Store segment information (end index, slope, intercept)
         try appendValue(usize, p1, compressed_values);
