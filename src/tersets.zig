@@ -22,7 +22,7 @@ const poor_mans_compression = @import("functional/poor_mans_compression.zig");
 const swing_slide_filter = @import("functional/swing_slide_filter.zig");
 const sim_piece = @import("functional/sim_piece.zig");
 const piecewise_histogram = @import("functional/histogram_compression.zig");
-const linear_pointwise_compression = @import("functional/linear_pointwise_compression.zig");
+const optimal_pointwise_linear_compression = @import("functional/optimal_pointwise_linear_compression.zig");
 
 /// The errors that can occur in TerseTS.
 pub const Error = error{
@@ -44,7 +44,7 @@ pub const Method = enum {
     SimPiece,
     PiecewiseConstantHistogram,
     PiecewiseLinearHistogram,
-    LinearPointwiseApproximation,
+    OptimalPiecewiseLinearApproximation,
 };
 
 /// Compress `uncompressed_values` within `error_bound` using `method` and returns the results
@@ -116,10 +116,11 @@ pub fn compress(
                 error_bound,
             );
         },
-        .LinearPointwiseApproximation => {
-            try linear_pointwise_compression.compress(
+        .OptimalPiecewiseLinearApproximation => {
+            try optimal_pointwise_linear_compression.compress(
                 uncompressed_values,
                 &compressed_values,
+                allocator,
                 error_bound,
             );
         },
@@ -161,8 +162,8 @@ pub fn decompress(
         .PiecewiseLinearHistogram => {
             try piecewise_histogram.decompressPWLH(compressed_values_slice, &decompressed_values);
         },
-        .LinearPointwiseApproximation => {
-            try linear_pointwise_compression.decompress(compressed_values_slice, &decompressed_values);
+        .OptimalPiecewiseLinearApproximation => {
+            try optimal_pointwise_linear_compression.decompress(compressed_values_slice, &decompressed_values);
         },
     }
 
