@@ -12,10 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// //! Implementation of Optimal Pointwise Linear Compression under the L-infinity norm
-// //! Based on the paper:
-// //! "Approximations of One-Dimensional Digital Signals Under the Norm"
-// //! by M. Dalai and R. Leonardi, IEEE Transactions on Signal Processing, 2006.
+//! Implementation of ABC Linear Approximation under the L-infinity norm
+//! Based on the paper:
+//! "Approximations of One-Dimensional Digital Signals Under the Norm"
+//! by M. Dalai and R. Leonardi, IEEE Transactions on Signal Processing, 2006.
+//
+// The name "ABCLinearApproximation" reflects the core geometric concept of the algorithm:
+// the optimal segment is determined by evaluating triplets of points A, B,
+// and C.
 
 const std = @import("std");
 const mem = std.mem;
@@ -40,7 +44,10 @@ fn appendValue(comptime T: type, value: T, compressed: *ArrayList(u8)) !void {
     try compressed.appendSlice(&bytes);
 }
 
-pub fn findOptimalSegment(convex_hull: *ConvexHull) Error!LinearFunction {
+/// Find the optimal segment using ABC structure from convex hulls.
+/// A, B = side from either hull
+/// C = point from the opposite hull with max deviation, projected vertically into AB
+pub fn findABCOptimalSegment(convex_hull: *ConvexHull) Error!LinearFunction {
     const len = convex_hull.len();
 
     // Initialize first side l1 = (p0, p1)
@@ -61,11 +68,11 @@ pub fn findOptimalSegment(convex_hull: *ConvexHull) Error!LinearFunction {
         var pivot_idx: usize = i;
 
         for (i + 1..len) |j| {
-            const P = convex_hull.at(j);
+            const C = convex_hull.at(j);
 
-            // Deviation of point P from line l_i
-            const pred_value = side_slope * (@as(f64, @floatFromInt(P.time)) - @as(f64, @floatFromInt(A.time))) + A.value;
-            const deviation = @abs(pred_value - P.value);
+            // Deviation of point C from line l_i
+            const pred_value = side_slope * (@as(f64, @floatFromInt(C.time)) - @as(f64, @floatFromInt(A.time))) + A.value;
+            const deviation = @abs(pred_value - C.value);
 
             if (deviation > max_dev) {
                 max_dev = deviation;
@@ -75,7 +82,7 @@ pub fn findOptimalSegment(convex_hull: *ConvexHull) Error!LinearFunction {
 
         const pivot = convex_hull.at(pivot_idx);
 
-        // Determine relative x-position of pivot wrt l_i
+        // Determine relative x-position of pivot to l_i
         if (pivot.time > B.time) {
             // x-external to right -> advance to next side
             i += 1;
@@ -105,7 +112,7 @@ pub fn findOptimalSegment(convex_hull: *ConvexHull) Error!LinearFunction {
     return LinearFunction{ .slope = slope, .intercept = intercept };
 }
 
-/// Compresses the signal using Optimal Pointwise Linear Compression under the L-infinity norm
+/// Compresses the signal using ABCLinearApproximation under the L-infinity norm
 /// Grows convex hull segments as long as they respect the error bound.
 /// Stores end, slope, intercept for each compressed segment.
 pub fn compress(
@@ -147,8 +154,7 @@ pub fn compress(
 
             // Section III-A, Step 2-3: Find A, B, C and compute the solution line
             // Try to compute the best fitting line using current convex hull points
-            // (using slope envelope logic explained in the paper Section III)
-            const line = try findOptimalSegment(&convex_hull);
+            const line = try findABCOptimalSegment(&convex_hull);
 
             // Compute maximum error over current segment
             const max_error = try convex_hull.computeMaxError(line);
@@ -182,7 +188,7 @@ pub fn compress(
     }
 }
 
-/// Decompress the Optimal Pointwise Linear-compressed stream.
+/// Decompress the ABC Linear-compressed stream.
 /// Simply rebuilds points from stored slope and intercept.
 pub fn decompress(
     compressed_values: []const u8,
@@ -222,7 +228,7 @@ test "compresses and decompresses perfect linear signal" {
         try uncompressed_values.append(2.0 * @as(f64, @floatFromInt(i)) + 5.0);
     }
 
-    try tester.testCompressAndDecompress(uncompressed_values.items, allocator, Method.OptimalPiecewiseLinearApproximation, error_bound, tersets.isWithinErrorBound);
+    try tester.testCompressAndDecompress(uncompressed_values.items, allocator, Method.ABCLinearApproximation, error_bound, tersets.isWithinErrorBound);
 }
 
 test "compresses noisy linear signal within error bound" {
@@ -237,7 +243,7 @@ test "compresses noisy linear signal within error bound" {
         try uncompressed_values.append(3.0 * @as(f64, @floatFromInt(i)) + 4.0 + noise);
     }
 
-    try tester.testCompressAndDecompress(uncompressed_values.items, allocator, Method.OptimalPiecewiseLinearApproximation, error_bound, tersets.isWithinErrorBound);
+    try tester.testCompressAndDecompress(uncompressed_values.items, allocator, Method.ABCLinearApproximation, error_bound, tersets.isWithinErrorBound);
 }
 
 test "random lines and error bound compress and decompress" {
@@ -254,7 +260,7 @@ test "random lines and error bound compress and decompress" {
         try tester.generateRandomLinearFunction(&uncompressed_values, random);
     }
 
-    try tester.testCompressAndDecompress(uncompressed_values.items, allocator, Method.OptimalPiecewiseLinearApproximation, error_bound, tersets.isWithinErrorBound);
+    try tester.testCompressAndDecompress(uncompressed_values.items, allocator, Method.ABCLinearApproximation, error_bound, tersets.isWithinErrorBound);
 }
 
 test "odd size compress and decompress" {
@@ -271,7 +277,7 @@ test "odd size compress and decompress" {
     // Add another element to make the uncompressed values of odd size.
     try uncompressed_values.append(random.float(f64));
 
-    try tester.testCompressAndDecompress(uncompressed_values.items, allocator, Method.OptimalPiecewiseLinearApproximation, error_bound, tersets.isWithinErrorBound);
+    try tester.testCompressAndDecompress(uncompressed_values.items, allocator, Method.ABCLinearApproximation, error_bound, tersets.isWithinErrorBound);
 }
 
 test "compresses and decompresses constant signal" {
@@ -285,7 +291,7 @@ test "compresses and decompresses constant signal" {
         try uncompressed_values.append(7.7);
     }
 
-    try tester.testCompressAndDecompress(uncompressed_values.items, allocator, Method.OptimalPiecewiseLinearApproximation, error_bound, tersets.isWithinErrorBound);
+    try tester.testCompressAndDecompress(uncompressed_values.items, allocator, Method.ABCLinearApproximation, error_bound, tersets.isWithinErrorBound);
 }
 
 test "fails on single point input" {
