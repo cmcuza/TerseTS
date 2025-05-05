@@ -77,13 +77,13 @@ class __Configuration(Structure):
 @unique
 class Method(Enum):
     PoorMansCompressionMidrange = 0
-    PoorMansCompressionMean = 1,
-    SwingFilter = 2,
-    SwingFilterDisconnected = 3,
-    SlideFilter = 4,
-    SimPiece = 5,
-    PiecewiseConstantHistogram = 6,
-    PiecewiseLinearHistogram = 7,
+    PoorMansCompressionMean = 1
+    SwingFilter = 2
+    SwingFilterDisconnected = 3
+    SlideFilter = 4
+    SimPiece = 5
+    PiecewiseConstantHistogram = 6
+    PiecewiseLinearHistogram = 7
     
 
 # Public Functions.
