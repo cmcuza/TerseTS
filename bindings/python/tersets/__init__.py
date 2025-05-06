@@ -79,6 +79,7 @@ class Method(Enum):
     PoorMansCompressionMidrange = 0
     PoorMansCompressionMean = 1
     SwingFilter = 2
+    VisvalingamWhyatt = 7
 
 
 # Public Functions.

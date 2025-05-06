@@ -22,6 +22,7 @@ const poor_mans_compression = @import("functional/poor_mans_compression.zig");
 const swing_slide_filter = @import("functional/swing_slide_filter.zig");
 const sim_piece = @import("functional/sim_piece.zig");
 const piecewise_histogram = @import("functional/histogram_compression.zig");
+const vw = @import("line_simplication/visvalingam_whyatt.zig");
 
 /// The errors that can occur in TerseTS.
 pub const Error = error{
@@ -32,6 +33,7 @@ pub const Error = error{
     UnsupportedErrorBound,
     OutOfMemory,
     EmptyConvexHull,
+    EmptyQueue,
 };
 
 /// The compression methods in TerseTS.
@@ -43,6 +45,7 @@ pub const Method = enum {
     SimPiece,
     PiecewiseConstantHistogram,
     PiecewiseLinearHistogram,
+    VisvalingamWhyatt,
 };
 
 /// Compress `uncompressed_values` within `error_bound` using `method` and returns the results
@@ -114,6 +117,14 @@ pub fn compress(
                 error_bound,
             );
         },
+        .VisvalingamWhyatt => {
+            try vw.compress(
+                uncompressed_values,
+                &compressed_values,
+                allocator,
+                error_bound,
+            );
+        },
     }
     try compressed_values.append(@intFromEnum(method));
     return compressed_values;
@@ -151,6 +162,9 @@ pub fn decompress(
         },
         .PiecewiseLinearHistogram => {
             try piecewise_histogram.decompressPWLH(compressed_values_slice, &decompressed_values);
+        },
+        .VisvalingamWhyatt => {
+            try vw.decompress(compressed_values_slice, &decompressed_values);
         },
     }
 
