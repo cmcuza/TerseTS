@@ -190,8 +190,10 @@ pub fn generateBoundedRandomValues(
     uncompressed_values: *ArrayList(f64),
     lower_bound: f64,
     upper_bound: f64,
-    random: Random,
+    random_opt: ?Random,
 ) !void {
+    var random = random_opt orelse getRandomNumberGenerator();
+
     for (0..number_of_values) |_| {
         // generate f64 values in the range [0, 1).
         const rand_value: f64 = random.float(f64);
@@ -201,21 +203,23 @@ pub fn generateBoundedRandomValues(
 }
 
 /// Generate `number_of_values` of random `f64` values following a linear function of random slope
-/// and intercept for use in testing using `random`. Random noise is add to the elements and then
-/// add to `uncompressed_values`.
-pub fn generateRandomLinearFunction(uncompressed_values: *ArrayList(f64), random: Random) !void {
-    // Generate a f64 in the range [0, 1) and use it to generate a random `slope` between 0 and 10
-    // with two precision values. This slope enables enough variety while keeping the values within
-    // the acceptable range.
-    var rand_value: f64 = random.float(f64);
-    const slope: f64 = @round(rand_value * 1000) / 100;
+/// and intercept for use in testing using `random_opt`. Random noise is add to the elements and then
+/// add to `uncompressed_values`.If `random_opt` is not passed, a random number generator is created.
+pub fn generateRandomLinearFunction(uncompressed_values: *ArrayList(f64), random_opt: ?Random) !void {
+    // If `random_opt` is not passed, a random number generator is created using the current time as seed.
+    var random = random_opt orelse getRandomNumberGenerator();
 
-    // Repeat to generate a random intercept.
+    // Generate a random slope in the range [-10, 10]. Multiply by 1000 to increase changes of getting
+    // a value different from zero.
+    var rand_value: f64 = random.float(f64);
+    const slope: f64 = @round((rand_value - 0.5) * 1000) / 100;
+
+    // Repeat the process before to generate a random intercept in the range [-10, 10].
     rand_value = random.float(f64);
-    const intercept: f64 = @round(rand_value * 1000) / 10;
+    const intercept: f64 = @round((rand_value - 0.5) * 1000) / 100;
 
     for (0..number_of_values) |x| {
-        rand_value = random.float(f64);
+        rand_value = random.float(f64) - 0.5; // Random noise in the range [-0.5, 0.5).
         const linear_function_value = slope * @as(f64, @floatFromInt(x)) + intercept + rand_value;
         try uncompressed_values.append(linear_function_value);
     }
@@ -227,4 +231,11 @@ pub fn generateBoundedRandomValue(lower_bound: f64, upper_bound: f64, random: Ra
     const rand_value: f64 = random.float(f64);
     const bounded_value = lower_bound + (upper_bound - lower_bound) * rand_value;
     return bounded_value;
+}
+
+/// Returns an engine to generate random numbers using the current time as seed.
+pub fn getRandomNumberGenerator() Random {
+    const seed: u64 = @bitCast(time.milliTimestamp());
+    var prng = std.Random.DefaultPrng.init(seed);
+    return prng.random();
 }
