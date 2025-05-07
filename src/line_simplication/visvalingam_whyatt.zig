@@ -359,9 +359,11 @@ test "vw compress and decompress with zero error bound" {
     try compress(uncompressed_values.items, &compressed_values, allocator, error_bound);
     try decompress(compressed_values.items, &decompressed_values);
 
-    for (0..uncompressed_values.items.len) |i| {
-        try std.testing.expectEqual(uncompressed_values.items[i], decompressed_values.items[i]);
-    }
+    try std.testing.expect(tersets.isWithinErrorBound(
+        uncompressed_values.items,
+        decompressed_values.items,
+        error_bound,
+    ));
 }
 
 test "vw compress and compress with known result" {
