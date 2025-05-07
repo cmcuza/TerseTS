@@ -316,14 +316,16 @@ fn createLinearFunction(start_point: DiscretePoint, end_point: DiscretePoint, li
     }
 }
 
-/// Test if the area of all the triangles defined by three points is within the error bound.
+/// Test if the area of all the triangles defined by three points contained in `values`
+/// is within the `error_bound`.
 pub fn testAreaWithinErrorBound(
     values: []const f64,
     error_bound: f32,
 ) !void {
+    // At least three points are needed to form a triangle.
     if (values.len < 3) return;
 
-    // Calculate initial areas.
+    // Calculate the area formed by all triangles.
     for (1..values.len - 1) |i| {
         const area = calculateArea(
             DiscretePoint{ .time = i - 1, .value = values[i - 1] },
