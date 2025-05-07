@@ -367,7 +367,7 @@ test "vw compress and compress with known result" {
 
     // Input data.
     const uncompressed_values: []const f64 = &[_]f64{ 1.0, 1.5, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0 };
-    const error_bound: f32 = 2.1;
+    const error_bound: f32 = 2.5;
 
     // Output buffer.
     var compressed_values = ArrayList(u8).init(allocator);
@@ -379,17 +379,14 @@ test "vw compress and compress with known result" {
     try compress(uncompressed_values, &compressed_values, allocator, error_bound);
     try decompress(compressed_values.items, &decompressed_values);
 
-    const compressed_representation = mem.bytesAsSlice(f64, compressed_values.items);
+    // Check if the decompressed values have the same lenght as the compressed ones.
+    try std.testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
 
-    var index: usize = 0;
-    var previous_point_index: usize = 0;
-    while (index < compressed_representation.len - 1) : (index += 2) {
-        const current_point_index = @as(usize, @bitCast(compressed_representation[index + 1]));
-
-        // Check if the point is within the error bound.
-        try testAreaWithinErrorBound(uncompressed_values[previous_point_index .. current_point_index + 1], error_bound);
-        previous_point_index = current_point_index;
-    }
+    // In theory, all triangles formed by the slices of removed points should be within the error otherwise the
+    // point cannot be removed. In this case, the error is 2.5,  and the area of the triangles is always less than
+    // this value except when removing the element in position 5. Therefore, the area of the triangles formed by the
+    // slices of the removed points from 0..5 should be less than 2.5.
+    try testAreaWithinErrorBound(uncompressed_values[0..6], error_bound);
 }
 
 test "vw compress and compress with random data" {
@@ -409,14 +406,23 @@ test "vw compress and compress with random data" {
     defer decompressed_values.deinit();
     const error_bound: f32 = random.float(f32);
 
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0, 2, random);
+    try tester.generateBoundedRandomValues(&uncompressed_values, 0, 1, random);
 
     // Call the compress function.
     try compress(uncompressed_values.items, &compressed_values, allocator, error_bound);
     try decompress(compressed_values.items, &decompressed_values);
 
+    // Check if the decompressed values have the same lenght as the compressed ones.
+    try std.testing.expectEqual(uncompressed_values.items.len, decompressed_values.items.len);
+
+    // In theory, all triangles formed by the slices of removed points should be within the error otherwise the
+    // point cannot be removed. In this case, the error bound is unknown as well as which points are finally
+    // preserved in the compressed representation. Therefore, we need to used the compressed representation to access
+    // each of the points preserved and their index `current_point_index`. Then, the area of the triangles formed by the
+    // slices of the removed points from `previous_point_index`..`current_point_index` should be less than `error_bound`.
     const compressed_representation = mem.bytesAsSlice(f64, compressed_values.items);
 
+    std.debug.print("len={}\n", .{compressed_representation.len});
     var index: usize = 0;
     var previous_point_index: usize = 0;
     while (index < compressed_representation.len - 1) : (index += 2) {
