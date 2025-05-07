@@ -931,7 +931,7 @@ test "swing filter zero error bound and odd size compress and decompress" {
     try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, undefined);
 
     //  Extra element to make the size odd.
-    try uncompressed_values.append(tester.getRandomNumberGenerator().float(f64));
+    try uncompressed_values.append(0.1);
 
     try compressSwingFilter(uncompressed_values.items, &compressed_values, error_bound);
     try decompressSwingFilter(compressed_values.items, &decompressed_values);
@@ -953,9 +953,10 @@ test "swing filter random lines and random error bound compress and decompress" 
     var decompressed_values = ArrayList(f64).init(allocator);
     defer decompressed_values.deinit();
 
-    const error_bound: f32 = tester.getRandomNumberGenerator().float(f32) * 10;
+    const error_bound: f32 = tester.generateBoundedRandomValue(f32, 1, 10, undefined);
 
-    for (0..tester.getRandomNumberGenerator().intRangeAtMost(usize, 4, 20)) |_| {
+    const max_lines: usize = @intFromFloat(@round(tester.generateBoundedRandomValue(f64, 4, 25, undefined)));
+    for (0..max_lines) |_| {
         // Generate a random linear function and add it to the uncompressed values.
         try tester.generateRandomLinearFunction(&uncompressed_values, undefined);
     }
@@ -980,9 +981,11 @@ test "swing filter disconnected random lines and random error bound compress and
     var decompressed_values = ArrayList(f64).init(allocator);
     defer decompressed_values.deinit();
 
-    const error_bound: f32 = tester.getRandomNumberGenerator().float(f32) * 10;
+    const error_bound: f32 = tester.generateBoundedRandomValue(f32, 1, 10, undefined);
 
-    for (0..tester.getRandomNumberGenerator().intRangeAtMost(usize, 4, 20)) |_| {
+    const max_lines: usize = @intFromFloat(@round(tester.generateBoundedRandomValue(f64, 4, 25, undefined)));
+
+    for (0..max_lines) |_| {
         // Generate a random linear function and add it to the uncompressed values.
         try tester.generateRandomLinearFunction(&uncompressed_values, undefined);
     }
@@ -1042,7 +1045,7 @@ test "slide filter zero error bound and odd size compress and decompress" {
 
     try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, undefined);
     //  Extra element to make the size odd.
-    try uncompressed_values.append(tester.getRandomNumberGenerator().float(f64));
+    try uncompressed_values.append(0.1);
 
     try compressSlideFilter(
         uncompressed_values.items,
@@ -1069,9 +1072,11 @@ test "slide filter random lines and random error bound compress and decompress" 
     var decompressed_values = ArrayList(f64).init(allocator);
     defer decompressed_values.deinit();
 
-    const error_bound: f32 = tester.getRandomNumberGenerator().float(f32) * 10;
+    const error_bound: f32 = tester.generateBoundedRandomValue(f32, 1, 10, undefined);
 
-    for (0..tester.getRandomNumberGenerator().intRangeAtMost(usize, 4, 20)) |_| {
+    const max_lines: usize = @intFromFloat(@round(tester.generateBoundedRandomValue(f64, 4, 25, undefined)));
+
+    for (0..max_lines) |_| {
         // Generate a random linear function and add it to the uncompressed values.
         try tester.generateRandomLinearFunction(&uncompressed_values, undefined);
     }

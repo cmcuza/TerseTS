@@ -192,7 +192,9 @@ pub fn generateBoundedRandomValues(
     upper_bound: f64,
     random_opt: ?Random,
 ) !void {
-    var random = random_opt orelse getRandomNumberGenerator();
+    const seed: u64 = @bitCast(time.milliTimestamp());
+    var prng = std.Random.DefaultPrng.init(seed);
+    var random = random_opt orelse prng.random();
 
     for (0..number_of_values) |_| {
         // generate f64 values in the range [0, 1).
@@ -207,7 +209,9 @@ pub fn generateBoundedRandomValues(
 /// add to `uncompressed_values`.If `random_opt` is not passed, a random number generator is created.
 pub fn generateRandomLinearFunction(uncompressed_values: *ArrayList(f64), random_opt: ?Random) !void {
     // If `random_opt` is not passed, a random number generator is created using the current time as seed.
-    var random = random_opt orelse getRandomNumberGenerator();
+    const seed: u64 = @bitCast(time.milliTimestamp());
+    var prng = std.Random.DefaultPrng.init(seed);
+    var random = random_opt orelse prng.random();
 
     // Generate a random slope in the range [-10, 10]. Multiply by 1000 to increase changes of getting
     // a value different from zero.
@@ -227,15 +231,12 @@ pub fn generateRandomLinearFunction(uncompressed_values: *ArrayList(f64), random
 
 /// Return a random `f64` value between `lower_bound` and `upper_bound` for
 /// use in testing using `random`.
-pub fn generateBoundedRandomValue(lower_bound: f64, upper_bound: f64, random: Random) f64 {
-    const rand_value: f64 = random.float(f64);
-    const bounded_value = lower_bound + (upper_bound - lower_bound) * rand_value;
-    return bounded_value;
-}
-
-/// Returns an engine to generate random numbers using the current time as seed.
-pub fn getRandomNumberGenerator() Random {
+pub fn generateBoundedRandomValue(comptime T: type, lower_bound: T, upper_bound: T, random_opt: ?Random) T {
     const seed: u64 = @bitCast(time.milliTimestamp());
     var prng = std.Random.DefaultPrng.init(seed);
-    return prng.random();
+    var random = random_opt orelse prng.random();
+
+    const rand_value: T = random.float(T);
+    const bounded_value = lower_bound + (upper_bound - lower_bound) * rand_value;
+    return bounded_value;
 }

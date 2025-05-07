@@ -575,7 +575,7 @@ test "Histogram insert, and merge test number buckets in PWCH" {
 
     // Insert 1000 random numbers into the histogram.
     for (0..1000) |i| {
-        const rand_number = tester.generateBoundedRandomValue(0, 1000, random);
+        const rand_number = tester.generateBoundedRandomValue(f64, 0, 1000, random);
         try histogram.insert(i, rand_number);
     }
     try expectEqual(max_buckets, histogram.buckets.items.len);
@@ -654,7 +654,7 @@ test "Fixed cluster number with random values for PWCH" {
     // Generate random values for each cluster.
     for (cluster_ranges) |cluster| {
         for (0..cluster.count) |_| {
-            const value = tester.generateBoundedRandomValue(cluster.min, cluster.max, random);
+            const value = tester.generateBoundedRandomValue(f64, cluster.min, cluster.max, random);
             try data_points.append(value);
         }
     }
@@ -713,9 +713,9 @@ test "Random clusters, elements per cluster and values for PWCH" {
     defer cluster_ranges.deinit();
 
     const min_value: f64 = -1e6;
-    const cluster_width: f64 = tester.generateBoundedRandomValue(100, 1000, random);
+    const cluster_width: f64 = tester.generateBoundedRandomValue(f64, 100, 1000, random);
     // Generate min gap.
-    const gap: f64 = cluster_width + tester.generateBoundedRandomValue(100, 1000, random) + 100;
+    const gap: f64 = cluster_width + tester.generateBoundedRandomValue(f64, 100, 1000, random) + 100;
     const max_counts_per_cluster: usize = 100;
 
     var current_min_value = min_value;
@@ -740,7 +740,7 @@ test "Random clusters, elements per cluster and values for PWCH" {
     // Generate random values for each cluster.
     for (cluster_ranges.items) |cluster| {
         for (0..cluster.count) |_| {
-            const value = tester.generateBoundedRandomValue(cluster.min, cluster.max, random);
+            const value = tester.generateBoundedRandomValue(f64, cluster.min, cluster.max, random);
             try data_points.append(value);
         }
     }
@@ -924,7 +924,7 @@ test "Insert random values in an Histogram with expected number of buckets" {
 
     // Insert 1000 random numbers into the histogram.
     for (0..1000) |i| {
-        const rand_number = tester.generateBoundedRandomValue(0, 1000, random);
+        const rand_number = tester.generateBoundedRandomValue(f64, 0, 1000, random);
         try histogram.insert(i, rand_number);
     }
     try expectEqual(max_buckets, histogram.buckets.items.len);
