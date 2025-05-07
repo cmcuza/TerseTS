@@ -424,7 +424,6 @@ test "vw compress and compress with random data" {
     // slices of the removed points from `previous_point_index`..`current_point_index` should be less than `error_bound`.
     const compressed_representation = mem.bytesAsSlice(f64, compressed_values.items);
 
-    std.debug.print("len={}\n", .{compressed_representation.len});
     var index: usize = 0;
     var previous_point_index: usize = 0;
     while (index < compressed_representation.len - 1) : (index += 2) {
