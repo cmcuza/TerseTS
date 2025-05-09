@@ -28,8 +28,8 @@ const Method = tersets.Method;
 const Error = tersets.Error;
 const tester = @import("../tester.zig");
 
-/// Compress `uncompressed_values` within `error_bound` using "Poor Man’s Compression - Midrange"
-/// and write the result to `compressed_values`. If an error occurs it is returned.
+/// Compress `uncompressed_values` within `error_bound` using "Poor Man’s Compression - Midrange".
+/// The function writes the result to `compressed_values`. If an error occurs it is returned.
 pub fn compressMidrange(
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
@@ -59,8 +59,8 @@ pub fn compressMidrange(
     try appendValueAndIndexToArrayList(compressed_value, index, compressed_values);
 }
 
-/// Compress `uncompressed_values` within `error_bound` using "Poor Man’s Compression - Mean"
-/// and write the result to `compressed_values`. If an error occurs it is returned.
+/// Compress `uncompressed_values` within `error_bound` using "Poor Man’s Compression - Mean".
+/// The function writes the result to `compressed_values`. If an error occurs it is returned.
 pub fn compressMean(
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
@@ -97,8 +97,8 @@ pub fn compressMean(
 }
 
 /// Decompress `compressed_values` produced by "Poor Man’s Compression - Midrange" and
-/// "Poor Man’s Compression - Mean" and write the result to `decompressed_values`. If an error
-/// occurs it is returned.
+/// "Poor Man’s Compression - Mean". The function writes the result to `decompressed_values`.
+/// If an error occurs it is returned.
 pub fn decompress(
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),

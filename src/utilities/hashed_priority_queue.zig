@@ -31,7 +31,6 @@ const HashMap = std.HashMap;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
-const assert = std.debug.assert;
 const expectEqual = testing.expectEqual;
 const expectError = testing.expectError;
 
@@ -95,14 +94,21 @@ pub fn HashedPriorityQueue(
             try self.addUnchecked(elem);
         }
 
+        /// Returns the minimum element in the queue without removing it.
+        pub fn peek(self: *Self) !T {
+            if (self.len == 0) return Error.EmptyQueue;
+            return self.items[0];
+        }
+
         /// Removes and returns the element with the highest priority (at index 0).
-        pub fn remove(self: *Self) !T {
+        pub fn pop(self: *Self) !T {
             return try self.removeIndex(0);
         }
 
         /// Removes and returns the element at the specified index.
         pub fn removeIndex(self: *Self, index: usize) !T {
-            assert(self.len > index);
+            if (self.len < index) return Error.ItemNotFound;
+
             const last = self.items[self.len - 1];
             const item = self.items[index];
 
@@ -286,7 +292,7 @@ test "add and remove min keys of simple values in HashedPriorityQueue" {
 
     // Remove elements from the queue and verify the order.
     for (sorted_list.items) |expected_value| {
-        const removed_value = try queue.remove();
+        const removed_value = try queue.pop();
         try expectEqual(expected_value, removed_value);
     }
 }
@@ -315,19 +321,19 @@ test "test update function in HashedPriorityQueue" {
     try queue.update(55, 5);
     try queue.update(44, 4);
     try queue.update(11, 1);
-    try expectEqual(@as(u32, 1), queue.remove());
-    try expectEqual(@as(u32, 4), queue.remove());
-    try expectEqual(@as(u32, 5), queue.remove());
+    try expectEqual(@as(u32, 1), queue.pop());
+    try expectEqual(@as(u32, 4), queue.pop());
+    try expectEqual(@as(u32, 5), queue.pop());
     try queue.add(1);
     try queue.add(1);
     try queue.add(2);
     try queue.add(2);
     try queue.update(1, 5);
     try queue.update(2, 4);
-    try expectEqual(@as(u32, 1), queue.remove());
-    try expectEqual(@as(u32, 2), queue.remove());
-    try expectEqual(@as(u32, 4), queue.remove());
-    try expectEqual(@as(u32, 5), queue.remove());
+    try expectEqual(@as(u32, 1), queue.pop());
+    try expectEqual(@as(u32, 2), queue.pop());
+    try expectEqual(@as(u32, 4), queue.pop());
+    try expectEqual(@as(u32, 5), queue.pop());
     try expectError(Error.ItemNotFound, queue.update(1, 1));
 }
 
@@ -372,12 +378,12 @@ test "add and remove min key of custom struct in HashedPriorityQueue" {
     try queue.add(.{ .key = 7, .value = 13.0 });
 
     // Remove elements and check if they are in the correct order.
-    try expectEqual(2, (try queue.remove()).key);
-    try expectEqual(4, (try queue.remove()).key);
-    try expectEqual(7, (try queue.remove()).key);
-    try expectEqual(10, (try queue.remove()).key);
-    try expectEqual(15, (try queue.remove()).key);
-    try expectEqual(23, (try queue.remove()).key);
+    try expectEqual(2, (try queue.pop()).key);
+    try expectEqual(4, (try queue.pop()).key);
+    try expectEqual(7, (try queue.pop()).key);
+    try expectEqual(10, (try queue.pop()).key);
+    try expectEqual(15, (try queue.pop()).key);
+    try expectEqual(23, (try queue.pop()).key);
 }
 
 test "add, remove and element position for key of structs in HashedPriorityQueue" {
@@ -422,13 +428,13 @@ test "add, remove and element position for key of structs in HashedPriorityQueue
 
     // Remove elements and check if they are in the correct order.
     try expectEqual(0, (try queue.getIndex(.{ .key = 4, .value = 7.0 })));
-    try expectEqual(4, (try queue.remove()).key);
+    try expectEqual(4, (try queue.pop()).key);
     try expectEqual(0, (try queue.getIndex(.{ .key = 2, .value = 12.0 })));
-    try expectEqual(2, (try queue.remove()).key);
+    try expectEqual(2, (try queue.pop()).key);
 
     try queue.update(.{ .key = 7, .value = 13.0 }, .{ .key = 8, .value = 13.0 });
     try expectEqual(0, (try queue.getIndex(.{ .key = 8, .value = 13.0 })));
-    try expectEqual(8, (try queue.remove()).key);
+    try expectEqual(8, (try queue.pop()).key);
 
     try expectError(Error.ItemNotFound, queue.update(
         .{ .key = 17, .value = 13.0 },
@@ -437,11 +443,11 @@ test "add, remove and element position for key of structs in HashedPriorityQueue
 
     try queue.update(.{ .key = 23, .value = 54.0 }, .{ .key = 23, .value = 5.0 });
     try expectEqual(0, (try queue.getIndex(.{ .key = 23, .value = 5.0 })));
-    try expectEqual(23, (try queue.remove()).key);
+    try expectEqual(23, (try queue.pop()).key);
 
     try queue.add(.{ .key = 7, .value = 3.0 });
     try expectEqual(0, (try queue.getIndex(.{ .key = 7, .value = 3.0 })));
-    try expectEqual(7, (try queue.remove()).key);
+    try expectEqual(7, (try queue.pop()).key);
     try expectError(Error.ItemNotFound, queue.update(
         .{ .key = 7, .value = 3.0 },
         .{ .key = 9, .value = 13.0 },

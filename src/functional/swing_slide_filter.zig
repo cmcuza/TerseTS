@@ -52,8 +52,8 @@ const LinearFunction = shared.LinearFunction;
 
 const ConvexHull = @import("../utilities/convex_hull.zig").ConvexHull;
 
-/// Compress `uncompressed_values` within `error_bound` using "Swing Filter" and write the
-/// result to `compressed_values`. If an error occurs it is returned.
+/// Compress `uncompressed_values` within `error_bound` using "Swing Filter". The function writes
+/// the result to `compressed_values`. If an error occurs it is returned.
 pub fn compressSwingFilter(
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
@@ -228,8 +228,8 @@ pub fn compressSwingFilter(
     try appendValue(usize, current_timestamp, compressed_values);
 }
 
-/// Compress `uncompressed_values` within `error_bound` using "Slide Filter" and write the
-/// result to `compressed_values`. The `allocator` is used to allocate memory for the convex hull.
+/// Compress `uncompressed_values` within `error_bound` using "Slide Filter". The function writes
+/// the result to `compressed_values`. The `allocator` is used to allocate memory for the convex hull.
 /// If an error occurs it is returned.
 pub fn compressSlideFilter(
     uncompressed_values: []const f64,
@@ -437,7 +437,7 @@ pub fn compressSlideFilter(
 
 /// Compress `uncompressed_values` within `error_bound` using "Swing Filter"'s filtering mechanism.
 /// Different from the proposed papper, this implementation allows a extra degree of freedom by
-/// disconnecting adjacent segments in the recording mechanism. The algorithm write the result to
+/// disconnecting adjacent segments in the recording mechanism. The algorithm writes the result to
 /// `compressed_values`. If an error occurs it is returned.
 pub fn compressSwingFilterDisconnected(
     uncompressed_values: []const f64,
@@ -614,7 +614,7 @@ pub fn compressSwingFilterDisconnected(
     try appendValue(usize, current_timestamp, compressed_values);
 }
 
-/// Decompress `compressed_values` produced by "Swing Filter". The algorithm write the result to
+/// Decompress `compressed_values` produced by "Swing Filter". The algorithm writes the result to
 /// `decompressed_values`. If an error occurs it is returned.
 pub fn decompressSwingFilter(
     compressed_values: []const u8,
@@ -674,7 +674,7 @@ pub fn decompressSwingFilter(
 
 /// Decompress `compressed_values` produced by "Slide Filter". This implementation is reused to
 /// decompress the "Swing Filter Disconnected" algorithm since the `compressed_values` are
-/// expected to have the same structure. The algorithm write the result to `decompressed_values`.
+/// expected to have the same structure. The algorithm writes the result to `decompressed_values`.
 /// If an error occurs it is returned.
 pub fn decompressSlideFilter(
     compressed_values: []const u8,

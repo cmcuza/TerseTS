@@ -107,6 +107,7 @@ fn errorToInt(err: Error) i32 {
         Error.OutOfMemory => return 5,
         Error.ItemNotFound => return 6,
         Error.EmptyConvexHull => return 7,
+        Error.EmptyQueue => return 8,
     }
 }
 
@@ -119,6 +120,7 @@ test "method enum must match method constants" {
     try testing.expectEqual(@intFromEnum(tersets.Method.SimPiece), 5);
     try testing.expectEqual(@intFromEnum(tersets.Method.PiecewiseConstantHistogram), 6);
     try testing.expectEqual(@intFromEnum(tersets.Method.PiecewiseLinearHistogram), 7);
+    try testing.expectEqual(@intFromEnum(tersets.Method.VisvalingamWhyatt), 8);
 }
 
 test "error for unknown compression method" {

@@ -52,7 +52,7 @@ const tester = @import("../tester.zig");
 const Approximation = enum(i8) { constant, linear };
 
 /// Compress `uncompressed_values` with the maximum number of buckets defined by the `error_bound`
-/// using "Piecewice Constant Histogram" compression method and write the result to
+/// using "Piecewice Constant Histogram" compression method. The function writes the result to
 /// `compressed_values`. If an error occurs it is returned.
 pub fn compressPWCH(
     uncompressed_values: []const f64,
@@ -87,7 +87,7 @@ pub fn compressPWCH(
 }
 
 /// Compress `uncompressed_values` with the maximum number of buckets defined by the `error_bound`
-/// using "Piecewice Linear Histogram" compression method and write the result to
+/// using "Piecewice Linear Histogram" compression method. The function writes the result to
 /// `compressed_values`. If an error occurs it is returned.
 pub fn compressPWLH(
     uncompressed_values: []const f64,
@@ -419,7 +419,7 @@ const Histogram = struct {
     /// elements in the `buckets` list.
     fn minMerge(self: *Self) !void {
         // Pop the smallest merge error (the least costly merge).
-        const min_merge_error: MergeError = try self.merge_queue.remove();
+        const min_merge_error: MergeError = try self.merge_queue.pop();
 
         // Merge the buckets at min_merge_error.index and min_merge_error.index + 1.
         const index = min_merge_error.index;
@@ -552,13 +552,13 @@ test "Hash PriorityQueue with hash_context for MergeError" {
     try pq.add(error2);
     try pq.add(error3);
 
-    const top_value = try pq.remove();
+    const top_value = try pq.pop();
     try std.testing.expect(top_value.index == 2);
 
-    const next_top = try pq.remove();
+    const next_top = try pq.pop();
     try std.testing.expect(next_top.index == 1);
 
-    const final_top = try pq.remove();
+    const final_top = try pq.pop();
     try std.testing.expect(final_top.index == 3);
 }
 
