@@ -31,7 +31,6 @@ const HashMap = std.HashMap;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
-const assert = std.debug.assert;
 const expectEqual = testing.expectEqual;
 const expectError = testing.expectError;
 
@@ -108,7 +107,8 @@ pub fn HashedPriorityQueue(
 
         /// Removes and returns the element at the specified index.
         pub fn removeIndex(self: *Self, index: usize) !T {
-            assert(self.len > index);
+            if (self.len < index) return Error.ItemNotFound;
+
             const last = self.items[self.len - 1];
             const item = self.items[index];
 

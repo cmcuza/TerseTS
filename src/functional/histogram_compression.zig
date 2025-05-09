@@ -52,7 +52,7 @@ const tester = @import("../tester.zig");
 const Approximation = enum(i8) { constant, linear };
 
 /// Compress `uncompressed_values` with the maximum number of buckets defined by the `error_bound`
-/// using "Piecewice Constant Histogram" compression method and write the result to
+/// using "Piecewice Constant Histogram" compression method. The function writes the result to
 /// `compressed_values`. If an error occurs it is returned.
 pub fn compressPWCH(
     uncompressed_values: []const f64,
@@ -87,7 +87,7 @@ pub fn compressPWCH(
 }
 
 /// Compress `uncompressed_values` with the maximum number of buckets defined by the `error_bound`
-/// using "Piecewice Linear Histogram" compression method and write the result to
+/// using "Piecewice Linear Histogram" compression method. The function writes the result to
 /// `compressed_values`. If an error occurs it is returned.
 pub fn compressPWLH(
     uncompressed_values: []const f64,

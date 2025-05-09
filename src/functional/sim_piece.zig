@@ -37,9 +37,9 @@ const DiscretePoint = shared.DiscretePoint;
 
 const tester = @import("../tester.zig");
 
-/// Compresses `uncompressed_values` within `error_bound` using the "Sim-Piece" algorithm, writing
-/// the result to `compressed_values`. The `allocator` is used for memory allocation of intermediate
-/// data structures. If an error occurs, it is returned.
+/// Compresses `uncompressed_values` within `error_bound` using the "Sim-Piece" algorithm.
+/// The function writes the result to `compressed_values`. The `allocator` is used for memory
+/// allocation of intermediate data structures. If an error occurs, it is returned.
 pub fn compressSimPiece(
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
@@ -92,7 +92,7 @@ pub fn compressSimPiece(
     try appendValue(usize, uncompressed_values.len, compressed_values);
 }
 
-/// Decompress `compressed_values` produced by "Sim-Piece" and write the result to
+/// Decompress `compressed_values` produced by "Sim-Piece". The function writes the result to
 /// `decompressed_values`. The `allocator` is used for memory allocation of intermediate
 /// data structures. If an error occurs it is returned.
 pub fn decompress(

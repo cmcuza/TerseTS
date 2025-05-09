@@ -31,9 +31,11 @@ const HashedPriorityQueue = @import(
     "../utilities/hashed_priority_queue.zig",
 ).HashedPriorityQueue;
 
-const DiscretePoint = @import("../utilities/shared_structs.zig").DiscretePoint;
-const LinearFunction = @import("../utilities/shared_structs.zig").LinearFunction;
-const Segment = @import("../utilities/shared_structs.zig").Segment;
+const shared = @import("../utilities/shared_structs.zig");
+
+const DiscretePoint = shared.DiscretePoint;
+const LinearFunction = shared.LinearFunction;
+const Segment = shared.Segment;
 
 const tester = @import("../tester.zig");
 
@@ -47,27 +49,29 @@ pub fn compress(
     allocator: mem.Allocator,
     error_bound: f32,
 ) Error!void {
-    // If we have 2 or fewer points, copy them directly.
+    // If we have 2 or fewer points, store them without compression..
     if (uncompressed_values.len <= 2) {
-        for (0..uncompressed_values.len) |i| {
-            try appendValue(f64, uncompressed_values[i], compressed_values);
-        }
+        try appendValue(f64, uncompressed_values[0], compressed_values);
+        try appendValue(usize, 1, compressed_values);
+        try appendValue(f64, uncompressed_values[1], compressed_values);
         return;
     }
+
     if (error_bound < 0) {
         return Error.IncorrectInput;
     }
 
-    // Initialize hashed priority queue with area as priority.
+    // Initialize a hashed priority queue to store the effective area of triangles formed by every
+    // sequence of three consecutive points. The priority is determined by the area.
     var heap = try HashedPriorityQueue(
         PointArea,
         void,
         comparePointArea,
-        HashPointAreaContext,
+        PointAreaHashContext,
     ).init(allocator, {});
     defer heap.deinit();
 
-    // First point cannot be removed. Thus the area is set to infinity.
+    // First point cannot be removed. Thus, the area is set to infinity.
     try heap.add(PointArea{
         .index = 0,
         .area = math.inf(f64),
@@ -97,15 +101,15 @@ pub fn compress(
         .right_point = uncompressed_values.len,
     });
 
-    // Placeholder for the point area to be used in the loop to search neighborg points.
-    var placeholder_point: PointArea = .{
+    // Placeholder for the point area to be used in the loop to search for neighboring points.
+    var placeholder_point_area: PointArea = .{
         .index = 0,
         .area = 0,
         .left_point = 0,
         .right_point = 0,
     };
 
-    // Main simplification loop
+    // Main simplification loop.
     while (heap.items.len > 2) {
         // Get the point with the smallest area.
         const min_point: PointArea = try heap.peek();
@@ -118,61 +122,32 @@ pub fn compress(
         // Now is safe to remove the point with the smallest area.
         _ = try heap.pop();
 
-        // Adjust neighbors of removed point
-        placeholder_point.index = min_point.left_point;
-        var left_point: PointArea = try heap.get(try heap.getIndex(placeholder_point));
+        // Adjust neighbors of removed point.
+        placeholder_point_area.index = min_point.left_point;
+        var left_point: PointArea = try heap.get(try heap.getIndex(placeholder_point_area));
         left_point.right_point = min_point.right_point;
 
-        placeholder_point.index = min_point.right_point;
-        var right_point: PointArea = try heap.get(try heap.getIndex(placeholder_point));
+        placeholder_point_area.index = min_point.right_point;
+        var right_point: PointArea = try heap.get(try heap.getIndex(placeholder_point_area));
         right_point.left_point = min_point.left_point;
 
-        // Update areas of left neighbor.
-        if (left_point.left_point > 0) {
-
-            // New area of the left point.
-            const new_area = calculateArea(
-                DiscretePoint{
-                    .time = left_point.left_point,
-                    .value = uncompressed_values[left_point.left_point],
-                },
-                DiscretePoint{
-                    .time = left_point.index,
-                    .value = uncompressed_values[left_point.index],
-                },
-                DiscretePoint{
-                    .time = left_point.right_point,
-                    .value = uncompressed_values[left_point.right_point],
-                },
-            );
-            left_point.area = new_area;
-        }
-        // Update the left point in the heap. Even if the area is not changed, it is necessary to update the
-        // left point to update the pointer to its right point.
-        try heap.update(left_point, left_point);
-
-        // Update area of right neighbor.
-        if (right_point.right_point < uncompressed_values.len) {
-            // New area of the right point.
-            const new_area = calculateArea(
-                DiscretePoint{
-                    .time = right_point.left_point,
-                    .value = uncompressed_values[right_point.left_point],
-                },
-                DiscretePoint{
-                    .time = right_point.index,
-                    .value = uncompressed_values[right_point.index],
-                },
-                DiscretePoint{
-                    .time = right_point.right_point,
-                    .value = uncompressed_values[right_point.right_point],
-                },
-            );
-            right_point.area = new_area;
-        }
-        // Update the right point in the heap. Even if the area is not changed, it is necessary to update the
-        // right point to update the pointer to its left point.
-        try heap.update(right_point, right_point);
+        // Update areas of left and right neighbors.
+        try updateNeighborArea(
+            &heap,
+            left_point,
+            left_point.left_point,
+            left_point.index,
+            left_point.right_point,
+            uncompressed_values,
+        );
+        try updateNeighborArea(
+            &heap,
+            right_point,
+            right_point.left_point,
+            right_point.index,
+            right_point.right_point,
+            uncompressed_values,
+        );
     }
 
     // Sort remaining points by original index to preserve order.
@@ -240,32 +215,38 @@ pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList
     }
 }
 
-/// Structure for holding the points area for by the three adjacency points.
+/// A `PointArea` represents a point in a series and its associated effective area, which is
+/// calculated based on the triangle formed by the point and its two adjacent neighbors in the
+/// series. The effective area is used to determine the importance of the point in the context
+/// of the Visvalingam-Whyatt line simplification algorithm. Points with smaller areas are less
+/// significant and are more likely to be removed during the simplification process.
 const PointArea = struct {
-    // Index of the point.
+    // Index of the point in the original series.
     index: usize,
-    // Area of the point.
+    // Effective area of the point, calculated using the triangle formed by the point and its
+    // two adjacent neighbors.
     area: f64,
-    // Left point.
+    // Index of the left (previous) neighbor of the point in the series.
     left_point: usize,
-    // Right point.
+    // Index of the right (next) neighbor of the point in the series.
     right_point: usize,
 
-    /// order by the `index` field (ascending).
+    /// Order by the `index` field (ascending). This is used to sort points by their original
+    /// position in the series to preserve the order after simplification.
     fn firstThan(_: void, point_1: PointArea, point_2: PointArea) bool {
         return point_1.index < point_2.index;
     }
 };
 
-/// `HashPointAreaContext` provides context for hashing and comparing `PointArea` items for use
+/// `PointAreaHashContext` provides context for hashing and comparing `PointArea` items for use
 /// in `HashMap`. It defines how `PointArea` are hashed and compared for equality.
-const HashPointAreaContext = struct {
+const PointAreaHashContext = struct {
     /// Hashes the `index: usize` by bitcasting it to `u64`.
-    pub fn hash(_: HashPointAreaContext, merge_error: PointArea) u64 {
+    pub fn hash(_: PointAreaHashContext, merge_error: PointArea) u64 {
         return @as(u64, @intCast(merge_error.index));
     }
     /// Compares two `index` for equality.
-    pub fn eql(_: HashPointAreaContext, merge_error_one: PointArea, merge_error_two: PointArea) bool {
+    pub fn eql(_: PointAreaHashContext, merge_error_one: PointArea, merge_error_two: PointArea) bool {
         return merge_error_one.index == merge_error_two.index;
     }
 };
@@ -316,6 +297,33 @@ fn createLinearFunction(start_point: DiscretePoint, end_point: DiscretePoint, li
     }
 }
 
+/// Update the area of the `neighbor` point in the `heap`. The `left_index`, `center_index` and
+/// `right_index` are the indices of the points in the `uncompressed_values` array. The
+/// `uncompressed_values` are needed to calculate the area of the triangles formed by the three points.
+fn updateNeighborArea(
+    heap: *HashedPriorityQueue(PointArea, void, comparePointArea, PointAreaHashContext),
+    neighbor: PointArea,
+    left_index: usize,
+    center_index: usize,
+    right_index: usize,
+    uncompressed_values: []const f64,
+) !void {
+    var new_neighbor = neighbor;
+    if (left_index > 0 and right_index < uncompressed_values.len) {
+        // New area of the neighbor point.
+        const new_area = calculateArea(
+            DiscretePoint{ .time = left_index, .value = uncompressed_values[left_index] },
+            DiscretePoint{ .time = center_index, .value = uncompressed_values[center_index] },
+            DiscretePoint{ .time = right_index, .value = uncompressed_values[right_index] },
+        );
+
+        new_neighbor.area = new_area;
+    }
+    // Update the neighbor in the heap. Even if the area is not changed, it is necessary to update the
+    // neighbor to update the pointer to its adjacent points.
+    try heap.update(neighbor, new_neighbor);
+}
+
 /// Test if the area of all the triangles defined by three points contained in `values`
 /// is within the `error_bound`.
 pub fn testAreaWithinErrorBound(
@@ -325,7 +333,7 @@ pub fn testAreaWithinErrorBound(
     // At least three points are needed to form a triangle.
     if (values.len < 3) return;
 
-    // Calculate the area formed by all triangles.
+    // Calculate the area formed by each triangle.
     for (1..values.len - 1) |i| {
         const area = calculateArea(
             DiscretePoint{ .time = i - 1, .value = values[i - 1] },
@@ -355,7 +363,7 @@ test "vw compress and decompress with zero error bound" {
 
     try tester.generateBoundedRandomValues(&uncompressed_values, 0, 1000000, random);
 
-    // Call the compress function.
+    // Call the compress and decompress functions.
     try compress(uncompressed_values.items, &compressed_values, allocator, error_bound);
     try decompress(compressed_values.items, &decompressed_values);
 
