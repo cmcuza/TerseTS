@@ -180,7 +180,11 @@ pub fn replaceNormalValues(
 pub fn generateRandomValues(uncompressed_values: *ArrayList(f64), random: Random) !void {
     for (0..number_of_values) |_| {
         // rand can only generate f64 values in the range [0, 1).
-        try uncompressed_values.append(@as(f64, @bitCast(random.int(u64))));
+        var random_value = @as(f64, @bitCast(random.int(u64)));
+        if (!std.math.isFinite(random_value))
+            random_value = 0.0;
+
+        try uncompressed_values.append(random_value);
     }
 }
 
