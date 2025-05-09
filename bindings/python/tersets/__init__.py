@@ -79,8 +79,12 @@ class Method(Enum):
     PoorMansCompressionMidrange = 0
     PoorMansCompressionMean = 1
     SwingFilter = 2
-    VisvalingamWhyatt = 7
-
+    SwingFilterDisconnected = 3
+    SlideFilter = 4
+    SimPiece = 5
+    PiecewiseConstantHistogram = 6
+    PiecewiseLinearHistogram = 7
+    VisvalingamWhyatt = 8
 
 # Public Functions.
 def compress(values: List[float], method: Method, error_bound: float) -> bytes:

@@ -41,6 +41,7 @@ pub const Method = enum {
     PoorMansCompressionMidrange,
     PoorMansCompressionMean,
     SwingFilter,
+    SwingFilterDisconnected,
     SlideFilter,
     SimPiece,
     PiecewiseConstantHistogram,
@@ -79,14 +80,21 @@ pub fn compress(
             );
         },
         .SwingFilter => {
-            try swing_slide_filter.compressSwing(
+            try swing_slide_filter.compressSwingFilter(
+                uncompressed_values,
+                &compressed_values,
+                error_bound,
+            );
+        },
+        .SwingFilterDisconnected => {
+            try swing_slide_filter.compressSwingFilterDisconnected(
                 uncompressed_values,
                 &compressed_values,
                 error_bound,
             );
         },
         .SlideFilter => {
-            try swing_slide_filter.compressSlide(
+            try swing_slide_filter.compressSlideFilter(
                 uncompressed_values,
                 &compressed_values,
                 allocator,
@@ -151,8 +159,11 @@ pub fn decompress(
         .PoorMansCompressionMidrange, .PoorMansCompressionMean => {
             try poor_mans_compression.decompress(compressed_values_slice, &decompressed_values);
         },
-        .SwingFilter, .SlideFilter => {
-            try swing_slide_filter.decompress(compressed_values_slice, &decompressed_values);
+        .SwingFilter => {
+            try swing_slide_filter.decompressSwingFilter(compressed_values_slice, &decompressed_values);
+        },
+        .SwingFilterDisconnected, .SlideFilter => {
+            try swing_slide_filter.decompressSlideFilter(compressed_values_slice, &decompressed_values);
         },
         .SimPiece => {
             try sim_piece.decompress(compressed_values_slice, &decompressed_values, allocator);
