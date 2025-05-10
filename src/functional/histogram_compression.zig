@@ -73,6 +73,9 @@ pub fn compressPWCH(
     defer histogram.deinit();
 
     for (uncompressed_values, 0..) |elem, index| {
+        // Check if the current point is NaN or infinite. If so, return an error.
+        if (!math.isFinite(elem)) return Error.InvalidInput;
+
         try histogram.insert(index, elem);
     }
 
@@ -108,6 +111,9 @@ pub fn compressPWLH(
     defer histogram.deinit();
 
     for (uncompressed_values, 0..) |elem, index| {
+        // Check if the current point is NaN or infinite. If so, return an error.
+        if (!math.isFinite(elem)) return Error.InvalidInput;
+
         try histogram.insert(index, elem);
     }
 

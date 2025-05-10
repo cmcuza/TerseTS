@@ -32,6 +32,7 @@ pub const Error = error{
     UnsupportedErrorBound,
     OutOfMemory,
     EmptyConvexHull,
+    InvalidInput,
 };
 
 /// The compression methods in TerseTS.
