@@ -107,6 +107,7 @@ fn errorToInt(err: Error) i32 {
         Error.OutOfMemory => return 5,
         Error.ItemNotFound => return 6,
         Error.EmptyConvexHull => return 7,
+        Error.InvalidInput => return 8,
     }
 }
 

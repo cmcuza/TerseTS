@@ -180,8 +180,20 @@ pub fn replaceNormalValues(
 pub fn generateRandomValues(uncompressed_values: *ArrayList(f64), random: Random) !void {
     for (0..number_of_values) |_| {
         // rand can only generate f64 values in the range [0, 1).
+        const random_value = @as(f64, @bitCast(random.int(u64)));
+        try uncompressed_values.append(random_value);
+    }
+}
+
+/// Generate `number_of_values` of random `f64` values for use in testing using `random` and add
+/// them to `uncompressed_values`. If the value is not finite, it is replaced with zero.
+pub fn generateNumericRandomValues(uncompressed_values: *ArrayList(f64), random: Random) !void {
+    for (0..number_of_values) |_| {
+        // rand can only generate f64 values in the range [0, 1).
         var random_value = @as(f64, @bitCast(random.int(u64)));
         if (!std.math.isFinite(random_value))
+            // Replace non-finite values (e.g., NaN, infinity) with 0.0 to ensure valid test data
+            // and avoid potential issues with downstream operations that may not handle them.
             random_value = 0.0;
 
         try uncompressed_values.append(random_value);
