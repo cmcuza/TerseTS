@@ -31,11 +31,11 @@ const HashedPriorityQueue = @import(
     "../utilities/hashed_priority_queue.zig",
 ).HashedPriorityQueue;
 
-const shared = @import("../utilities/shared_structs.zig");
+const shared_structs = @import("../utilities/shared_structs.zig");
 
-const DiscretePoint = shared.DiscretePoint;
-const LinearFunction = shared.LinearFunction;
-const Segment = shared.Segment;
+const DiscretePoint = shared_structs.DiscretePoint;
+const LinearFunction = shared_structs.LinearFunction;
+const Segment = shared_structs.Segment;
 
 const tester = @import("../tester.zig");
 
@@ -49,7 +49,7 @@ pub fn compress(
     allocator: mem.Allocator,
     error_bound: f32,
 ) Error!void {
-    // If we have 2 or fewer points, store them without compression..
+    // If we have 2 or fewer points, store them without compression.
     if (uncompressed_values.len <= 2) {
         try appendValue(f64, uncompressed_values[0], compressed_values);
         try appendValue(usize, 1, compressed_values);
@@ -252,7 +252,7 @@ const PointAreaHashContext = struct {
 };
 
 /// Comparison function for the `HashedPriorityQueue`. It compares merge errors, and also considers
-///  bucket indices for equality.
+/// bucket indices for equality.
 fn comparePointArea(_: void, point_1: PointArea, point_2: PointArea) math.Order {
     if (point_1.area == point_2.area)
         return math.Order.eq;
