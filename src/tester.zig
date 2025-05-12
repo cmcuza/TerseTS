@@ -189,7 +189,7 @@ pub fn generateRandomValues(uncompressed_values: *ArrayList(f64), random: Random
 /// them to `uncompressed_values`. If the value is not finite, it is replaced with zero.
 pub fn generateFiniteRandomValues(uncompressed_values: *ArrayList(f64), random: Random) !void {
     var index: usize = 0;
-    while (index < number_of_values) {
+    while (index < 20) {
         // rand can only generate f64 values in the range [0, 1), thus using u64.
         const random_value = @as(f64, @bitCast(random.int(u64)));
         // Online add finite values.
@@ -238,7 +238,7 @@ pub fn generateRandomLinearFunction(uncompressed_values: *ArrayList(f64), random
     rand_value = random.float(f64);
     const intercept: f64 = @round((rand_value - 0.5) * 1000) / 100;
 
-    for (0..number_of_values) |x| {
+    for (0..20) |x| {
         rand_value = random.float(f64) - 0.5; // Random noise in the range [-0.5, 0.5).
         const linear_function_value = slope * @as(f64, @floatFromInt(x)) + intercept + rand_value;
         try uncompressed_values.append(linear_function_value);

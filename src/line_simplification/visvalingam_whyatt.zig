@@ -58,7 +58,7 @@ pub fn compress(
     }
 
     if (error_bound < 0) {
-        return Error.IncorrectInput;
+        return Error.UnsupportedErrorBound;
     }
 
     // Initialize a hashed priority queue to store the effective area of triangles formed by every
@@ -170,7 +170,7 @@ pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList
     // The compressed representation is composed of two values after getting the first since all
     // segments are connected. Therefore, the condition checks that after the first value, the rest
     // of the values are in pairs (index, value) and that they are all of type 64-bit float.
-    if ((compressed_values.len - 8) % 16 != 0) return Error.IncorrectInput;
+    if ((compressed_values.len - 8) % 16 != 0) return Error.UnsupportedInput;
 
     const compressed_lines_and_index = mem.bytesAsSlice(f64, compressed_values);
 
@@ -285,7 +285,11 @@ fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)
 
 /// Creates a linear function that passes throught the two points of the `segment` and returns it
 /// in `linear_function`.
-fn createLinearFunction(start_point: DiscretePoint, end_point: DiscretePoint, linear_function: *LinearFunction) void {
+fn createLinearFunction(
+    start_point: DiscretePoint,
+    end_point: DiscretePoint,
+    linear_function: *LinearFunction,
+) void {
     if (end_point.time != start_point.time) {
         const duration: f80 = @floatFromInt(end_point.time - start_point.time);
         linear_function.slope = (end_point.value - start_point.value) / duration;
@@ -361,7 +365,7 @@ test "vw compress and decompress with zero error bound" {
     defer decompressed_values.deinit();
     const error_bound: f32 = 0.0;
 
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0, 1000000, random);
+    try tester.generateFiniteRandomValues(&uncompressed_values, random);
 
     // Call the compress and decompress functions.
     try compress(uncompressed_values.items, &compressed_values, allocator, error_bound);

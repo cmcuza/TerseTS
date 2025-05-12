@@ -37,10 +37,10 @@ const HashedPriorityQueue = @import(
 const shared = @import("../utilities/shared_structs.zig");
 
 const DiscretePoint = shared.DiscretePoint;
-const LinearFunction = shared.LinearFunction;
-const Segment = shared.Segment;
 
 const tester = @import("../tester.zig");
+
+const testing = std.testing;
 
 /// Compresses `uncompressed_values` using the "Bottom-Up" simplification algorithm.
 /// This algorithm iteratively merges points to minimize the sum of squared errors,
@@ -101,32 +101,87 @@ pub fn compress(
         // Now is safe to pop the point from the heap.
         _ = try heap.pop();
 
-        placeholder_segment_cost = min_segment.left_seg;
-        const left_seg: SegmentMergeCost = try heap.get(try heap.getIndex(placeholder_segment_cost));
-
-        placeholder_segment_cost.index = min_segment.right_point;
-        const right_seg: SegmentMergeCost = try heap.get(try heap.getIndex(placeholder_segment_cost));
-
+        placeholder_segment_cost.index = min_segment.right_seg;
+        var right_seg: SegmentMergeCost = try heap.get(try heap.getIndex(placeholder_segment_cost));
         right_seg.seg_start = min_segment.seg_start;
-        right_seg.left_seg = left_seg.index;
-        left_seg.right_seg = right_seg.index;
 
-        if (right_seg.seg_start != 0) {
+        if (min_segment.seg_start != 0) {
+            placeholder_segment_cost.index = min_segment.left_seg;
+            var left_seg: SegmentMergeCost = try heap.get(try heap.getIndex(placeholder_segment_cost));
+            right_seg.left_seg = left_seg.index;
+            left_seg.right_seg = right_seg.index;
             // Compute the merge cost of merging the previous and current segments.
             const merge_cost = mergeCost(uncompressed_values, left_seg, right_seg);
-            const new_left_seg = left_seg;
-            new_left_seg.cost = merge_cost;
-            try heap.update(left_seg, new_left_seg);
+            left_seg.cost = merge_cost;
+            try heap.update(left_seg, left_seg);
         }
 
         if (right_seg.seg_end != uncompressed_values.len - 1) {
             // Compute the merge cost of merging the previous and current segments.
-            placeholder_segment_cost = right_seg.right_seg;
+            placeholder_segment_cost.index = right_seg.right_seg;
             const right_to_right_seg = try heap.get(try heap.getIndex(placeholder_segment_cost));
             const merge_cost = mergeCost(uncompressed_values, right_seg, right_to_right_seg);
-            const new_right_seg = right_seg;
-            new_right_seg.cost = merge_cost;
-            try heap.update(right_seg, new_right_seg);
+            right_seg.cost = merge_cost;
+        }
+        try heap.update(right_seg, right_seg);
+    }
+
+    // Sort remaining points by original index to preserve order.
+    std.mem.sort(SegmentMergeCost, heap.items[0..heap.len], {}, SegmentMergeCost.firstThan);
+
+    // Output compressed series: (seg_start, index, end_value) pairs.
+    for (0..heap.len) |index| {
+        const seg_start = heap.items[index].seg_start;
+        const seg_end = heap.items[index].seg_end;
+        try appendValue(f64, uncompressed_values[seg_start], compressed_values);
+        try appendValue(usize, seg_end, compressed_values);
+        try appendValue(f64, uncompressed_values[seg_end], compressed_values);
+    }
+
+    return;
+}
+
+/// Decompress `compressed_values` produced by "Bottom-Up". The function writes the result to
+/// `decompressed_values`. If an error occurs it is returned.
+pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList(f64)) Error!void {
+    // The compressed representation is composed of three values: (start_value, end_time, end_value)
+    // all of type 64-bit float.
+    if (compressed_values.len % 24 != 0) return Error.UnsupportedInput;
+
+    const compressed_lines_and_index = mem.bytesAsSlice(f64, compressed_values);
+
+    var first_timestamp: usize = 0;
+    var index: usize = 0;
+
+    while (index < compressed_lines_and_index.len) : (index += 3) {
+        const start_point = .{ .time = first_timestamp, .value = compressed_lines_and_index[index] };
+        const end_point = .{
+            .time = @as(usize, @bitCast(compressed_lines_and_index[index + 1])),
+            .value = compressed_lines_and_index[index + 2],
+        };
+
+        // Check if the segment has only two points. If so, we can directly append their values.
+        if (start_point.time + 1 != end_point.time) {
+            const duration: f64 = @floatFromInt(end_point.time - start_point.time);
+
+            const slope = (end_point.value - start_point.value) / duration;
+            const intercept = start_point.value - slope *
+                @as(f64, @floatFromInt(start_point.time));
+
+            try decompressed_values.append(start_point.value);
+            var current_timestamp: usize = start_point.time + 1;
+
+            // Interpolate the values between the start and end points of the current segment.
+            while (current_timestamp < end_point.time) : (current_timestamp += 1) {
+                const y: f64 = slope * @as(f64, @floatFromInt(current_timestamp)) + intercept;
+                try decompressed_values.append(y);
+            }
+            try decompressed_values.append(end_point.value);
+            first_timestamp = current_timestamp + 1;
+        } else {
+            // If the start and end points are the same, append the start point value directly.
+            try decompressed_values.append(start_point.value);
+            first_timestamp += 1;
         }
     }
 }
@@ -227,6 +282,9 @@ fn buildInitialPairwiseSegmentCost(
         previous_seg = current_seg;
     }
 
+    // Insert the previous segment which is probably the last one and has infinite cost.
+    try heap.add(previous_seg);
+
     // If the last segment is not a pair, we need to add it to the heap.
     if (seg_start < uncompressed_values.len) {
         var last_seg = SegmentMergeCost{
@@ -296,4 +354,80 @@ fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)
         },
         else => @compileError("Unsupported type for append value function"),
     }
+}
+
+// test "bottom-up can compress and decompress with zero error bound" {
+//     // Initialize a random number generator.
+//     const seed: u64 = @bitCast(time.milliTimestamp());
+//     var prng = std.Random.DefaultPrng.init(seed);
+//     const random = prng.random();
+
+//     const allocator = std.testing.allocator;
+
+//     // Output buffer.
+//     var uncompressed_values = ArrayList(f64).init(allocator);
+//     defer uncompressed_values.deinit();
+//     var compressed_values = ArrayList(u8).init(allocator);
+//     defer compressed_values.deinit();
+//     var decompressed_values = ArrayList(f64).init(allocator);
+//     defer decompressed_values.deinit();
+//     const error_bound: f32 = 0.0;
+
+//     try tester.generateFiniteRandomValues(&uncompressed_values, random);
+
+//     for (uncompressed_values.items) |value| {
+//         std.debug.print(" {} ", .{value});
+//     }
+//     std.debug.print("\n", .{});
+//     // Call the compress and decompress functions.
+//     try compress(uncompressed_values.items, &compressed_values, allocator, error_bound);
+//     try decompress(compressed_values.items, &decompressed_values);
+
+//     if (uncompressed_values.items.len != decompressed_values.items.len) {
+//         std.debug.print("Size Here {} {}\n", .{ uncompressed_values.items.len, decompressed_values.items.len });
+//     }
+
+//     for (0..uncompressed_values.items.len) |index| {
+//         const uncompressed_value = uncompressed_values.items[index];
+//         const decompressed_value = decompressed_values.items[index];
+//         if (@abs(uncompressed_value - decompressed_value) > error_bound)
+//             std.debug.print("{} {} \n", .{ uncompressed_value, decompressed_value });
+//     }
+
+//     // try std.testing.expect(tersets.isWithinErrorBound(
+//     //     uncompressed_values.items,
+//     //     decompressed_values.items,
+//     //     error_bound,
+//     // ));
+// }
+
+test "bottom-up random lines and random error bound compress and decompress" {
+    const allocator = testing.allocator;
+
+    var uncompressed_values = ArrayList(f64).init(allocator);
+    defer uncompressed_values.deinit();
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+    var decompressed_values = ArrayList(f64).init(allocator);
+    defer decompressed_values.deinit();
+
+    const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0, 1, undefined);
+
+    // const max_lines: usize = @intFromFloat(@round(tester.generateBoundedRandomValue(f64, 4, 25, undefined)));
+
+    // for (0..max_lines) |_| {
+    //     // Generate a random linear function and add it to the uncompressed values.
+    //     try tester.generateRandomLinearFunction(&uncompressed_values, undefined);
+    // }
+
+    try tester.generateRandomLinearFunction(&uncompressed_values, undefined);
+
+    try compress(
+        uncompressed_values.items,
+        &compressed_values,
+        allocator,
+        error_bound,
+    );
+
+    try decompress(compressed_values.items, &decompressed_values);
 }

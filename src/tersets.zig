@@ -22,7 +22,7 @@ const poor_mans_compression = @import("functional/poor_mans_compression.zig");
 const swing_slide_filter = @import("functional/swing_slide_filter.zig");
 const sim_piece = @import("functional/sim_piece.zig");
 const piecewise_histogram = @import("functional/histogram_compression.zig");
-const vw = @import("line_simplication/visvalingam_whyatt.zig");
+const vw = @import("line_simplification/visvalingam_whyatt.zig");
 const bottom_up = @import("line_simplification/bottom_up.zig");
 
 /// The errors that can occur in TerseTS.
