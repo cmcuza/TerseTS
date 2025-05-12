@@ -84,7 +84,6 @@ pub fn compress(
             const max_error = try convex_hull.computeMaxError(line);
 
             if (max_error <= error_bound) {
-
                 // If all points are within error_bound -> segment still valid
                 last_valid_end = i;
                 last_valid_line = line;
@@ -213,11 +212,16 @@ pub fn findABCOptimalSegment(convex_hull: *ConvexHull, allocator: mem.Allocator)
     // Once finished, line from A to B is the optimal approximation
     const start = convex_hull.at(A_index);
     const end = convex_hull.at(A_index + 1);
+    const c = convex_hull.at(A_index + 1);
 
     const delta_time = @as(f64, @floatFromInt(end.time - start.time));
 
     const slope = (end.value - start.value) / delta_time;
-    const intercept = start.value - slope * @as(f64, @floatFromInt(start.time));
+
+    const pred = slope * (@as(f64, @floatFromInt(c.time - start.time))) + start.value;
+    const deviation = @abs(pred - c.value);
+
+    const intercept = start.value - slope * @as(f64, @floatFromInt(start.time)) + deviation / 2;
 
     return LinearFunction{ .slope = slope, .intercept = intercept };
 }
@@ -251,7 +255,13 @@ fn computeDeviation(A: DiscretePoint, B: DiscretePoint, C: DiscretePoint) f64 {
     const delta_time = @as(f64, @floatFromInt(B.time - A.time));
     const slope = (B.value - A.value) / delta_time;
 
-    const pred = slope * (@as(f64, @floatFromInt(C.time - A.time))) + A.value;
+    // Project point C vertically onto the line defined by A and B.
+    // The expression (time_C - time_A) may be negative if C is x-external (i.e., C.time < A.time),
+    // which is valid and expected. We use floating-point subtraction to avoid usize underflow.
+    const time_A = @as(f64, @floatFromInt(A.time));
+    const time_C = @as(f64, @floatFromInt(C.time));
+
+    const pred = slope * (time_C - time_A) + A.value;
 
     // Deviation of point C from line l_i
     return @abs(pred - C.value);
