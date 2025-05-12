@@ -238,7 +238,7 @@ pub fn generateRandomLinearFunction(uncompressed_values: *ArrayList(f64), random
     rand_value = random.float(f64);
     const intercept: f64 = @round((rand_value - 0.5) * 1000) / 100;
 
-    for (0..20) |x| {
+    for (0..number_of_values) |x| {
         rand_value = random.float(f64) - 0.5; // Random noise in the range [-0.5, 0.5).
         const linear_function_value = slope * @as(f64, @floatFromInt(x)) + intercept + rand_value;
         try uncompressed_values.append(linear_function_value);

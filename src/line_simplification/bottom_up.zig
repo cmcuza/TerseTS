@@ -17,7 +17,7 @@
 //! An online algorithm for segmenting time series.
 //! IEEE ICDM, pp. 289-296, 2001.
 //! https://doi.org/10.1109/ICDM.2001.989531"
-//! This specific implementation uses the "Root-Sum-of-Squared-Errors"
+//! This specific implementation uses the "Root-Mean-Squared-Errors (RMSE)"
 //! as the cost function. Future work may include other cost functions.
 
 const std = @import("std");
@@ -34,9 +34,10 @@ const HashedPriorityQueue = @import(
     "../utilities/hashed_priority_queue.zig",
 ).HashedPriorityQueue;
 
-const shared = @import("../utilities/shared_structs.zig");
+const shared_structs = @import("../utilities/shared_structs.zig");
 
-const DiscretePoint = shared.DiscretePoint;
+const DiscretePoint = shared_structs.DiscretePoint;
+const LinearFunction = shared_structs.LinearFunction;
 
 const tester = @import("../tester.zig");
 
@@ -77,6 +78,7 @@ pub fn compress(
     ).init(allocator, {});
     defer heap.deinit();
 
+    // Compute all pairwise merging cost of the segments.
     try buildInitialPairwiseSegmentCost(&heap, uncompressed_values);
 
     // Placeholder for the segment cost to be used in the loop to search for neighboring segments.
@@ -101,28 +103,55 @@ pub fn compress(
         // Now is safe to pop the point from the heap.
         _ = try heap.pop();
 
+        // Update the index of the placeholder segment to the right segment of the current minimum segment.
         placeholder_segment_cost.index = min_segment.right_seg;
+
+        // Retrieve the right segment from the heap using its index.
         var right_seg: SegmentMergeCost = try heap.get(try heap.getIndex(placeholder_segment_cost));
+
+        // Update the start of the right segment to include the start of the merged segment.
         right_seg.seg_start = min_segment.seg_start;
 
+        // If the current minimum segment is not the first segment, update the left segment.
         if (min_segment.seg_start != 0) {
+            // Update the index of the placeholder segment to the left segment of the current minimum segment.
             placeholder_segment_cost.index = min_segment.left_seg;
+
+            // Retrieve the left segment from the heap using its index.
             var left_seg: SegmentMergeCost = try heap.get(try heap.getIndex(placeholder_segment_cost));
+
+            // Update the right segment's left neighbor to the left segment's index.
             right_seg.left_seg = left_seg.index;
+
+            // Update the left segment's right neighbor to the right segment's index.
             left_seg.right_seg = right_seg.index;
-            // Compute the merge cost of merging the previous and current segments.
+
+            // Compute the merge cost of merging the left and right segments.
             const merge_cost = mergeCost(uncompressed_values, left_seg, right_seg);
+
+            // Update the cost of the left segment with the computed merge cost.
             left_seg.cost = merge_cost;
+
+            // Update the left segment in the heap.
             try heap.update(left_seg, left_seg);
         }
 
+        // If the right segment is not the last segment, update its merge cost with its right neighbor.
         if (right_seg.seg_end != uncompressed_values.len - 1) {
-            // Compute the merge cost of merging the previous and current segments.
+            // Update the index of the placeholder segment to the right neighbor of the right segment.
             placeholder_segment_cost.index = right_seg.right_seg;
+
+            // Retrieve the right neighbor of the right segment from the heap.
             const right_to_right_seg = try heap.get(try heap.getIndex(placeholder_segment_cost));
+
+            // Compute the merge cost of merging the right segment with its right neighbor.
             const merge_cost = mergeCost(uncompressed_values, right_seg, right_to_right_seg);
+
+            // Update the cost of the right segment with the computed merge cost.
             right_seg.cost = merge_cost;
         }
+
+        // Update the right segment in the heap.
         try heap.update(right_seg, right_seg);
     }
 
@@ -133,9 +162,21 @@ pub fn compress(
     for (0..heap.len) |index| {
         const seg_start = heap.items[index].seg_start;
         const seg_end = heap.items[index].seg_end;
-        try appendValue(f64, uncompressed_values[seg_start], compressed_values);
-        try appendValue(usize, seg_end, compressed_values);
-        try appendValue(f64, uncompressed_values[seg_end], compressed_values);
+
+        if (seg_start + 1 < seg_end) {
+            try appendValue(f64, uncompressed_values[seg_start], compressed_values);
+            try appendValue(usize, seg_end, compressed_values);
+            try appendValue(f64, uncompressed_values[seg_end], compressed_values);
+        } else {
+            const rmse_line = computeLinearRegression(uncompressed_values, seg_start, seg_end);
+            const slope: f64 = @floatCast(rmse_line.slope);
+            const intercept: f64 = @floatCast(rmse_line.slope);
+            const start_value = slope * @as(f64, @floatFromInt(seg_start)) + intercept;
+            const end_value = slope * @as(f64, @floatFromInt(seg_end)) + intercept;
+            try appendValue(f64, start_value, compressed_values);
+            try appendValue(usize, seg_end, compressed_values);
+            try appendValue(f64, end_value, compressed_values);
+        }
     }
 
     return;
@@ -179,9 +220,11 @@ pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList
             try decompressed_values.append(end_point.value);
             first_timestamp = current_timestamp + 1;
         } else {
-            // If the start and end points are the same, append the start point value directly.
+            // If the start and end points are the distance 1,
+            // append the start point and end points directly.
             try decompressed_values.append(start_point.value);
-            first_timestamp += 1;
+            try decompressed_values.append(end_point.value);
+            first_timestamp += 2;
         }
     }
 }
@@ -245,7 +288,7 @@ fn buildInitialPairwiseSegmentCost(
         SegmentMergeCostHashContext,
     ),
     uncompressed_values: []const f64,
-) !void {
+) Error!void {
     var seg_id: usize = 1;
     var seg_start: usize = 2;
 
@@ -305,43 +348,66 @@ fn buildInitialPairwiseSegmentCost(
 fn mergeCost(uncompressed_values: []const f64, seg_one: SegmentMergeCost, seg_two: SegmentMergeCost) f64 {
     const merged_start = @min(seg_one.seg_start, seg_two.seg_start);
     const merged_end = @max(seg_one.seg_end, seg_two.seg_end);
-    return computeRSSE(uncompressed_values, merged_start, merged_end);
+    return computeRMSE(uncompressed_values, merged_start, merged_end);
 }
 
-fn computeRSSE(uncompressed_values: []const f64, seg_start: usize, seg_end: usize) f64 {
+/// Compute the linear regression that minimizes the Root-Mean-Squared-Errors (RMSE).
+fn computeLinearRegression(values: []const f64, seg_start: usize, seg_end: usize) LinearFunction {
+    // Calculate the length of the segment.
     const seg_len: f64 = @floatFromInt(seg_end - seg_start + 1);
-    if (seg_len <= 1) return 0.0;
+    if (seg_len == 1) return LinearFunction{ .slope = 0, .intercept = values[seg_start] }; // If the segment has one or no points, return zero error.
 
+    // Initialize variables for summation.
     var sum_x: f64 = 0;
     var sum_y: f64 = 0;
     var sum_x2: f64 = 0;
     var sum_xy: f64 = 0;
 
+    // Compute the sums required for linear regression.
     var i: usize = seg_start;
     while (i <= seg_end) : (i += 1) {
-        const x: f64 = @floatFromInt(i);
-        const y: f64 = uncompressed_values[i];
+        const x: f64 = @floatFromInt(i); // Independent variable (index).
+        const y: f64 = values[i]; // Dependent variable (value).
         sum_x += x;
         sum_y += y;
         sum_x2 += x * x;
         sum_xy += x * y;
     }
 
+    // Calculate the variance of x and the covariance of x and y.
     const var_x: f64 = sum_x2 - (sum_x * sum_x / seg_len);
     const cov_xy = sum_xy - (sum_x * sum_y / seg_len);
+
+    // Compute the slope and intercept of the best-fit line.
     const slope = cov_xy / var_x;
     const mean_x = sum_x / seg_len;
     const mean_y = sum_y / seg_len;
     const intercept = mean_y - slope * mean_x;
+    return LinearFunction{ .slope = slope, .intercept = intercept };
+}
 
+/// Computes the Root-Mean-Squared-Errors (RMSE) for a segment of the `uncompressed_values`.
+/// This function calculates the error between the actual values and the predicted values
+/// based on a linear regression model fitted to the segment defined by `seg_start` and `seg_end`.
+fn computeRMSE(uncompressed_values: []const f64, seg_start: usize, seg_end: usize) f64 {
+    const seg_len: f64 = @floatFromInt(seg_end - seg_start + 1);
+    if (seg_len <= 1) return 0.0; // If the segment has one or no points, return zero error.
+
+    const rmse_line = computeLinearRegression(uncompressed_values, seg_start, seg_end);
+
+    const slope: f64 = @floatCast(rmse_line.slope);
+    const intercept: f64 = @floatCast(rmse_line.intercept);
+    // Calculate the sum of squared errors (SSE) between actual and predicted values.
     var sse: f64 = 0;
-    i = seg_start;
+    var i = seg_start;
     while (i <= seg_end) : (i += 1) {
-        const pred = slope * @as(f64, @floatFromInt(i)) + intercept;
-        const diff = uncompressed_values[i] - pred;
-        sse += diff * diff;
+        const pred = slope * @as(f64, @floatFromInt(i)) + intercept; // Predicted value.
+        const diff = uncompressed_values[i] - pred; // Difference between actual and predicted.
+        sse += diff * diff; // Accumulate squared differences.
     }
-    return std.math.sqrt(sse);
+
+    // Return the RMSE.
+    return std.math.sqrt(sse / seg_len);
 }
 
 /// Append `value` of `type` determined at compile time to `compressed_values`.
@@ -356,50 +422,41 @@ fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)
     }
 }
 
-// test "bottom-up can compress and decompress with zero error bound" {
-//     // Initialize a random number generator.
-//     const seed: u64 = @bitCast(time.milliTimestamp());
-//     var prng = std.Random.DefaultPrng.init(seed);
-//     const random = prng.random();
+/// Test if the RMSE of the linear regression line that fits the points in the segment in `values`
+/// is within the `error_bound`.
+pub fn testRMSEisWithinErrorBound(
+    values: []const f64,
+    error_bound: f32,
+) !void {
+    // At least two points are needed to form a line.
+    if (values.len < 2) return;
 
-//     const allocator = std.testing.allocator;
+    const rmse = computeRMSE(values, 0, values.len - 1);
+    try std.testing.expect(rmse <= error_bound);
+}
 
-//     // Output buffer.
-//     var uncompressed_values = ArrayList(f64).init(allocator);
-//     defer uncompressed_values.deinit();
-//     var compressed_values = ArrayList(u8).init(allocator);
-//     defer compressed_values.deinit();
-//     var decompressed_values = ArrayList(f64).init(allocator);
-//     defer decompressed_values.deinit();
-//     const error_bound: f32 = 0.0;
+test "bottom-up can compress and decompress with zero error bound" {
+    const allocator = std.testing.allocator;
 
-//     try tester.generateFiniteRandomValues(&uncompressed_values, random);
+    // Output buffer.
+    var uncompressed_values = ArrayList(f64).init(allocator);
+    defer uncompressed_values.deinit();
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+    var decompressed_values = ArrayList(f64).init(allocator);
+    defer decompressed_values.deinit();
+    const error_bound: f32 = 0.0;
 
-//     for (uncompressed_values.items) |value| {
-//         std.debug.print(" {} ", .{value});
-//     }
-//     std.debug.print("\n", .{});
-//     // Call the compress and decompress functions.
-//     try compress(uncompressed_values.items, &compressed_values, allocator, error_bound);
-//     try decompress(compressed_values.items, &decompressed_values);
+    // Bottom Up cannot handle very large value due to numerical issues with `math.order()`.
+    try tester.generateBoundedRandomValues(&uncompressed_values, 0, 1000000, undefined);
 
-//     if (uncompressed_values.items.len != decompressed_values.items.len) {
-//         std.debug.print("Size Here {} {}\n", .{ uncompressed_values.items.len, decompressed_values.items.len });
-//     }
+    // Call the compress and decompress functions.
+    try compress(uncompressed_values.items, &compressed_values, allocator, error_bound);
+    try decompress(compressed_values.items, &decompressed_values);
 
-//     for (0..uncompressed_values.items.len) |index| {
-//         const uncompressed_value = uncompressed_values.items[index];
-//         const decompressed_value = decompressed_values.items[index];
-//         if (@abs(uncompressed_value - decompressed_value) > error_bound)
-//             std.debug.print("{} {} \n", .{ uncompressed_value, decompressed_value });
-//     }
-
-//     // try std.testing.expect(tersets.isWithinErrorBound(
-//     //     uncompressed_values.items,
-//     //     decompressed_values.items,
-//     //     error_bound,
-//     // ));
-// }
+    // Check if the decompressed values have the same lenght as the compressed ones.
+    try std.testing.expectEqual(uncompressed_values.items.len, decompressed_values.items.len);
+}
 
 test "bottom-up random lines and random error bound compress and decompress" {
     const allocator = testing.allocator;
@@ -413,14 +470,11 @@ test "bottom-up random lines and random error bound compress and decompress" {
 
     const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0, 1, undefined);
 
-    // const max_lines: usize = @intFromFloat(@round(tester.generateBoundedRandomValue(f64, 4, 25, undefined)));
-
-    // for (0..max_lines) |_| {
-    //     // Generate a random linear function and add it to the uncompressed values.
-    //     try tester.generateRandomLinearFunction(&uncompressed_values, undefined);
-    // }
-
-    try tester.generateRandomLinearFunction(&uncompressed_values, undefined);
+    const max_lines: usize = @intFromFloat(@round(tester.generateBoundedRandomValue(f64, 4, 25, undefined)));
+    for (0..max_lines) |_| {
+        // Generate a random linear function and add it to the uncompressed values.
+        try tester.generateRandomLinearFunction(&uncompressed_values, undefined);
+    }
 
     try compress(
         uncompressed_values.items,
@@ -430,4 +484,24 @@ test "bottom-up random lines and random error bound compress and decompress" {
     );
 
     try decompress(compressed_values.items, &decompressed_values);
+
+    // Check if the decompressed values have the same lenght as the compressed ones.
+    try std.testing.expectEqual(uncompressed_values.items.len, decompressed_values.items.len);
+
+    // In theory, the linear interpolation of all segments formed by the slices of preserved points, should have a RMSE
+    // within the error bound otherwise there a mistake. Since the error bound and the poitns are unknown, we need to
+    // used the compressed representation to access each of the points preserved and their index `current_point_index`.
+    // Then, the RMSE of the linear regression of the segment formed by the slices from
+    // `previous_point_index`..`current_point_index` should be less than `error_bound`.
+    const compressed_representation = mem.bytesAsSlice(f64, compressed_values.items);
+
+    var index: usize = 0;
+    var previous_point_index: usize = 0;
+    while (index < compressed_representation.len - 1) : (index += 3) {
+        const current_point_index = @min(@as(usize, @bitCast(compressed_representation[index + 1])), uncompressed_values.items.len - 1);
+
+        // Check if the point is within the error bound.
+        try testRMSEisWithinErrorBound(uncompressed_values.items[previous_point_index .. current_point_index + 1], error_bound);
+        previous_point_index = current_point_index + 1;
+    }
 }

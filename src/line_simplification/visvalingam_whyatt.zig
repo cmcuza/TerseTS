@@ -58,11 +58,7 @@ pub fn compress(
     }
 
     if (error_bound < 0) {
-<<<<<<< HEAD
-        return Error.UnsupportedErrorBound;
-=======
         return Error.UnsupportedInput;
->>>>>>> dev/add-vw-algorithm
     }
 
     // Initialize a hashed priority queue to store the effective area of triangles formed by every
@@ -283,27 +279,6 @@ fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)
     }
 }
 
-<<<<<<< HEAD
-/// Creates a linear function that passes throught the two points of the `segment` and returns it
-/// in `linear_function`.
-fn createLinearFunction(
-    start_point: DiscretePoint,
-    end_point: DiscretePoint,
-    linear_function: *LinearFunction,
-) void {
-    if (end_point.time != start_point.time) {
-        const duration: f80 = @floatFromInt(end_point.time - start_point.time);
-        linear_function.slope = (end_point.value - start_point.value) / duration;
-        linear_function.intercept = start_point.value - linear_function.slope *
-            @as(f80, @floatFromInt(start_point.time));
-    } else {
-        linear_function.slope = 0.0;
-        linear_function.intercept = start_point.value;
-    }
-}
-
-=======
->>>>>>> dev/add-vw-algorithm
 /// Update the area of the `neighbor` point in the `heap`. The `left_index`, `center_index` and
 /// `right_index` are the indices of the points in the `uncompressed_values` array. The
 /// `uncompressed_values` are needed to calculate the area of the triangles formed by the three points.
@@ -368,7 +343,7 @@ test "vw compress and decompress with zero error bound" {
     defer decompressed_values.deinit();
     const error_bound: f32 = 0.0;
 
-    try tester.generateFiniteRandomValues(&uncompressed_values, random);
+    try tester.generateBoundedRandomValues(&uncompressed_values, 0, 1000000, random);
 
     // Call the compress and decompress functions.
     try compress(uncompressed_values.items, &compressed_values, allocator, error_bound);
