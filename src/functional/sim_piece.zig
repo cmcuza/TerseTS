@@ -192,12 +192,15 @@ fn computeSegmentsMetadata(
     uncompressed_values: []const f64,
     segments_metadata: *ArrayList(SegmentMetadata),
     error_bound: f32,
-) !void {
+) Error!void {
     // Adjust the error bound to avoid exceeding it during decompression.
     const adjusted_error_bound = error_bound - shared.ErrorBoundMargin;
 
     var upper_bound_slope: f64 = math.floatMax(f64);
     var lower_bound_slope: f64 = -math.floatMax(f64);
+
+    // Check if the first point is NaN or infinite. If so, return an error.
+    if (!math.isFinite(uncompressed_values[0])) return Error.UnsupportedInput;
 
     // Initialize the `start_point` with the first uncompressed value.
     var start_point: DiscretePoint = .{ .time = 0, .value = uncompressed_values[0] };
@@ -209,6 +212,10 @@ fn computeSegmentsMetadata(
 
     // The first point is already part of `current_segment`, the next point is at index one.
     for (1..uncompressed_values.len) |current_timestamp| {
+
+        // Check if the current point is NaN or infinite. If so, return an error.
+        if (!math.isFinite(uncompressed_values[current_timestamp])) return Error.UnsupportedInput;
+
         const end_point: DiscretePoint = .{
             .time = current_timestamp,
             .value = uncompressed_values[current_timestamp],
