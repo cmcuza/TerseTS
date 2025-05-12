@@ -74,7 +74,7 @@ pub fn compressPWCH(
 
     for (uncompressed_values, 0..) |elem, index| {
         // Check if the current point is NaN or infinite. If so, return an error.
-        if (!math.isFinite(elem)) return Error.InvalidInput;
+        if (!math.isFinite(elem)) return Error.UnsupportedInput;
 
         try histogram.insert(index, elem);
     }
@@ -112,7 +112,7 @@ pub fn compressPWLH(
 
     for (uncompressed_values, 0..) |elem, index| {
         // Check if the current point is NaN or infinite. If so, return an error.
-        if (!math.isFinite(elem)) return Error.InvalidInput;
+        if (!math.isFinite(elem)) return Error.UnsupportedInput;
 
         try histogram.insert(index, elem);
     }
@@ -149,7 +149,7 @@ pub fn decompressPWCH(
 ) Error!void {
     // The compressed representation is pairs containing a 64-bit float value
     // and 64-bit integer end index.
-    if (compressed_values.len % 16 != 0) return Error.IncorrectInput;
+    if (compressed_values.len % 16 != 0) return Error.UnsupportedInput;
 
     const compressed_values_and_index = mem.bytesAsSlice(f64, compressed_values);
 
@@ -173,7 +173,7 @@ pub fn decompressPWLH(
 ) Error!void {
     // The compressed representation is composed of three values: (start_value, end_value, end_time)
     // all of type 64-bit float.
-    if (compressed_values.len % 24 != 0) return Error.IncorrectInput;
+    if (compressed_values.len % 24 != 0) return Error.UnsupportedInput;
 
     const compressed_lines_and_index = mem.bytesAsSlice(f64, compressed_values);
 

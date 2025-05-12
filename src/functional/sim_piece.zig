@@ -200,7 +200,7 @@ fn computeSegmentsMetadata(
     var lower_bound_slope: f64 = -math.floatMax(f64);
 
     // Check if the first point is NaN or infinite. If so, return an error.
-    if (!math.isFinite(uncompressed_values[0])) return Error.InvalidInput;
+    if (!math.isFinite(uncompressed_values[0])) return Error.UnsupportedInput;
 
     // Initialize the `start_point` with the first uncompressed value.
     var start_point: DiscretePoint = .{ .time = 0, .value = uncompressed_values[0] };
@@ -214,7 +214,7 @@ fn computeSegmentsMetadata(
     for (1..uncompressed_values.len) |current_timestamp| {
 
         // Check if the current point is NaN or infinite. If so, return an error.
-        if (!math.isFinite(uncompressed_values[current_timestamp])) return Error.InvalidInput;
+        if (!math.isFinite(uncompressed_values[current_timestamp])) return Error.UnsupportedInput;
 
         const end_point: DiscretePoint = .{
             .time = current_timestamp,

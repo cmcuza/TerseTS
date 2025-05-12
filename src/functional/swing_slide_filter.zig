@@ -75,7 +75,7 @@ pub fn compressSwingFilter(
     var new_lower_bound: LinearFunction = .{ .slope = undefined, .intercept = undefined };
 
     // Check if the first two points are NaN or infinite. If so, return an error.
-    if (!(math.isFinite(uncompressed_values[0]) and math.isFinite(uncompressed_values[1]))) return Error.InvalidInput;
+    if (!(math.isFinite(uncompressed_values[0]) and math.isFinite(uncompressed_values[1]))) return Error.UnsupportedInput;
 
     // Initialize the current segment with first two points.
     var current_segment: Segment = .{
@@ -102,7 +102,7 @@ pub fn compressSwingFilter(
         var end_value: f64 = 0;
 
         // Check if the current point is NaN or infinite. If so, return an error.
-        if (!math.isFinite(uncompressed_values[current_timestamp])) return Error.InvalidInput;
+        if (!math.isFinite(uncompressed_values[current_timestamp])) return Error.UnsupportedInput;
 
         if ((upper_limit < (uncompressed_values[current_timestamp] - adjusted_error_bound)) or
             (lower_limit > (uncompressed_values[current_timestamp] + adjusted_error_bound)))
@@ -269,7 +269,7 @@ pub fn compressSlideFilter(
     var new_lower_bound: LinearFunction = .{ .slope = undefined, .intercept = undefined };
 
     // Check if the first two points are NaN or infinite. If so, return an error.
-    if (!(math.isFinite(uncompressed_values[0]) and math.isFinite(uncompressed_values[1]))) return Error.InvalidInput;
+    if (!(math.isFinite(uncompressed_values[0]) and math.isFinite(uncompressed_values[1]))) return Error.UnsupportedInput;
 
     // Initialize the current segment with first two points.
     var current_segment: Segment = .{
@@ -307,7 +307,7 @@ pub fn compressSlideFilter(
         );
 
         // Check if the point at the current timestamp is NaN or infinite. If so, return an error.
-        if (!math.isFinite(uncompressed_values[current_timestamp])) return Error.InvalidInput;
+        if (!math.isFinite(uncompressed_values[current_timestamp])) return Error.UnsupportedInput;
 
         if ((upper_limit < (uncompressed_values[current_timestamp] - adjusted_error_bound)) or
             (lower_limit > (uncompressed_values[current_timestamp] + adjusted_error_bound)))
@@ -360,7 +360,7 @@ pub fn compressSlideFilter(
             if (current_timestamp + 1 < uncompressed_values.len) {
 
                 // Check if the point at the current timestamp is NaN or infinite. If so, return an error.
-                if (!math.isFinite(uncompressed_values[current_timestamp + 1])) return Error.InvalidInput;
+                if (!math.isFinite(uncompressed_values[current_timestamp + 1])) return Error.UnsupportedInput;
 
                 // Update the current segment.
                 current_segment.end_point = .{
@@ -471,7 +471,7 @@ pub fn compressSwingFilterDisconnected(
         error_bound;
 
     // Check if the first two points are NaN or infinite. If so, return an error.
-    if (!(math.isFinite(uncompressed_values[0]) and math.isFinite(uncompressed_values[1]))) return Error.InvalidInput;
+    if (!(math.isFinite(uncompressed_values[0]) and math.isFinite(uncompressed_values[1]))) return Error.UnsupportedInput;
 
     // Create the upper lower and upper bounds used throughout the function. They are uninitialized
     // as they will be modified throughout the function.
@@ -500,7 +500,7 @@ pub fn compressSwingFilterDisconnected(
         const lower_limit = evaluateLinearFunctionAtTime(lower_bound, usize, current_timestamp);
 
         // Check if the current point is NaN or infinite. If so, return an error.
-        if (!math.isFinite(uncompressed_values[current_timestamp])) return Error.InvalidInput;
+        if (!math.isFinite(uncompressed_values[current_timestamp])) return Error.UnsupportedInput;
 
         if ((upper_limit < (uncompressed_values[current_timestamp] - adjusted_error_bound)) or
             (lower_limit > (uncompressed_values[current_timestamp] + adjusted_error_bound)))
@@ -549,7 +549,7 @@ pub fn compressSwingFilterDisconnected(
             if (current_timestamp + 1 < uncompressed_values.len) {
 
                 // Check if the current point is NaN or infinite. If so, return an error.
-                if (!math.isFinite(uncompressed_values[current_timestamp + 1])) return Error.InvalidInput;
+                if (!math.isFinite(uncompressed_values[current_timestamp + 1])) return Error.UnsupportedInput;
 
                 current_segment.end_point.time = current_timestamp + 1;
                 current_segment.end_point.value = uncompressed_values[current_timestamp + 1];
@@ -651,7 +651,7 @@ pub fn decompressSwingFilter(
     // The compressed representation is composed of two values after extracting the first since all
     // segments are connected. Therefore, the condition checks that after the first value, the rest
     // of the values are in pairs (end_value, end_time) and that they are all of type 64-bit float.
-    if ((compressed_values.len - 8) % 16 != 0) return Error.IncorrectInput;
+    if ((compressed_values.len - 8) % 16 != 0) return Error.UnsupportedInput;
 
     const compressed_lines_and_index = mem.bytesAsSlice(f64, compressed_values);
 
@@ -710,7 +710,7 @@ pub fn decompressSlideFilter(
 ) Error!void {
     // The compressed representation is composed of three values: (start_value, end_value, end_time)
     // all of type 64-bit float.
-    if (compressed_values.len % 24 != 0) return Error.IncorrectInput;
+    if (compressed_values.len % 24 != 0) return Error.UnsupportedInput;
 
     const compressed_lines_and_index = mem.bytesAsSlice(f64, compressed_values);
 
@@ -864,7 +864,7 @@ fn usizeToF80(value: usize) f80 {
 test "swing filter can always compress and decompress" {
     const allocator = testing.allocator;
     try tester.testGenerateCompressAndDecompress(
-        tester.generateNumericRandomValues,
+        tester.generateFiniteRandomValues,
         allocator,
         Method.SwingFilter,
         0,
@@ -875,7 +875,7 @@ test "swing filter can always compress and decompress" {
 test "swing filter disconnected can always compress and decompress" {
     const allocator = testing.allocator;
     try tester.testGenerateCompressAndDecompress(
-        tester.generateNumericRandomValues,
+        tester.generateFiniteRandomValues,
         allocator,
         Method.SwingFilterDisconnected,
         0,
@@ -886,7 +886,7 @@ test "swing filter disconnected can always compress and decompress" {
 test "slide filter disconnected can always compress and decompress" {
     const allocator = testing.allocator;
     try tester.testGenerateCompressAndDecompress(
-        tester.generateNumericRandomValues,
+        tester.generateFiniteRandomValues,
         allocator,
         Method.SlideFilter,
         0,
@@ -906,13 +906,13 @@ test "swing and slide filter fail if NaN or infinite values are present" {
     try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, undefined);
 
     compressSwingFilter(uncompressed_values.items, &compressed_values, 0.0) catch |err| {
-        try testing.expectEqual(err, Error.InvalidInput);
+        try testing.expectEqual(err, Error.UnsupportedInput);
     };
     compressSwingFilterDisconnected(uncompressed_values.items, &compressed_values, 0.0) catch |err| {
-        try testing.expectEqual(err, Error.InvalidInput);
+        try testing.expectEqual(err, Error.UnsupportedInput);
     };
     compressSlideFilter(uncompressed_values.items, &compressed_values, allocator, 0.0) catch |err| {
-        try testing.expectEqual(err, Error.InvalidInput);
+        try testing.expectEqual(err, Error.UnsupportedInput);
     };
 }
 
