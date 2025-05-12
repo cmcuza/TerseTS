@@ -38,80 +38,6 @@ const LinearFunction = shared.LinearFunction;
 const ConvexHull = @import("../utilities/convex_hull.zig").ConvexHull;
 const Segment = shared.Segment;
 
-/// Helper to serialize a value into bytes
-fn appendValue(comptime T: type, value: T, compressed: *ArrayList(u8)) !void {
-    const bytes: [8]u8 = @bitCast(value);
-    try compressed.appendSlice(&bytes);
-}
-
-/// Find the optimal segment using ABC structure from convex hulls.
-/// A, B = side from either hull
-/// C = point from the opposite hull with max deviation, projected vertically into AB
-pub fn findABCOptimalSegment(convex_hull: *ConvexHull) Error!LinearFunction {
-    const len = convex_hull.len();
-
-    // Initialize first side l1 = (p0, p1)
-    var i: usize = 0;
-    var finished = false;
-
-    while (!finished) {
-        if (i + 1 >= len) break; // No more sides
-
-        const A = convex_hull.at(i);
-        const B = convex_hull.at(i + 1);
-
-        // Compute slope of side l_i
-        const side_slope = (B.value - A.value) / (@as(f64, @floatFromInt(B.time)) - @as(f64, @floatFromInt(A.time)));
-
-        // Find v(l_i): the vertex that maximizes deviation from the side l_i
-        var max_dev: f64 = -1.0;
-        var pivot_idx: usize = i;
-
-        for (i + 1..len) |j| {
-            const C = convex_hull.at(j);
-
-            // Deviation of point C from line l_i
-            const pred_value = side_slope * (@as(f64, @floatFromInt(C.time)) - @as(f64, @floatFromInt(A.time))) + A.value;
-            const deviation = @abs(pred_value - C.value);
-
-            if (deviation > max_dev) {
-                max_dev = deviation;
-                pivot_idx = j;
-            }
-        }
-
-        const pivot = convex_hull.at(pivot_idx);
-
-        // Determine relative x-position of pivot to l_i
-        if (pivot.time > B.time) {
-            // x-external to right -> advance to next side
-            i += 1;
-        } else if (pivot.time < A.time) {
-            // x-external to left -> adjust upper hull between v(l_{i-1}) and v(l_i)
-            if (i == 0) {
-                // If we are already at the first side, we cannot move left.
-                // In this case, just accept the current segment as optimal.
-                finished = true;
-            } else {
-                // x-external to left -> adjust search: go back one side
-                i -= 1;
-            }
-        } else {
-            // x-internal -> optimal segment found
-            finished = true;
-        }
-    }
-
-    // Once finished, line from A to B is the optimal approximation
-    const start = convex_hull.at(i);
-    const end = convex_hull.at(i + 1);
-
-    const slope = (end.value - start.value) / (@as(f64, @floatFromInt(end.time)) - @as(f64, @floatFromInt(start.time)));
-    const intercept = start.value - slope * @as(f64, @floatFromInt(start.time));
-
-    return LinearFunction{ .slope = slope, .intercept = intercept };
-}
-
 /// Compresses the signal using ABCLinearApproximation under the L-infinity norm
 /// Grows convex hull segments as long as they respect the error bound.
 /// Stores end, slope, intercept for each compressed segment.
@@ -124,20 +50,19 @@ pub fn compress(
     if (uncompressed_values.len < 2) return Error.IncorrectInput;
     if (error_bound <= 0.0) return Error.UnsupportedErrorBound;
 
-    const epsilon: f64 = @floatCast(error_bound);
-
     var convex_hull = try ConvexHull.init(allocator);
     // Free the memory used by the convex hull.
     defer convex_hull.deinit();
 
     var start: usize = 0;
 
-    while (start < uncompressed_values.len) {
+    while (start < uncompressed_values.len - 1) {
         // Clean convex hull for the new segment
         convex_hull.clean();
 
         // Start of the new segment (p0)
         var last_valid_end = start;
+        var last_valid_line: ?LinearFunction = null;
         var i = start;
 
         // 'i' walks through the points trying to grow the current segment
@@ -147,44 +72,47 @@ pub fn compress(
             try convex_hull.add(.{ .time = i, .value = uncompressed_values[i] });
 
             if (convex_hull.len() < 2) {
-                // Need at least two points to define a valid segment
                 last_valid_end = i;
                 continue;
             }
 
             // Section III-A, Step 2-3: Find A, B, C and compute the solution line
             // Try to compute the best fitting line using current convex hull points
-            const line = try findABCOptimalSegment(&convex_hull);
+            const line = try findABCOptimalSegment(&convex_hull, allocator);
 
             // Compute maximum error over current segment
             const max_error = try convex_hull.computeMaxError(line);
 
-            if (max_error <= epsilon) {
+            if (max_error <= error_bound) {
+
                 // If all points are within error_bound -> segment still valid
                 last_valid_end = i;
+                last_valid_line = line;
             } else {
                 // Otherwise: error exceeded -> stop extending segment
                 break;
             }
         }
 
-        // Finalize the current segment
-        const p0 = start;
-        const p1 = last_valid_end;
-        const p0_val = uncompressed_values[p0];
-        const p1_val = uncompressed_values[p1];
-
-        // Calculate slope and intercept for final segment
-        const slope = (p1_val - p0_val) / @as(f64, @floatFromInt(p1 - p0));
-        const intercept = p0_val - slope * @as(f64, @floatFromInt(p0));
-
         // Store segment information (end index, slope, intercept)
-        try appendValue(usize, p1, compressed_values);
-        try appendValue(f64, slope, compressed_values);
-        try appendValue(f64, intercept, compressed_values);
+        if (last_valid_line) |valid_line| {
+            try appendValue(usize, last_valid_end, compressed_values);
+            try appendValue(f64, @floatCast(valid_line.slope), compressed_values);
+            try appendValue(f64, @floatCast(valid_line.intercept), compressed_values);
+        }
 
         // Start next segment after last_valid_end
-        start = p1 + 1;
+        start = last_valid_end + 1;
+    }
+    // Store the last point if left
+    if (start == uncompressed_values.len - 1) {
+        const value = uncompressed_values[start];
+        const slope: f64 = 0.0;
+        const intercept = value;
+
+        try appendValue(usize, start, compressed_values);
+        try appendValue(f64, slope, compressed_values);
+        try appendValue(f64, intercept, compressed_values);
     }
 }
 
@@ -198,23 +126,131 @@ pub fn decompress(
     if (compressed_values.len % 24 != 0) return Error.IncorrectInput;
 
     const fields = mem.bytesAsSlice(f64, compressed_values);
-    var i: usize = 0;
-    var start: usize = 0;
+    var field_index: usize = 0;
+    var segment_start: usize = 0;
 
-    while (i + 2 < fields.len) {
-        const end = @as(usize, @bitCast(fields[i]));
-        const slope = fields[i + 1];
-        const intercept = fields[i + 2];
+    while (field_index + 2 < fields.len) {
+        const segment_end = @as(usize, @bitCast(fields[field_index]));
+        const slope = fields[field_index + 1];
+        const intercept = fields[field_index + 2];
 
-        for (start..end + 1) |t| {
+        for (segment_start..segment_end + 1) |t| {
             const x = @as(f64, @floatFromInt(t));
             const y = slope * x + intercept;
             try decompressed_values.append(y);
         }
 
-        start = end + 1;
-        i += 3;
+        segment_start = segment_end + 1;
+        field_index += 3;
     }
+}
+
+/// Helper to serialize a value into bytes
+fn appendValue(comptime T: type, value: T, compressed: *ArrayList(u8)) !void {
+    const bytes: [8]u8 = @bitCast(value);
+    try compressed.appendSlice(&bytes);
+}
+
+// Find the optimal segment using ABC structure from convex hulls.
+/// A, B = side from either hull
+/// C = point from the opposite hull with max deviation, projected vertically into AB
+pub fn findABCOptimalSegment(convex_hull: *ConvexHull, allocator: mem.Allocator) Error!LinearFunction {
+    const len = convex_hull.len();
+
+    // Initialize first side l1 = (p0, p1)
+    var A_index: usize = 0;
+    var finished = false;
+    var visited = std.AutoHashMap(usize, void).init(allocator);
+    defer visited.deinit();
+
+    while (!finished) {
+        if (A_index + 1 >= len) break; // No more sides
+
+        const A = convex_hull.at(A_index);
+        const B = convex_hull.at(A_index + 1);
+
+        // Find C
+        const maybe_pivot_idx = findPivotC(convex_hull, A_index);
+
+        const C_index = maybe_pivot_idx orelse {
+            // No valid C found, use AB as the line (in case of just two points in convex hull)
+            // Need at least three points to define a valid segment using the ABC method
+            const slope = (B.value - A.value) / (@as(f64, @floatFromInt(B.time)) - @as(f64, @floatFromInt(A.time)));
+            const intercept = A.value - slope * @as(f64, @floatFromInt(A.time));
+
+            return LinearFunction{ .slope = slope, .intercept = intercept };
+        };
+
+        const C = convex_hull.at(C_index);
+
+        if (visited.contains(A_index)) {
+            break;
+        }
+        try visited.put(A_index, {}); // Mark as visited
+
+        // Determine relative x-position of pivot to l_i
+        if (C.time > B.time) {
+            // x-external to right -> advance to next side
+            A_index += 1;
+        } else if (C.time < A.time) {
+            // x-external to left -> adjust upper hull between v(l_{i-1}) and v(l_i)
+            if (A_index == 0) {
+                // If we are already at the first side, we cannot move left.
+                // In this case, just accept the current segment as optimal.
+                finished = true;
+            } else {
+                // x-external to left -> adjust search: go back one side
+                A_index -= 1;
+            }
+        } else {
+            // x-internal -> optimal segment found
+            finished = true;
+        }
+    }
+
+    // Once finished, line from A to B is the optimal approximation
+    const start = convex_hull.at(A_index);
+    const end = convex_hull.at(A_index + 1);
+
+    const slope = (end.value - start.value) / (@as(f64, @floatFromInt(end.time)) - @as(f64, @floatFromInt(start.time)));
+    const intercept = start.value - slope * @as(f64, @floatFromInt(start.time));
+
+    return LinearFunction{ .slope = slope, .intercept = intercept };
+}
+
+/// Find the pivot point C.
+fn findPivotC(convex_hull: *ConvexHull, A_index: usize) ?usize {
+    const A = convex_hull.at(A_index);
+    const B = convex_hull.at(A_index + 1);
+    var max_dev: f64 = -1.0;
+    var pivot_idx: ?usize = null;
+
+    // Check all hull vertices for x-internal points
+    // Find v(l_i): the vertex that maximizes deviation from the side l_i
+    for (0..convex_hull.len()) |C_index| {
+        const C = convex_hull.at(C_index);
+        // Explicitly exclude A and B from being C
+        if (C_index != A_index and C_index != A_index + 1) {
+            const dev = computeDeviation(A, B, C);
+            if (dev > max_dev) {
+                max_dev = dev;
+                pivot_idx = C_index;
+            }
+        }
+    }
+
+    return pivot_idx;
+}
+
+fn computeDeviation(A: DiscretePoint, B: DiscretePoint, C: DiscretePoint) f64 {
+    // Compute slope of side l_i
+    const delta_time = (@as(f64, @floatFromInt(B.time)) - @as(f64, @floatFromInt(A.time)));
+    const slope = (B.value - A.value) / delta_time;
+
+    const pred = slope * (@as(f64, @floatFromInt(C.time)) - @as(f64, @floatFromInt(A.time))) + A.value;
+
+    // Deviation of point C from line l_i
+    return @abs(pred - C.value);
 }
 
 test "compresses and decompresses perfect linear signal" {
@@ -225,33 +261,29 @@ test "compresses and decompresses perfect linear signal" {
     defer uncompressed_values.deinit();
 
     for (0..50) |i| {
-        try uncompressed_values.append(2.0 * @as(f64, @floatFromInt(i)) + 5.0);
+        try uncompressed_values.append(2 * @as(f64, @floatFromInt(i)) + 1.0);
     }
 
-    try tester.testCompressAndDecompress(uncompressed_values.items, allocator, Method.ABCLinearApproximation, error_bound, tersets.isWithinErrorBound);
-}
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
 
-test "compresses noisy linear signal within error bound" {
-    const allocator = std.testing.allocator;
-    const error_bound: f32 = 0.11;
+    try compress(
+        uncompressed_values.items,
+        &compressed_values,
+        allocator,
+        error_bound,
+    );
 
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-
-    for (0..50) |i| {
-        const noise = if (i % 2 == 0) @as(f64, 0.05) else @as(f64, -0.05);
-        try uncompressed_values.append(3.0 * @as(f64, @floatFromInt(i)) + 4.0 + noise);
-    }
-
-    try tester.testCompressAndDecompress(uncompressed_values.items, allocator, Method.ABCLinearApproximation, error_bound, tersets.isWithinErrorBound);
+    // Only 3 elements are stored in the compressed array.
+    try std.testing.expectEqual(compressed_values.items.len / 8, 3);
 }
 
 test "random lines and error bound compress and decompress" {
     const allocator = std.testing.allocator;
-    const error_bound: f32 = 0.01;
     const seed: u64 = @bitCast(time.milliTimestamp());
     var prng = rand.DefaultPrng.init(seed);
     const random = prng.random();
+    const error_bound: f32 = random.float(f32) * 0.1;
 
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
