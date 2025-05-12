@@ -101,13 +101,11 @@ fn Array(comptime data_type: type) type {
 fn errorToInt(err: Error) i32 {
     switch (err) {
         Error.UnknownMethod => return 1,
-        Error.EmptyInput => return 2,
+        Error.UnsupportedInput => return 2,
         Error.UnsupportedErrorBound => return 3,
-        Error.IncorrectInput => return 4,
-        Error.OutOfMemory => return 5,
-        Error.ItemNotFound => return 6,
-        Error.EmptyConvexHull => return 7,
-        Error.EmptyQueue => return 8,
+        Error.OutOfMemory => return 4,
+        Error.ItemNotFound => return 5,
+        Error.EmptyConvexHull => return 6,
     }
 }
 

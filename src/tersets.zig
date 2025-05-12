@@ -28,10 +28,9 @@ const bottom_up = @import("line_simplification/bottom_up.zig");
 /// The errors that can occur in TerseTS.
 pub const Error = error{
     UnknownMethod,
-    ItemNotFound,
-    EmptyInput,
-    IncorrectInput,
+    UnsupportedInput,
     UnsupportedErrorBound,
+    ItemNotFound,
     OutOfMemory,
     EmptyConvexHull,
     EmptyQueue,
@@ -61,7 +60,7 @@ pub fn compress(
     method: Method,
     error_bound: f32,
 ) Error!ArrayList(u8) {
-    if (uncompressed_values.len == 0) return Error.EmptyInput;
+    if (uncompressed_values.len == 0) return Error.UnsupportedInput;
     if (error_bound < 0) return Error.UnsupportedErrorBound;
 
     var compressed_values = ArrayList(u8).init(allocator);
@@ -155,7 +154,7 @@ pub fn decompress(
     compressed_values: []const u8,
     allocator: Allocator,
 ) Error!ArrayList(f64) {
-    if (compressed_values.len == 0) return Error.EmptyInput;
+    if (compressed_values.len == 0) return Error.UnsupportedInput;
 
     const method_index: u8 = compressed_values[compressed_values.len - 1];
     if (method_index > getMaxMethodIndex()) return Error.UnknownMethod;
