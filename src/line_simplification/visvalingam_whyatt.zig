@@ -190,25 +190,21 @@ pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList
             .value = compressed_lines_and_index[index + 2],
         };
 
-        if (start_point.time < end_point.time) {
+        if (start_point.time + 1 < end_point.time) {
             // Create the linear approximation for the current segment.
-            if (end_point.time != start_point.time) {
-                const duration: f64 = @floatFromInt(end_point.time - start_point.time);
-                slope = (end_point.value - start_point.value) / duration;
-                intercept = start_point.value - slope *
-                    @as(f64, @floatFromInt(start_point.time));
-            } else {
-                slope = 0.0;
-                intercept = start_point.value;
-            }
+            const duration: f64 = @floatFromInt(end_point.time - start_point.time);
+            slope = (end_point.value - start_point.value) / duration;
+            intercept = start_point.value - slope *
+                @as(f64, @floatFromInt(start_point.time));
+
             var current_timestamp: usize = start_point.time + 1;
             // Interpolate the values between the start and end points of the current segment.
             while (current_timestamp < end_point.time) : (current_timestamp += 1) {
                 const y: f64 = slope * @as(f64, @floatFromInt(current_timestamp)) + intercept;
                 try decompressed_values.append(y);
             }
-            try decompressed_values.append(end_point.value);
         }
+        try decompressed_values.append(end_point.value);
 
         // The start point of the next segment is the end point of the current segment.
         start_point = end_point;
@@ -280,20 +276,6 @@ fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)
             try compressed_values.appendSlice(value_as_bytes[0..]);
         },
         else => @compileError("Unsupported type for append value function"),
-    }
-}
-
-/// Creates a linear function that passes throught the two points of the `segment` and returns it
-/// in `linear_function`.
-fn createLinearFunction(start_point: DiscretePoint, end_point: DiscretePoint, linear_function: *LinearFunction) void {
-    if (end_point.time != start_point.time) {
-        const duration: f80 = @floatFromInt(end_point.time - start_point.time);
-        linear_function.slope = (end_point.value - start_point.value) / duration;
-        linear_function.intercept = start_point.value - linear_function.slope *
-            @as(f80, @floatFromInt(start_point.time));
-    } else {
-        linear_function.slope = 0.0;
-        linear_function.intercept = start_point.value;
     }
 }
 
