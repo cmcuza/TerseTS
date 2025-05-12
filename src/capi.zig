@@ -106,6 +106,10 @@ fn errorToInt(err: Error) i32 {
         Error.OutOfMemory => return 4,
         Error.ItemNotFound => return 5,
         Error.EmptyConvexHull => return 6,
+<<<<<<< HEAD
+=======
+        Error.EmptyQueue => return 7,
+>>>>>>> dev/add-vw-algorithm
     }
 }
 

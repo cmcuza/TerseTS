@@ -58,7 +58,11 @@ pub fn compress(
     }
 
     if (error_bound < 0) {
+<<<<<<< HEAD
         return Error.UnsupportedErrorBound;
+=======
+        return Error.UnsupportedInput;
+>>>>>>> dev/add-vw-algorithm
     }
 
     // Initialize a hashed priority queue to store the effective area of triangles formed by every
@@ -190,25 +194,21 @@ pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList
             .value = compressed_lines_and_index[index + 2],
         };
 
-        if (start_point.time < end_point.time) {
+        if (start_point.time + 1 < end_point.time) {
             // Create the linear approximation for the current segment.
-            if (end_point.time != start_point.time) {
-                const duration: f64 = @floatFromInt(end_point.time - start_point.time);
-                slope = (end_point.value - start_point.value) / duration;
-                intercept = start_point.value - slope *
-                    @as(f64, @floatFromInt(start_point.time));
-            } else {
-                slope = 0.0;
-                intercept = start_point.value;
-            }
+            const duration: f64 = @floatFromInt(end_point.time - start_point.time);
+            slope = (end_point.value - start_point.value) / duration;
+            intercept = start_point.value - slope *
+                @as(f64, @floatFromInt(start_point.time));
+
             var current_timestamp: usize = start_point.time + 1;
             // Interpolate the values between the start and end points of the current segment.
             while (current_timestamp < end_point.time) : (current_timestamp += 1) {
                 const y: f64 = slope * @as(f64, @floatFromInt(current_timestamp)) + intercept;
                 try decompressed_values.append(y);
             }
-            try decompressed_values.append(end_point.value);
         }
+        try decompressed_values.append(end_point.value);
 
         // The start point of the next segment is the end point of the current segment.
         start_point = end_point;
@@ -283,6 +283,7 @@ fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)
     }
 }
 
+<<<<<<< HEAD
 /// Creates a linear function that passes throught the two points of the `segment` and returns it
 /// in `linear_function`.
 fn createLinearFunction(
@@ -301,6 +302,8 @@ fn createLinearFunction(
     }
 }
 
+=======
+>>>>>>> dev/add-vw-algorithm
 /// Update the area of the `neighbor` point in the `heap`. The `left_index`, `center_index` and
 /// `right_index` are the indices of the points in the `uncompressed_values` array. The
 /// `uncompressed_values` are needed to calculate the area of the triangles formed by the three points.
