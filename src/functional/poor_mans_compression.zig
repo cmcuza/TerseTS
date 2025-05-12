@@ -104,7 +104,7 @@ pub fn decompress(
     decompressed_values: *ArrayList(f64),
 ) Error!void {
     // The compressed representation is pairs containing a 64-bit float value and 64-bit end index.
-    if (compressed_values.len % 16 != 0) return Error.IncorrectInput;
+    if (compressed_values.len % 16 != 0) return Error.UnsupportedInput;
 
     const compressed_values_and_index = mem.bytesAsSlice(f64, compressed_values);
 

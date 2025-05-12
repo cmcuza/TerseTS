@@ -58,7 +58,7 @@ pub fn compress(
     }
 
     if (error_bound < 0) {
-        return Error.IncorrectInput;
+        return Error.UnsupportedInput;
     }
 
     // Initialize a hashed priority queue to store the effective area of triangles formed by every
@@ -170,7 +170,7 @@ pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList
     // The compressed representation is composed of two values after getting the first since all
     // segments are connected. Therefore, the condition checks that after the first value, the rest
     // of the values are in pairs (index, value) and that they are all of type 64-bit float.
-    if ((compressed_values.len - 8) % 16 != 0) return Error.IncorrectInput;
+    if ((compressed_values.len - 8) % 16 != 0) return Error.UnsupportedInput;
 
     const compressed_lines_and_index = mem.bytesAsSlice(f64, compressed_values);
 
