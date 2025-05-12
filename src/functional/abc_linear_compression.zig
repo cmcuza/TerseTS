@@ -175,7 +175,9 @@ pub fn findABCOptimalSegment(convex_hull: *ConvexHull, allocator: mem.Allocator)
         const C_index = maybe_pivot_idx orelse {
             // No valid C found, use AB as the line (in case of just two points in convex hull)
             // Need at least three points to define a valid segment using the ABC method
-            const slope = (B.value - A.value) / (@as(f64, @floatFromInt(B.time)) - @as(f64, @floatFromInt(A.time)));
+            const delta_time = @as(f64, @floatFromInt(B.time - A.time));
+
+            const slope = (B.value - A.value) / delta_time;
             const intercept = A.value - slope * @as(f64, @floatFromInt(A.time));
 
             return LinearFunction{ .slope = slope, .intercept = intercept };
@@ -212,7 +214,9 @@ pub fn findABCOptimalSegment(convex_hull: *ConvexHull, allocator: mem.Allocator)
     const start = convex_hull.at(A_index);
     const end = convex_hull.at(A_index + 1);
 
-    const slope = (end.value - start.value) / (@as(f64, @floatFromInt(end.time)) - @as(f64, @floatFromInt(start.time)));
+    const delta_time = @as(f64, @floatFromInt(end.time - start.time));
+
+    const slope = (end.value - start.value) / delta_time;
     const intercept = start.value - slope * @as(f64, @floatFromInt(start.time));
 
     return LinearFunction{ .slope = slope, .intercept = intercept };
@@ -244,10 +248,10 @@ fn findPivotC(convex_hull: *ConvexHull, A_index: usize) ?usize {
 
 fn computeDeviation(A: DiscretePoint, B: DiscretePoint, C: DiscretePoint) f64 {
     // Compute slope of side l_i
-    const delta_time = (@as(f64, @floatFromInt(B.time)) - @as(f64, @floatFromInt(A.time)));
+    const delta_time = @as(f64, @floatFromInt(B.time - A.time));
     const slope = (B.value - A.value) / delta_time;
 
-    const pred = slope * (@as(f64, @floatFromInt(C.time)) - @as(f64, @floatFromInt(A.time))) + A.value;
+    const pred = slope * (@as(f64, @floatFromInt(C.time - A.time))) + A.value;
 
     // Deviation of point C from line l_i
     return @abs(pred - C.value);
