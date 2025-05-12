@@ -29,6 +29,7 @@ const ArrayList = std.ArrayList;
 
 const tersets = @import("../tersets.zig");
 const tester = @import("../tester.zig");
+const testing = std.testing;
 const Error = tersets.Error;
 const Method = tersets.Method;
 
@@ -158,6 +159,8 @@ pub fn findABCOptimalSegment(convex_hull: *ConvexHull, allocator: mem.Allocator)
 
     // Initialize first side l1 = (p0, p1)
     var A_index: usize = 0;
+    var C_index: usize = 0;
+
     var finished = false;
     var visited = std.AutoHashMap(usize, void).init(allocator);
     defer visited.deinit();
@@ -171,7 +174,7 @@ pub fn findABCOptimalSegment(convex_hull: *ConvexHull, allocator: mem.Allocator)
         // Find C
         const maybe_pivot_idx = findPivotC(convex_hull, A_index);
 
-        const C_index = maybe_pivot_idx orelse {
+        C_index = maybe_pivot_idx orelse {
             // No valid C found, use AB as the line (in case of just two points in convex hull)
             // Need at least three points to define a valid segment using the ABC method
             const delta_time = @as(f64, @floatFromInt(B.time - A.time));
@@ -212,7 +215,7 @@ pub fn findABCOptimalSegment(convex_hull: *ConvexHull, allocator: mem.Allocator)
     // Once finished, line from A to B is the optimal approximation
     const start = convex_hull.at(A_index);
     const end = convex_hull.at(A_index + 1);
-    const c = convex_hull.at(A_index + 1);
+    const c = convex_hull.at(C_index);
 
     const delta_time = @as(f64, @floatFromInt(end.time - start.time));
 
@@ -338,4 +341,55 @@ test "compresses and decompresses constant signal" {
     }
 
     try tester.testCompressAndDecompress(uncompressed_values.items, allocator, Method.ABCLinearApproximation, error_bound, tersets.isWithinErrorBound);
+}
+
+test "identifies correct ABC points in the convex hull of a bigger size" {
+    const allocator = std.testing.allocator;
+    const error_bound: f32 = 5;
+
+    var uncompressed_values = ArrayList(f64).init(allocator);
+    defer uncompressed_values.deinit();
+
+    try uncompressed_values.append(3);
+    try uncompressed_values.append(2);
+    try uncompressed_values.append(3.5);
+    try uncompressed_values.append(5);
+    try uncompressed_values.append(3);
+    try uncompressed_values.append(4);
+    try uncompressed_values.append(4);
+    try uncompressed_values.append(3);
+    try uncompressed_values.append(4.5);
+    try uncompressed_values.append(3.5);
+    try uncompressed_values.append(2.5);
+    try uncompressed_values.append(2.5);
+    try uncompressed_values.append(3.5);
+    try uncompressed_values.append(2.5);
+    try uncompressed_values.append(2.5);
+    try uncompressed_values.append(2.5);
+    try uncompressed_values.append(3);
+    try uncompressed_values.append(3);
+    try uncompressed_values.append(3);
+    try uncompressed_values.append(3);
+    try uncompressed_values.append(2.8);
+
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+
+    try compress(
+        uncompressed_values.items,
+        &compressed_values,
+        allocator,
+        error_bound,
+    );
+
+    // Interpret the compressed bytes as values
+    const fields = std.mem.bytesAsSlice(f64, compressed_values.items);
+    const slope = fields[1];
+    const intercept = fields[2];
+
+    try testing.expect(@abs(slope - 0.036) <= 0.1);
+    try testing.expect(@abs(intercept - 3.43) <= 0.1);
+
+    // Ensure values are compressed in one single segment
+    try std.testing.expectEqual(compressed_values.items.len / 8, 3);
 }
