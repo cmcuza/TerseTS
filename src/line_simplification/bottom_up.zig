@@ -55,7 +55,7 @@ pub fn compress(
     error_bound: f32,
 ) Error!void {
 
-    // If we have 2 or fewer points, store them without compression..
+    // If we have 2 or fewer points, store them without compression.
     if (uncompressed_values.len <= 2) {
         try appendValue(f64, uncompressed_values[0], compressed_values);
         try appendValue(usize, 1, compressed_values);
@@ -64,7 +64,7 @@ pub fn compress(
     }
 
     if (error_bound < 0) {
-        return Error.IncorrectInput;
+        return Error.UnsupportedErrorBound;
     }
 
     // Initialize a hashed priority queue to store the effective area of triangles formed by every
@@ -77,16 +77,16 @@ pub fn compress(
     ).init(allocator, {});
     defer heap.deinit();
 
-    try buildInitialPairwiseSegmentCost(heap, uncompressed_values);
+    try buildInitialPairwiseSegmentCost(&heap, uncompressed_values);
 
     // Placeholder for the segment cost to be used in the loop to search for neighboring segments.
     var placeholder_segment_cost: SegmentMergeCost = .{
-        .index = 0,
-        .cost = 0,
-        .left_seg = 0,
-        .right_seg = 0,
-        .seg_start = 0,
-        .seg_end = 0,
+        .index = undefined,
+        .cost = undefined,
+        .left_seg = undefined,
+        .right_seg = undefined,
+        .seg_start = undefined,
+        .seg_end = undefined,
     };
 
     while (heap.len > 2) {
@@ -182,7 +182,15 @@ fn compareSegmentMergeCost(_: void, seg_1: SegmentMergeCost, seg_2: SegmentMerge
 }
 
 /// Build initial pair-wise segments costs (two points per segment if possible).
-fn buildInitialPairwiseSegmentCost(heap: *HashedPriorityQueue, uncompressed_values: []const f64) !void {
+fn buildInitialPairwiseSegmentCost(
+    heap: *HashedPriorityQueue(
+        SegmentMergeCost,
+        void,
+        compareSegmentMergeCost,
+        SegmentMergeCostHashContext,
+    ),
+    uncompressed_values: []const f64,
+) !void {
     var seg_id: usize = 1;
     var seg_start: usize = 2;
 
@@ -221,7 +229,7 @@ fn buildInitialPairwiseSegmentCost(heap: *HashedPriorityQueue, uncompressed_valu
 
     // If the last segment is not a pair, we need to add it to the heap.
     if (seg_start < uncompressed_values.len) {
-        const last_seg = SegmentMergeCost{
+        var last_seg = SegmentMergeCost{
             .index = seg_id,
             .cost = std.math.inf(f64),
             .left_seg = seg_id - 1,
