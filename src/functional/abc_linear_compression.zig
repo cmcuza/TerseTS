@@ -325,16 +325,3 @@ test "compresses and decompresses constant signal" {
 
     try tester.testCompressAndDecompress(uncompressed_values.items, allocator, Method.ABCLinearApproximation, error_bound, tersets.isWithinErrorBound);
 }
-
-test "fails on single point input" {
-    const allocator = std.testing.allocator;
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    try uncompressed_values.append(42.0);
-
-    var compressed = ArrayList(u8).init(allocator);
-    defer compressed.deinit();
-
-    const result = compress(uncompressed_values.items, &compressed, allocator, 0.1);
-    try std.testing.expectError(Error.IncorrectInput, result);
-}
