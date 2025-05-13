@@ -162,17 +162,23 @@ pub fn compress(
     for (0..heap.len) |index| {
         const seg_start = heap.items[index].seg_start;
         const seg_end = heap.items[index].seg_end;
-
+        // Check if the segment has more than two points.
         if (seg_start + 1 < seg_end) {
+            // If the segment has only two points, directly append the start value,
+            // the end index, and the end value to the compressed representation.
             try appendValue(f64, uncompressed_values[seg_start], compressed_values);
             try appendValue(usize, seg_end, compressed_values);
             try appendValue(f64, uncompressed_values[seg_end], compressed_values);
         } else {
+            // If the segment has many points, compute the linear regression line
+            // for the segment and use it to calculate the start and end values.
             const rmse_line = computeLinearRegression(uncompressed_values, seg_start, seg_end);
             const slope: f64 = @floatCast(rmse_line.slope);
             const intercept: f64 = @floatCast(rmse_line.slope);
             const start_value = slope * @as(f64, @floatFromInt(seg_start)) + intercept;
             const end_value = slope * @as(f64, @floatFromInt(seg_end)) + intercept;
+
+            // Append the computed start value, end index, and end value to the compressed representation.
             try appendValue(f64, start_value, compressed_values);
             try appendValue(usize, seg_end, compressed_values);
             try appendValue(f64, end_value, compressed_values);
@@ -498,10 +504,16 @@ test "bottom-up random lines and random error bound compress and decompress" {
     var index: usize = 0;
     var previous_point_index: usize = 0;
     while (index < compressed_representation.len - 1) : (index += 3) {
-        const current_point_index = @min(@as(usize, @bitCast(compressed_representation[index + 1])), uncompressed_values.items.len - 1);
+        const current_point_index = @min(
+            @as(usize, @bitCast(compressed_representation[index + 1])),
+            uncompressed_values.items.len - 1,
+        );
 
         // Check if the point is within the error bound.
-        try testRMSEisWithinErrorBound(uncompressed_values.items[previous_point_index .. current_point_index + 1], error_bound);
+        try testRMSEisWithinErrorBound(
+            uncompressed_values.items[previous_point_index .. current_point_index + 1],
+            error_bound,
+        );
         previous_point_index = current_point_index + 1;
     }
 }

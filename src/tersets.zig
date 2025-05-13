@@ -187,7 +187,7 @@ pub fn decompress(
             try vw.decompress(compressed_values_slice, &decompressed_values);
         },
         .BottomUp => {
-            try sim_piece.decompress(compressed_values_slice, &decompressed_values, allocator);
+            try bottom_up.decompress(compressed_values_slice, &decompressed_values);
         },
     }
 
