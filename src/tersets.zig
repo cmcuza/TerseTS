@@ -23,6 +23,7 @@ const swing_slide_filter = @import("functional/swing_slide_filter.zig");
 const sim_piece = @import("functional/sim_piece.zig");
 const piecewise_histogram = @import("functional/histogram_compression.zig");
 const vw = @import("line_simplification/visvalingam_whyatt.zig");
+const sliding_window = @import("line_simplification/sliding_window.zig");
 
 /// The errors that can occur in TerseTS.
 pub const Error = error{
@@ -46,6 +47,7 @@ pub const Method = enum {
     PiecewiseConstantHistogram,
     PiecewiseLinearHistogram,
     VisvalingamWhyatt,
+    SlidingWindow,
 };
 
 /// Compress `uncompressed_values` within `error_bound` using `method` and returns the results
@@ -132,6 +134,13 @@ pub fn compress(
                 error_bound,
             );
         },
+        .SlidingWindow => {
+            try sliding_window.compress(
+                uncompressed_values,
+                &compressed_values,
+                error_bound,
+            );
+        },
     }
     try compressed_values.append(@intFromEnum(method));
     return compressed_values;
@@ -175,6 +184,9 @@ pub fn decompress(
         },
         .VisvalingamWhyatt => {
             try vw.decompress(compressed_values_slice, &decompressed_values);
+        },
+        .SlidingWindow => {
+            try sliding_window.decompress(compressed_values, &decompressed_values);
         },
     }
 
