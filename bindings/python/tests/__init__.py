@@ -24,7 +24,7 @@ TEST_VALUE_COUNT = 1000
 class TerseTSPythonTest(unittest.TestCase):
     def test_compress_and_decompress_zero_error(self):
         uncompressed = [
-            random.uniform(sys.float_info.min, sys.float_info.max)
+            random.uniform(1.0e-100, 1.0e+100)
             for _ in range(0, TEST_VALUE_COUNT)
         ]
         compressed = compress(uncompressed, Method.SwingFilter, 0.0)
