@@ -58,9 +58,9 @@ pub fn compressPWCH(
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
     allocator: mem.Allocator,
-    error_bound: f32,
+    max_buckets: usize,
 ) Error!void {
-    if (error_bound <= 1.0) {
+    if (max_buckets <= 1.0) {
         return Error.UnsupportedErrorBound;
     }
 
@@ -68,7 +68,6 @@ pub fn compressPWCH(
     // by a usize instead of `error_bound: f32`. Changing this requires modifications in
     // `src/tersets.zig` and `src/capi.zig` files.
     // TODO: Find the right way of passing the maximum number of buckets.
-    const max_buckets: usize = @as(usize, @intFromFloat(@floor(error_bound)));
     var histogram = try Histogram.init(allocator, max_buckets, .constant);
     defer histogram.deinit();
 
@@ -96,9 +95,9 @@ pub fn compressPWLH(
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
     allocator: mem.Allocator,
-    error_bound: f32,
+    max_buckets: usize,
 ) Error!void {
-    if (error_bound <= 1.0) {
+    if (max_buckets <= 1.0) {
         return Error.UnsupportedErrorBound;
     }
 
@@ -106,7 +105,6 @@ pub fn compressPWLH(
     // by a usize instead of `error_bound: f32`. Changing this requires modifications in
     // `src/tersets.zig` and `src/capi.zig` files.
     // TODO: Find the right way of passing the maximum number of buckets.
-    const max_buckets: usize = @as(usize, @intFromFloat(@floor(error_bound)));
     var histogram = try Histogram.init(allocator, max_buckets, .linear);
     defer histogram.deinit();
 

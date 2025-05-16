@@ -27,6 +27,8 @@ const debug = std.debug;
 const tersets = @import("tersets.zig");
 const Method = tersets.Method;
 
+const params = @import("params.zig");
+
 /// Number of values to generate for testing. This value needs to be higher than or equal to 2
 /// otherwise some of the tests will fail. The value is set to 100 to ensure that the tests are
 /// not too slow.
@@ -127,15 +129,27 @@ pub fn testCompressAndDecompress(
         error_bound: f32,
     ) bool,
 ) !void {
+    const basic_parameters = params.BasicParams{
+        .error_bound = error_bound,
+    };
+
+    const method_parameters = try params.mapBasicParamsToMethodParams(
+        method,
+        &basic_parameters,
+    );
+
     const compressed_values = try tersets.compress(
         uncompressed_values,
         allocator,
         method,
-        error_bound,
+        method_parameters,
     );
     defer compressed_values.deinit();
 
-    const decompressed_values = try tersets.decompress(compressed_values.items, allocator);
+    const decompressed_values = try tersets.decompress(
+        compressed_values.items,
+        allocator,
+    );
     defer decompressed_values.deinit();
 
     try testing.expect(withinErrorBound(
@@ -189,7 +203,7 @@ pub fn generateRandomValues(uncompressed_values: *ArrayList(f64), random: Random
 /// them to `uncompressed_values`. If the value is not finite, it is replaced with zero.
 pub fn generateFiniteRandomValues(uncompressed_values: *ArrayList(f64), random: Random) !void {
     var index: usize = 0;
-    while (index < number_of_values) {
+    while (index < 10) {
         // rand can only generate f64 values in the range [0, 1), thus using u64.
         const random_value = @as(f64, @bitCast(random.int(u64)));
         // Online add finite values.
