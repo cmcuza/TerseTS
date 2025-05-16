@@ -97,6 +97,21 @@ fn Array(comptime data_type: type) type {
     return extern struct { data: [*]const data_type, len: usize };
 }
 
+/// Returns a human-readable description of a TerseTS error code.
+export fn tersets_strerror(code: i32) [*:0]const u8 {
+    return switch (code) {
+        1 => "Unknown method",
+        2 => "Unsupported input",
+        3 => "Unsupported error bound",
+        4 => "Unsupported parameters",
+        5 => "Item not found",
+        6 => "Out of memory",
+        7 => "Empty convex hull",
+        8 => "Empty queue",
+        else => "Unknown error",
+    };
+}
+
 // Convert `err` to an `i32` as is not guaranteed to be stable `@intFromError`.
 fn errorToInt(err: Error) i32 {
     switch (err) {
