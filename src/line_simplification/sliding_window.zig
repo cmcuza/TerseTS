@@ -192,6 +192,11 @@ fn computeRMSE(uncompressed_values: []const f64, seg_start: usize, seg_end: usiz
     return std.math.sqrt(sse / seg_len);
 }
 
+/// Computes the maximum L-infinity (Chebyshev) error between the actual values and the
+/// linear interpolation over a segment of the input array. This function fits a straight
+/// line between the values at `seg_start` and `seg_end` in `uncompressed_values`, then
+/// calculates the maximum absolute difference between the actual values and the predicted
+/// values (from the fitted line) for all indices in the segment `[seg_start, seg_end]`.
 fn computeMaxLinfError(uncompressed_values: []const f64, seg_start: usize, seg_end: usize) f64 {
     const seg_len: f64 = @floatFromInt(seg_end - seg_start + 1);
     if (seg_len <= 2) return 0.0; // If the segment has one or no points, return zero error.
