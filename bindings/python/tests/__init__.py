@@ -16,7 +16,7 @@ import sys
 import random
 import unittest
 
-from tersets import compress, decompress, Method
+from tersets import compress, decompress, Method, FunctionalParams, ErrorBoundType
 
 # Number of values to generate for each test.
 TEST_VALUE_COUNT = 1000
@@ -27,6 +27,12 @@ class TerseTSPythonTest(unittest.TestCase):
             random.uniform(sys.float_info.min, sys.float_info.max)
             for _ in range(0, TEST_VALUE_COUNT)
         ]
-        compressed = compress(uncompressed, Method.SwingFilter, 0.0)
+        # Use FunctionalParams with relative error
+        params = FunctionalParams(
+            error_bound_type=ErrorBoundType.RELATIVE,
+            error_bound=0.0
+        )
+
+        compressed = compress(uncompressed, Method.SwingFilter, params)
         decompressed = decompress(compressed)
         self.assertEqual(uncompressed, decompressed)

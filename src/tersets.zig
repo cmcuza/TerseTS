@@ -18,17 +18,20 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
+const params = @import("params.zig");
 const poor_mans_compression = @import("functional/poor_mans_compression.zig");
 const swing_slide_filter = @import("functional/swing_slide_filter.zig");
 const sim_piece = @import("functional/sim_piece.zig");
 const piecewise_histogram = @import("functional/histogram_compression.zig");
 const vw = @import("line_simplification/visvalingam_whyatt.zig");
+const indentity = @import("lossless/identity.zig");
 
 /// The errors that can occur in TerseTS.
 pub const Error = error{
     UnknownMethod,
     UnsupportedInput,
     UnsupportedErrorBound,
+    UnsupportedParameters,
     ItemNotFound,
     OutOfMemory,
     EmptyConvexHull,
@@ -46,6 +49,7 @@ pub const Method = enum {
     PiecewiseConstantHistogram,
     PiecewiseLinearHistogram,
     VisvalingamWhyatt,
+    IdentityCompression,
 };
 
 /// Compress `uncompressed_values` within `error_bound` using `method` and returns the results
@@ -56,81 +60,92 @@ pub fn compress(
     uncompressed_values: []const f64,
     allocator: Allocator,
     method: Method,
-    error_bound: f32,
+    parameters: ?*const anyopaque,
 ) Error!ArrayList(u8) {
     if (uncompressed_values.len == 0) return Error.UnsupportedInput;
-    if (error_bound < 0) return Error.UnsupportedErrorBound;
 
     var compressed_values = ArrayList(u8).init(allocator);
 
     switch (method) {
         .PoorMansCompressionMidrange => {
+            const param = try castParams(params.FunctionalParams, parameters);
             try poor_mans_compression.compressMidrange(
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                param.error_bound,
             );
         },
         .PoorMansCompressionMean => {
+            const param = try castParams(params.FunctionalParams, parameters);
             try poor_mans_compression.compressMean(
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                param.error_bound,
             );
         },
         .SwingFilter => {
+            const param = try castParams(params.FunctionalParams, parameters);
             try swing_slide_filter.compressSwingFilter(
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                param.error_bound,
             );
         },
         .SwingFilterDisconnected => {
+            const param = try castParams(params.FunctionalParams, parameters);
             try swing_slide_filter.compressSwingFilterDisconnected(
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                param.error_bound,
             );
         },
         .SlideFilter => {
+            const param = try castParams(params.FunctionalParams, parameters);
             try swing_slide_filter.compressSlideFilter(
                 uncompressed_values,
                 &compressed_values,
                 allocator,
-                error_bound,
+                param.error_bound,
             );
         },
         .SimPiece => {
+            const param = try castParams(params.FunctionalParams, parameters);
             try sim_piece.compressSimPiece(
                 uncompressed_values,
                 &compressed_values,
                 allocator,
-                error_bound,
+                param.error_bound,
             );
         },
         .PiecewiseConstantHistogram => {
+            const param = try castParams(params.HistogramParams, parameters);
             try piecewise_histogram.compressPWCH(
                 uncompressed_values,
                 &compressed_values,
                 allocator,
-                error_bound,
+                param.maximum_buckets,
             );
         },
         .PiecewiseLinearHistogram => {
+            const param = try castParams(params.HistogramParams, parameters);
             try piecewise_histogram.compressPWLH(
                 uncompressed_values,
                 &compressed_values,
                 allocator,
-                error_bound,
+                param.maximum_buckets,
             );
         },
         .VisvalingamWhyatt => {
+            const param = try castParams(params.LineSimplificationParams, parameters);
             try vw.compress(
                 uncompressed_values,
                 &compressed_values,
                 allocator,
-                error_bound,
+                param.error_bound,
             );
+        },
+        .IdentityCompression => {
+            try indentity.compress(uncompressed_values, &compressed_values);
         },
     }
     try compressed_values.append(@intFromEnum(method));
@@ -176,6 +191,9 @@ pub fn decompress(
         .VisvalingamWhyatt => {
             try vw.decompress(compressed_values_slice, &decompressed_values);
         },
+        .IdentityCompression => {
+            try indentity.decompress(compressed_values_slice, &decompressed_values);
+        },
     }
 
     return decompressed_values;
@@ -211,4 +229,9 @@ pub fn getMaxMethodIndex() usize {
     }
 
     return max_index;
+}
+
+fn castParams(comptime ParamsType: type, parameters: ?*const anyopaque) !*const ParamsType {
+    if (parameters == null) return Error.UnsupportedParameters;
+    return @alignCast(@ptrCast(parameters.?));
 }
