@@ -51,7 +51,6 @@ pub const Method = enum {
     ABCLinearApproximation,
     VisvalingamWhyatt,
     BottomUp,
-    ABCLinearApproximation,
 };
 
 /// Compress `uncompressed_values` within `error_bound` using `method` and returns the results
@@ -154,14 +153,6 @@ pub fn compress(
                 error_bound,
             );
         },
-        .ABCLinearApproximation => {
-            try abc_compression.compress(
-                uncompressed_values,
-                &compressed_values,
-                allocator,
-                error_bound,
-            );
-        },
     }
     try compressed_values.append(@intFromEnum(method));
     return compressed_values;
@@ -211,9 +202,6 @@ pub fn decompress(
         },
         .BottomUp => {
             try bottom_up.decompress(compressed_values_slice, &decompressed_values);
-        },
-        .ABCLinearApproximation => {
-            try abc_compression.decompress(compressed_values_slice, &decompressed_values);
         },
     }
 

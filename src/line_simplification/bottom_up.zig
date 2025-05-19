@@ -55,17 +55,16 @@ pub fn compress(
     allocator: mem.Allocator,
     error_bound: f32,
 ) Error!void {
+    if (error_bound < 0) {
+        return Error.UnsupportedErrorBound;
+    }
 
-    // If we have 2 or fewer points, store them without compression.
+    // If we have 2 or fewer points, we store them without compression.
     if (uncompressed_values.len <= 2) {
         try appendValue(f64, uncompressed_values[0], compressed_values);
         try appendValue(usize, 1, compressed_values);
         try appendValue(f64, uncompressed_values[1], compressed_values);
         return;
-    }
-
-    if (error_bound < 0) {
-        return Error.UnsupportedErrorBound;
     }
 
     // Initialize a hashed priority queue to store the effective area of triangles formed by every
@@ -82,6 +81,10 @@ pub fn compress(
     try buildInitialPairwiseSegmentCost(&heap, uncompressed_values);
 
     // Placeholder for the segment cost to be used in the loop to search for neighboring segments.
+    // During the merging process, we keep track of neighboring segments: the "left segment" is
+    // the segment immediately before the current one, and the "right segment" is the segment
+    // immediately after. These relationships are maintained using the `left_seg` and `right_seg`
+    // fields in the `SegmentMergeCost` struct.
     var placeholder_segment_cost: SegmentMergeCost = .{
         .index = undefined,
         .cost = undefined,
@@ -156,7 +159,7 @@ pub fn compress(
     }
 
     // Sort remaining points by original index to preserve order.
-    std.mem.sort(SegmentMergeCost, heap.items[0..heap.len], {}, SegmentMergeCost.firstThan);
+    mem.sort(SegmentMergeCost, heap.items[0..heap.len], {}, SegmentMergeCost.firstThan);
 
     // Output compressed series: (seg_start, index, end_value) pairs.
     for (0..heap.len) |index| {
@@ -170,7 +173,7 @@ pub fn compress(
             try appendValue(usize, seg_end, compressed_values);
             try appendValue(f64, uncompressed_values[seg_end], compressed_values);
         } else {
-            // If the segment has many points, compute the linear regression line
+            // If the segment has more than two points, compute the linear regression line
             // for the segment and use it to calculate the start and end values.
             const rmse_line = computeLinearRegression(uncompressed_values, seg_start, seg_end);
             const slope: f64 = @floatCast(rmse_line.slope);
@@ -303,7 +306,7 @@ fn buildInitialPairwiseSegmentCost(
     // The second segment is the next two points, and so on.
     var previous_seg = SegmentMergeCost{
         .index = 0,
-        .cost = std.math.inf(f64),
+        .cost = math.inf(f64),
         .left_seg = 0,
         .right_seg = 1,
         .seg_start = 0,
@@ -315,7 +318,7 @@ fn buildInitialPairwiseSegmentCost(
 
         const current_seg = SegmentMergeCost{
             .index = seg_id,
-            .cost = std.math.inf(f64),
+            .cost = math.inf(f64),
             .left_seg = seg_id - 1,
             .right_seg = seg_id + 1,
             .seg_start = seg_start,
@@ -338,7 +341,7 @@ fn buildInitialPairwiseSegmentCost(
     if (seg_start < uncompressed_values.len) {
         var last_seg = SegmentMergeCost{
             .index = seg_id,
-            .cost = std.math.inf(f64),
+            .cost = math.inf(f64),
             .left_seg = seg_id - 1,
             .right_seg = seg_id + 1,
             .seg_start = seg_start,
@@ -357,7 +360,8 @@ fn mergeCost(uncompressed_values: []const f64, seg_one: SegmentMergeCost, seg_tw
     return computeRMSE(uncompressed_values, merged_start, merged_end);
 }
 
-/// Compute the linear regression that minimizes the Root-Mean-Squared-Errors (RMSE).
+/// Compute the linear interpolation between the bording points defined by `seg_start` and `seg_end`
+/// that minimizes the Root-Mean-Squared-Errors (RMSE).
 fn computeLinearRegression(values: []const f64, seg_start: usize, seg_end: usize) LinearFunction {
     // Calculate the length of the segment.
     const seg_len: f64 = @floatFromInt(seg_end - seg_start + 1);
@@ -394,7 +398,7 @@ fn computeLinearRegression(values: []const f64, seg_start: usize, seg_end: usize
 
 /// Computes the Root-Mean-Squared-Errors (RMSE) for a segment of the `uncompressed_values`.
 /// This function calculates the error between the actual values and the predicted values
-/// based on a linear regression model fitted to the segment defined by `seg_start` and `seg_end`.
+/// based on a linear interpolation fitted to the segment defined by `seg_start` and `seg_end`.
 fn computeRMSE(uncompressed_values: []const f64, seg_start: usize, seg_end: usize) f64 {
     const seg_len: f64 = @floatFromInt(seg_end - seg_start + 1);
     if (seg_len <= 1) return 0.0; // If the segment has one or no points, return zero error.
@@ -413,11 +417,11 @@ fn computeRMSE(uncompressed_values: []const f64, seg_start: usize, seg_end: usiz
     }
 
     // Return the RMSE.
-    return std.math.sqrt(sse / seg_len);
+    return math.sqrt(sse / seg_len);
 }
 
 /// Append `value` of `type` determined at compile time to `compressed_values`.
-fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)) !void {
+fn appendValue(comptime T: type, value: T, compressed_values: *ArrayList(u8)) !void {
     // Compile-time type check
     switch (@TypeOf(value)) {
         f64, usize => {
@@ -438,11 +442,11 @@ pub fn testRMSEisWithinErrorBound(
     if (values.len < 2) return;
 
     const rmse = computeRMSE(values, 0, values.len - 1);
-    try std.testing.expect(rmse <= error_bound);
+    try testing.expect(rmse <= error_bound);
 }
 
 test "bottom-up can compress and decompress with zero error bound" {
-    const allocator = std.testing.allocator;
+    const allocator = testing.allocator;
 
     // Output buffer.
     var uncompressed_values = ArrayList(f64).init(allocator);
@@ -461,7 +465,7 @@ test "bottom-up can compress and decompress with zero error bound" {
     try decompress(compressed_values.items, &decompressed_values);
 
     // Check if the decompressed values have the same lenght as the compressed ones.
-    try std.testing.expectEqual(uncompressed_values.items.len, decompressed_values.items.len);
+    try testing.expectEqual(uncompressed_values.items.len, decompressed_values.items.len);
 }
 
 test "bottom-up random lines and random error bound compress and decompress" {
@@ -492,7 +496,7 @@ test "bottom-up random lines and random error bound compress and decompress" {
     try decompress(compressed_values.items, &decompressed_values);
 
     // Check if the decompressed values have the same lenght as the compressed ones.
-    try std.testing.expectEqual(uncompressed_values.items.len, decompressed_values.items.len);
+    try testing.expectEqual(uncompressed_values.items.len, decompressed_values.items.len);
 
     // In theory, the linear interpolation of all segments formed by the slices of preserved points, should have a RMSE
     // within the error bound otherwise there a mistake. Since the error bound and the poitns are unknown, we need to
