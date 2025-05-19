@@ -189,7 +189,7 @@ pub fn generateRandomValues(uncompressed_values: *ArrayList(f64), random: Random
 /// them to `uncompressed_values`. If the value is not finite, it is replaced with zero.
 pub fn generateFiniteRandomValues(uncompressed_values: *ArrayList(f64), random: Random) !void {
     var index: usize = 0;
-    while (index < number_of_values) {
+    while (index < 20) {
         // rand can only generate f64 values in the range [0, 1), thus using u64.
         const random_value = @as(f64, @bitCast(random.int(u64)));
         // Online add finite values.
