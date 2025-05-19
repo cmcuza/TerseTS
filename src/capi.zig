@@ -135,8 +135,9 @@ test "method enum must match method constants" {
     try testing.expectEqual(@intFromEnum(tersets.Method.SimPiece), 5);
     try testing.expectEqual(@intFromEnum(tersets.Method.PiecewiseConstantHistogram), 6);
     try testing.expectEqual(@intFromEnum(tersets.Method.PiecewiseLinearHistogram), 7);
-    try testing.expectEqual(@intFromEnum(tersets.Method.VisvalingamWhyatt), 8);
-    try testing.expectEqual(@intFromEnum(tersets.Method.IdentityCompression), 9);
+    try testing.expectEqual(@intFromEnum(tersets.Method.ABCLinearApproximation), 8);
+    try testing.expectEqual(@intFromEnum(tersets.Method.VisvalingamWhyatt), 9);
+    try testing.expectEqual(@intFromEnum(tersets.Method.IdentityCompression), 10);
 }
 
 test "error for unknown compression method" {
@@ -221,8 +222,8 @@ test "can compress and decompress" {
         .len = uncompressed_array.len,
     };
 
-    // Calling "Identity" compression, which does not need configuration.
-    const configuration = Configuration{ .method = 9, .parameters = undefined };
+    // Calling "Identity" compression with value equal 10, which does not need configuration.
+    const configuration = Configuration{ .method = 10, .parameters = undefined };
 
     const compress_return_code = compress(
         uncompressed_values,

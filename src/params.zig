@@ -85,6 +85,7 @@ pub fn mapBasicParamsToMethodParams(
         .SimPiece,
         .SwingFilter,
         .SwingFilterDisconnected,
+        .ABCLinearApproximation,
         => {
             const concrete = try allocator.create(FunctionalParams);
             concrete.* = FunctionalParams{
@@ -137,6 +138,7 @@ pub fn destroyMappedParams(
         .SwingFilterDisconnected,
         .PoorMansCompressionMidrange,
         .PoorMansCompressionMean,
+        .ABCLinearApproximation,
         => {
             const typed: *FunctionalParams = castOpaquePtr(FunctionalParams, mutable_ptr);
             allocator.destroy(typed);
@@ -149,6 +151,6 @@ pub fn destroyMappedParams(
             const typed: *LineSimplificationParams = castOpaquePtr(LineSimplificationParams, mutable_ptr);
             allocator.destroy(typed);
         },
-        else => {},
+        .IdentityCompression => {},
     }
 }
