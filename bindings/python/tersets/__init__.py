@@ -41,26 +41,44 @@ from ctypes import (
 # -----------------------------------------------------------------------------
 
 def __load_library():
+    import platform
+
     if sys.platform == "win32":
         library_name = "tersets.pyd"
     else:
         library_name = "tersets" + sysconfig.get_config_var("SHLIB_SUFFIX")
 
+    # First try the installed library
     library_folder = pathlib.Path(__file__).parent.parent.resolve()
-    library_path = library_folder / library_name
-    if library_path.exists():
-        return cdll.LoadLibrary(str(library_path))
+    installed_path = library_folder / library_name
+    if installed_path.exists():
+        return cdll.LoadLibrary(str(installed_path))
 
-    # Fallback: use Zig build location.
+    # Try the fallback build output from Zig
     repository_root = pathlib.Path(__file__).parent.parent.parent.parent.resolve()
-    if sys.platform == "win32":
-        library_path = repository_root / "zig-out" / "bin" / "tersets.dll"
-    elif sys.platform == "darwin":
-        library_path = repository_root / "zig-out" / "lib" / "tersets.dylib"
-    else:
-        library_path = repository_root / "zig-out" / "lib" / library_name
 
-    return cdll.LoadLibrary(str(library_path))
+    if sys.platform == "win32":
+        fallback_folder = repository_root / "zig-out" / "bin"
+        fallback_name = "tersets.dll"
+    elif sys.platform == "darwin":
+        fallback_folder = repository_root / "zig-out" / "lib"
+        fallback_name = "tersets.dylib"
+    else:
+        fallback_folder = repository_root / "zig-out" / "lib"
+        fallback_name = library_name  # usually .so
+
+    # Try exact fallback first
+    fallback_path = fallback_folder / fallback_name
+    if fallback_path.exists():
+        return cdll.LoadLibrary(str(fallback_path))
+
+    # As last resort, search for a matching pattern
+    try:
+        globbed_path = next(fallback_folder.glob("*" + fallback_name))
+        return cdll.LoadLibrary(str(globbed_path))
+    except StopIteration:
+        raise OSError(f"TerseTS shared library not found: expected {fallback_path}")
+
 
 __library = __load_library()
 
