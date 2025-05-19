@@ -76,30 +76,79 @@ pub const HistogramParams = extern struct {
 pub fn mapBasicParamsToMethodParams(
     method: Method,
     basic: *const BasicParams,
+    allocator: Allocator,
 ) !?*const anyopaque {
     switch (method) {
-        .PoorMansCompressionMidrange, .PoorMansCompressionMean, .SlideFilter, .SimPiece, .SwingFilter, .SwingFilterDisconnected => {
-            const concrete = FunctionalParams{
+        .PoorMansCompressionMidrange,
+        .PoorMansCompressionMean,
+        .SlideFilter,
+        .SimPiece,
+        .SwingFilter,
+        .SwingFilterDisconnected,
+        => {
+            const concrete = try allocator.create(FunctionalParams);
+            concrete.* = FunctionalParams{
                 .error_bound_type = .abs_error_bound,
                 .error_bound = basic.error_bound,
             };
-            return &concrete;
+            return @ptrCast(@as(*const anyopaque, concrete));
         },
         .PiecewiseConstantHistogram, .PiecewiseLinearHistogram => {
-            const concrete = HistogramParams{
+            const concrete = try allocator.create(HistogramParams);
+            concrete.* = HistogramParams{
                 .maximum_buckets = @intFromFloat(basic.error_bound),
             };
-            return &concrete;
+            return @ptrCast(@as(*const anyopaque, concrete));
         },
         .VisvalingamWhyatt => {
-            const concrete = LineSimplificationParams{
+            const concrete = try allocator.create(LineSimplificationParams);
+            concrete.* = LineSimplificationParams{
                 .error_bound = basic.error_bound,
                 .cost_function = .root_mean_square_error,
             };
-            return &concrete;
+            return @ptrCast(@as(*const anyopaque, concrete));
         },
         .IdentityCompression => {
             return null;
         },
+    }
+}
+
+/// Cast a *anyopaque pointer to a mutable pointer of the given type.
+/// Must only be used when the actual underlying type is known.
+pub fn castOpaquePtr(comptime T: type, ptr: *anyopaque) *T {
+    return @alignCast(@ptrCast(ptr));
+}
+
+/// Destroys method-specific parameters previously returned by mapBasicParamsToMethodParams.
+/// The caller must ensure `ptr` was allocated via the `allocator` and matches the `method`.
+pub fn destroyMappedParams(
+    allocator: Allocator,
+    method: Method,
+    ptr: *const anyopaque,
+) void {
+    // Unsafe, but caller promises ownership so this is OK:
+    const mutable_ptr: *anyopaque = @constCast(ptr);
+
+    switch (method) {
+        .SimPiece,
+        .SlideFilter,
+        .SwingFilter,
+        .SwingFilterDisconnected,
+        .PoorMansCompressionMidrange,
+        .PoorMansCompressionMean,
+        => {
+            const typed: *FunctionalParams = castOpaquePtr(FunctionalParams, mutable_ptr);
+            allocator.destroy(typed);
+        },
+        .PiecewiseConstantHistogram, .PiecewiseLinearHistogram => {
+            const typed: *HistogramParams = castOpaquePtr(HistogramParams, mutable_ptr);
+            allocator.destroy(typed);
+        },
+        .VisvalingamWhyatt => {
+            const typed: *LineSimplificationParams = castOpaquePtr(LineSimplificationParams, mutable_ptr);
+            allocator.destroy(typed);
+        },
+        else => {},
     }
 }

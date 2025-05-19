@@ -136,7 +136,9 @@ pub fn testCompressAndDecompress(
     const method_parameters = try params.mapBasicParamsToMethodParams(
         method,
         &basic_parameters,
+        allocator,
     );
+    defer if (method_parameters) |ptr| params.destroyMappedParams(allocator, method, ptr);
 
     const compressed_values = try tersets.compress(
         uncompressed_values,

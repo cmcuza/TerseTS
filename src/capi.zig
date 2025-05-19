@@ -33,7 +33,7 @@ pub const UncompressedValues = Array(f64);
 /// A pointer to compressed values and the number of bytes.
 pub const CompressedValues = Array(u8);
 
-/// Configuration to use for compression and/or decompression.
+/// Configuration to use for compression.
 pub const Configuration = extern struct { method: u8, parameters: ?*const anyopaque };
 
 /// Compress `uncompressed_values` to `compressed_values` according to `configuration`.

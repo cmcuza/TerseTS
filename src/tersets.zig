@@ -54,8 +54,10 @@ pub const Method = enum {
 
 /// Compress `uncompressed_values` within `error_bound` using `method` and returns the results
 /// as a ArrayList of bytes returned by the compression methods. `allocator` is passed to the
-/// compression functions for memory management. If the compression is sucessful, the `method`
-/// is encoded in the compressed values last byte. If an error occurs it is returned.
+/// compression functions for memory management. `parameters` is used to specify the parameters
+/// of the compression methods. If `parameters` is null, an error is return.
+/// If the compression is sucessful, the `method` is encoded in the compressed values last byte.
+/// If an error occurs it is returned.
 pub fn compress(
     uncompressed_values: []const f64,
     allocator: Allocator,
@@ -63,6 +65,7 @@ pub fn compress(
     parameters: ?*const anyopaque,
 ) Error!ArrayList(u8) {
     if (uncompressed_values.len == 0) return Error.UnsupportedInput;
+    if ((parameters == null) and (method != Method.IdentityCompression)) return Error.UnsupportedParameters;
 
     var compressed_values = ArrayList(u8).init(allocator);
 
