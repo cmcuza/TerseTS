@@ -75,7 +75,7 @@ struct Configuration {
 // Parameter Structs
 // -----------------------------------------------------------------------------
 
-/// Basic fallback parameters — used when `is_default = 1`.
+/// Basic fallback parameters.
 struct BasicParams {
     float error_bound;
 };
@@ -85,7 +85,7 @@ struct HistogramParams {
     size_t maximum_buckets;
 };
 
-/// Functional approximation parameters (e.g. linear/piecewise regression).
+/// Functional approximation parameters (e.g. PMC, SWING).
 struct FunctionalParams {
     enum ErrorBoundType error_bound_type;
     float error_bound;

@@ -23,12 +23,13 @@ from enum import Enum, IntEnum, unique
 from ctypes import (
     cdll,
     Structure,
-    c_byte,
+    c_ubyte,
     c_uint8,
     c_float,
     c_double,
     c_size_t,
     c_void_p,
+    pointer,
     POINTER,
     byref,
     cast,
@@ -74,12 +75,13 @@ class ErrorBoundType(IntEnum):
 class CostFunction(IntEnum):
     RMSE = 0
     LINF = 1
+    AUC = 2
 
 class _UncompressedValues(Structure):
     _fields_ = [("data", POINTER(c_double)), ("len", c_size_t)]
 
 class _CompressedValues(Structure):
-    _fields_ = [("data", POINTER(c_byte)), ("len", c_size_t)]
+    _fields_ = [("data", POINTER(c_ubyte)), ("len", c_size_t)]
 
 class BasicParams(Structure):
     _fields_ = [
@@ -119,8 +121,9 @@ class Method(IntEnum):
     SimPiece = 5
     PiecewiseConstantHistogram = 6
     PiecewiseLinearHistogram = 7
-    VisvalingamWhyatt = 8
-    IdentityCompression = 9
+    ABCLinearApproximation = 8
+    VisvalingamWhyatt = 9
+    IdentityCompression = 10
 
 @unique
 class TerseTSError(IntEnum):
@@ -186,8 +189,7 @@ def compress(values: List[float], method: Method, params: Union[float, BasicPara
     compressed_values = _CompressedValues()
     config = _Configuration(
         method=method.value,
-        is_default=is_default,
-        parameters=cast(c_void_p, byref(params_struct))
+        parameters=cast(pointer(params_struct), c_void_p)
     )
 
     err = __library.compress(uncompressed_values, byref(compressed_values), config)
@@ -200,7 +202,7 @@ def compress(values: List[float], method: Method, params: Union[float, BasicPara
 def decompress(values: bytes) -> List[float]:
     """Decompress a byte sequence into a list of floats."""
     compressed_values = _CompressedValues()
-    compressed_values.data = (c_byte * len(values))(*values)
+    compressed_values.data = (c_ubyte * len(values))(*values)
     compressed_values.len = len(values)
 
     decompressed_values = _UncompressedValues()

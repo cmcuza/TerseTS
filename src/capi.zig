@@ -23,6 +23,8 @@ const tersets = @import("tersets.zig");
 const Error = tersets.Error;
 const Method = tersets.Method;
 
+const params = @import("params.zig");
+
 /// Global memory allocator used by tersets.
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const allocator = gpa.allocator();
@@ -124,6 +126,26 @@ fn errorToInt(err: Error) i32 {
         Error.EmptyConvexHull => return 7,
         Error.EmptyQueue => return 8,
     }
+}
+
+/// Force link the functional parameters to ensure they are included in the binary.
+export fn _force_link_functional(p: *const params.FunctionalParams) f32 {
+    return p.error_bound;
+}
+
+/// Force link the basic parameters to ensure they are included in the binary.
+export fn _force_link_basic(p: *const params.BasicParams) f32 {
+    return p.error_bound;
+}
+
+/// Force link the histogram parameters to ensure they are included in the binary.
+export fn _force_link_histogram(p: *const params.HistogramParams) usize {
+    return p.maximum_buckets;
+}
+
+/// Force link the line simplification parameters to ensure they are included in the binary.
+export fn _force_link_linesimp(p: *const params.LineSimplificationParams) f32 {
+    return p.error_bound;
 }
 
 test "method enum must match method constants" {

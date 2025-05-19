@@ -29,7 +29,7 @@ class TerseTSPythonTest(unittest.TestCase):
         ]
         # Use FunctionalParams with relative error
         params = FunctionalParams(
-            error_bound_type=ErrorBoundType.RELATIVE,
+            error_bound_type=ErrorBoundType.ABS,
             error_bound=0.0
         )
 
