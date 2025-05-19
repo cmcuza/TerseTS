@@ -74,53 +74,86 @@ pub fn compress(
     switch (method) {
         .PoorMansCompressionMidrange => {
             const param = try castParams(params.FunctionalParams, parameters);
-            try poor_mans_compression.compressMidrange(
-                uncompressed_values,
-                &compressed_values,
-                param.error_bound,
-            );
+            if (param.error_bound_type == params.ErrorBoundType.abs_error_bound) {
+                try poor_mans_compression.compressMidrange(
+                    uncompressed_values,
+                    &compressed_values,
+                    param.error_bound,
+                );
+            } else if (param.error_bound_type == params.ErrorBoundType.relative_error_bound) {
+                try poor_mans_compression.compressMidrangeRelative(
+                    uncompressed_values,
+                    &compressed_values,
+                    param.error_bound,
+                );
+            } else {
+                // Probably not needed because of we are using enums so the compiler should
+                // check this at compile time. But just adding just in case. Maybe we should
+                // create proper testing for this.
+                return Error.UnsupportedParameters;
+            }
         },
         .PoorMansCompressionMean => {
             const param = try castParams(params.FunctionalParams, parameters);
-            try poor_mans_compression.compressMean(
-                uncompressed_values,
-                &compressed_values,
-                param.error_bound,
-            );
+            if (param.error_bound_type == params.ErrorBoundType.abs_error_bound) {
+                try poor_mans_compression.compressMean(
+                    uncompressed_values,
+                    &compressed_values,
+                    param.error_bound,
+                );
+            } else {
+                return Error.UnsupportedParameters;
+            }
         },
         .SwingFilter => {
             const param = try castParams(params.FunctionalParams, parameters);
-            try swing_slide_filter.compressSwingFilter(
-                uncompressed_values,
-                &compressed_values,
-                param.error_bound,
-            );
+            if (param.error_bound_type == params.ErrorBoundType.abs_error_bound) {
+                try swing_slide_filter.compressSwingFilter(
+                    uncompressed_values,
+                    &compressed_values,
+                    param.error_bound,
+                );
+            } else {
+                return Error.UnsupportedParameters;
+            }
         },
         .SwingFilterDisconnected => {
             const param = try castParams(params.FunctionalParams, parameters);
-            try swing_slide_filter.compressSwingFilterDisconnected(
-                uncompressed_values,
-                &compressed_values,
-                param.error_bound,
-            );
+            if (param.error_bound_type == params.ErrorBoundType.abs_error_bound) {
+                try swing_slide_filter.compressSwingFilterDisconnected(
+                    uncompressed_values,
+                    &compressed_values,
+                    param.error_bound,
+                );
+            } else {
+                return Error.UnsupportedParameters;
+            }
         },
         .SlideFilter => {
             const param = try castParams(params.FunctionalParams, parameters);
-            try swing_slide_filter.compressSlideFilter(
-                uncompressed_values,
-                &compressed_values,
-                allocator,
-                param.error_bound,
-            );
+            if (param.error_bound_type == params.ErrorBoundType.abs_error_bound) {
+                try swing_slide_filter.compressSlideFilter(
+                    uncompressed_values,
+                    &compressed_values,
+                    allocator,
+                    param.error_bound,
+                );
+            } else {
+                return Error.UnsupportedParameters;
+            }
         },
         .SimPiece => {
             const param = try castParams(params.FunctionalParams, parameters);
-            try sim_piece.compressSimPiece(
-                uncompressed_values,
-                &compressed_values,
-                allocator,
-                param.error_bound,
-            );
+            if (param.error_bound_type == params.ErrorBoundType.abs_error_bound) {
+                try sim_piece.compressSimPiece(
+                    uncompressed_values,
+                    &compressed_values,
+                    allocator,
+                    param.error_bound,
+                );
+            } else {
+                return Error.UnsupportedParameters;
+            }
         },
         .PiecewiseConstantHistogram => {
             const param = try castParams(params.HistogramParams, parameters);
@@ -142,21 +175,29 @@ pub fn compress(
         },
         .ABCLinearApproximation => {
             const param = try castParams(params.FunctionalParams, parameters);
-            try abc_linear_compression.compress(
-                uncompressed_values,
-                &compressed_values,
-                allocator,
-                param.error_bound,
-            );
+            if (param.error_bound_type == params.ErrorBoundType.abs_error_bound) {
+                try abc_linear_compression.compress(
+                    uncompressed_values,
+                    &compressed_values,
+                    allocator,
+                    param.error_bound,
+                );
+            } else {
+                return Error.UnsupportedParameters;
+            }
         },
         .VisvalingamWhyatt => {
             const param = try castParams(params.LineSimplificationParams, parameters);
-            try vw.compress(
-                uncompressed_values,
-                &compressed_values,
-                allocator,
-                param.error_bound,
-            );
+            if (param.cost_function == params.CostFunction.area_under_curve) {
+                try vw.compress(
+                    uncompressed_values,
+                    &compressed_values,
+                    allocator,
+                    param.error_bound,
+                );
+            } else {
+                return Error.UnsupportedParameters;
+            }
         },
         .IdentityCompression => {
             try indentity.compress(uncompressed_values, &compressed_values);
@@ -232,6 +273,29 @@ pub fn isWithinErrorBound(
         const uncompressed_value = uncompressed_values[index];
         const decompressed_value = decompressed_values[index];
         if (@abs(uncompressed_value - decompressed_value) > error_bound) return false;
+    }
+    return true;
+}
+
+/// Auxiliary function to validate of the decompressed time series is within the relative error
+/// bound of the uncompressed time series. The function returns true if all elements are within
+/// the relative error bound, false otherwise.
+pub fn isWithinRelativeErrorBound(
+    uncompressed_values: []const f64,
+    decompressed_values: []const f64,
+    relative_error_bound: f32,
+) bool {
+    if (uncompressed_values.len != decompressed_values.len) {
+        return false;
+    }
+
+    for (0..uncompressed_values.len) |index| {
+        const original = uncompressed_values[index];
+        const reconstructed = decompressed_values[index];
+
+        const epsilon = @abs(original) * relative_error_bound;
+
+        if (@abs(reconstructed - original) > epsilon) return false;
     }
     return true;
 }

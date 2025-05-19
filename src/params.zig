@@ -35,6 +35,8 @@ pub const CostFunction = enum(u8) {
     root_mean_square_error,
     /// L-infinity norm (maximum absolute error).
     l_infinity_norm,
+    /// Area under the curve (AUC).
+    area_under_curve,
 };
 
 /// A basic parameter structure used as a default for compression methods that only require a
@@ -105,7 +107,7 @@ pub fn mapBasicParamsToMethodParams(
             const concrete = try allocator.create(LineSimplificationParams);
             concrete.* = LineSimplificationParams{
                 .error_bound = basic.error_bound,
-                .cost_function = .root_mean_square_error,
+                .cost_function = .area_under_curve,
             };
             return @ptrCast(@as(*const anyopaque, concrete));
         },

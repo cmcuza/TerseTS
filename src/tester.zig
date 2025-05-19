@@ -116,8 +116,10 @@ pub fn testGenerateCompressAndDecompress(
 
 /// Test that `uncompressed_values` are within `error_bound` according to `within_error_bound` after
 /// it has been compressed and decompressed using `method`. Assumes that `within_error_bound`
-/// returns `false` if the number of uncompressed and decompressed values are different. The
-/// libraries public interface is used to make it simpler to refactor the libraries internals.
+/// returns `false` if the number of uncompressed and decompressed values are different. The function
+/// creates a basic parameters struct and maps it to the method parameters. The function is used to
+/// test default parameters for each method. The libraries public interface is used to make it simpler
+/// to refactor the libraries internals.
 pub fn testCompressAndDecompress(
     uncompressed_values: []const f64,
     allocator: Allocator,

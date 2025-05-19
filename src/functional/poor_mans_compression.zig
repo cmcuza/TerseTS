@@ -28,6 +28,8 @@ const Method = tersets.Method;
 const Error = tersets.Error;
 const tester = @import("../tester.zig");
 
+const params = @import("../params.zig");
+
 /// Compress `uncompressed_values` within `error_bound` using "Poor Man’s Compression - Midrange".
 /// The function writes the result to `compressed_values`. If an error occurs it is returned.
 pub fn compressMidrange(
@@ -96,6 +98,51 @@ pub fn compressMean(
     try appendValueAndIndexToArrayList(average, index, compressed_values);
 }
 
+/// Compress `uncompressed_values` using "Poor Man’s Compression - Midrange" with a
+/// `relative_error_bound`. The error bound is a ratio (e.g., 0.01 = 1%), which ensures that every
+/// decompressed value is within `relative_error_bound` * |uncompressed_values|. The function writes
+/// the result to `compressed_values`. If an error occurs it is returned.
+/// Compress using PMC with relative error bound.
+/// Guarantees that each reconstructed value is within `±|v| * relative_bound`.
+pub fn compressMidrangeRelative(
+    uncompressed_values: []const f64,
+    compressed_values: *ArrayList(u8),
+    relative_bound: f32,
+) Error!void {
+    if (uncompressed_values.len == 0) return;
+
+    var minimum: f80 = uncompressed_values[0];
+    var maximum: f80 = uncompressed_values[0];
+    var tightest_epsilon: f64 = @abs(uncompressed_values[0]) * relative_bound;
+
+    var index: usize = 1;
+    for (uncompressed_values[1..]) |value| {
+        const next_min = @min(value, minimum);
+        const next_max = @max(value, maximum);
+        const new_epsilon = @abs(value) * relative_bound;
+        const updated_tightest = @min(tightest_epsilon, new_epsilon);
+
+        if ((next_max - next_min) > 2 * updated_tightest) {
+            const compressed_value = (maximum + minimum) / 2;
+            try appendValueAndIndexToArrayList(compressed_value, index, compressed_values);
+
+            // Start new segment
+            minimum = value;
+            maximum = value;
+            tightest_epsilon = new_epsilon;
+        } else {
+            minimum = next_min;
+            maximum = next_max;
+            tightest_epsilon = updated_tightest;
+        }
+
+        index += 1;
+    }
+
+    const compressed_value = (maximum + minimum) / 2;
+    try appendValueAndIndexToArrayList(compressed_value, index, compressed_values);
+}
+
 /// Decompress `compressed_values` produced by "Poor Man’s Compression - Midrange" and
 /// "Poor Man’s Compression - Mean". The function writes the result to `decompressed_values`.
 /// If an error occurs it is returned.
@@ -153,4 +200,45 @@ test "mean can always compress and decompress" {
         0,
         tersets.isWithinErrorBound,
     );
+}
+
+test "midrange relative can always compress and decompress" {
+    // Test that the compressed values are within the relative error bound.
+    // The function is different from the ones above, as it uses a relative error bound and
+    // the testGenerateCompressAndDecompress function does not support relative error bounds yet.
+    const allocator = testing.allocator;
+
+    var uncompressed_values = ArrayList(f64).init(allocator);
+    defer uncompressed_values.deinit();
+
+    // Generate a random relative error bound between 0.0 and 0.1, (i.e, 0% and 10%).
+    const relative_error_bound: f32 = tester.generateBoundedRandomValue(f32, 0.0, 0.1, undefined);
+
+    // Specifically for this test, we need to use the relative error bound.
+    const parameters = params.FunctionalParams{
+        .error_bound = relative_error_bound,
+        .error_bound_type = .relative_error_bound,
+    };
+
+    try tester.generateBoundedRandomValues(&uncompressed_values, -100, 100, undefined);
+
+    var compressed_values = try tersets.compress(
+        uncompressed_values.items,
+        allocator,
+        Method.PoorMansCompressionMidrange,
+        &parameters,
+    );
+    defer compressed_values.deinit();
+
+    var decompressed_values = try tersets.decompress(
+        compressed_values.items,
+        allocator,
+    );
+    defer decompressed_values.deinit();
+
+    try testing.expect(tersets.isWithinRelativeErrorBound(
+        uncompressed_values.items,
+        decompressed_values.items,
+        relative_error_bound,
+    ));
 }
