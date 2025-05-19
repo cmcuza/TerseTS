@@ -18,18 +18,21 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
+const params = @import("params.zig");
 const poor_mans_compression = @import("functional/poor_mans_compression.zig");
 const swing_slide_filter = @import("functional/swing_slide_filter.zig");
 const sim_piece = @import("functional/sim_piece.zig");
 const piecewise_histogram = @import("functional/histogram_compression.zig");
 const abc_linear_compression = @import("functional/abc_linear_compression.zig");
 const vw = @import("line_simplification/visvalingam_whyatt.zig");
+const indentity = @import("lossless/identity.zig");
 
 /// The errors that can occur in TerseTS.
 pub const Error = error{
     UnknownMethod,
     UnsupportedInput,
     UnsupportedErrorBound,
+    UnsupportedParameters,
     ItemNotFound,
     OutOfMemory,
     EmptyConvexHull,
@@ -48,99 +51,156 @@ pub const Method = enum {
     PiecewiseLinearHistogram,
     ABCLinearApproximation,
     VisvalingamWhyatt,
+    IdentityCompression,
 };
 
 /// Compress `uncompressed_values` within `error_bound` using `method` and returns the results
 /// as a ArrayList of bytes returned by the compression methods. `allocator` is passed to the
-/// compression functions for memory management. If the compression is sucessful, the `method`
-/// is encoded in the compressed values last byte. If an error occurs it is returned.
+/// compression functions for memory management. `parameters` is used to specify the parameters
+/// of the compression methods. If `parameters` is null, an error is return.
+/// If the compression is sucessful, the `method` is encoded in the compressed values last byte.
+/// If an error occurs it is returned.
 pub fn compress(
     uncompressed_values: []const f64,
     allocator: Allocator,
     method: Method,
-    error_bound: f32,
+    parameters: ?*const anyopaque,
 ) Error!ArrayList(u8) {
     if (uncompressed_values.len == 0) return Error.UnsupportedInput;
-    if (error_bound < 0) return Error.UnsupportedErrorBound;
+    if ((parameters == null) and (method != Method.IdentityCompression)) return Error.UnsupportedParameters;
 
     var compressed_values = ArrayList(u8).init(allocator);
 
     switch (method) {
         .PoorMansCompressionMidrange => {
-            try poor_mans_compression.compressMidrange(
-                uncompressed_values,
-                &compressed_values,
-                error_bound,
-            );
+            const param = try castParams(params.FunctionalParams, parameters);
+            if (param.error_bound_type == params.ErrorBoundType.abs_error_bound) {
+                try poor_mans_compression.compressMidrange(
+                    uncompressed_values,
+                    &compressed_values,
+                    param.error_bound,
+                );
+            } else if (param.error_bound_type == params.ErrorBoundType.relative_error_bound) {
+                try poor_mans_compression.compressMidrangeRelative(
+                    uncompressed_values,
+                    &compressed_values,
+                    param.error_bound,
+                );
+            } else {
+                // Probably not needed because of we are using enums so the compiler should
+                // check this at compile time. But just adding just in case. Maybe we should
+                // create proper testing for this.
+                return Error.UnsupportedParameters;
+            }
         },
         .PoorMansCompressionMean => {
-            try poor_mans_compression.compressMean(
-                uncompressed_values,
-                &compressed_values,
-                error_bound,
-            );
+            const param = try castParams(params.FunctionalParams, parameters);
+            if (param.error_bound_type == params.ErrorBoundType.abs_error_bound) {
+                try poor_mans_compression.compressMean(
+                    uncompressed_values,
+                    &compressed_values,
+                    param.error_bound,
+                );
+            } else {
+                return Error.UnsupportedParameters;
+            }
         },
         .SwingFilter => {
-            try swing_slide_filter.compressSwingFilter(
-                uncompressed_values,
-                &compressed_values,
-                error_bound,
-            );
+            const param = try castParams(params.FunctionalParams, parameters);
+            if (param.error_bound_type == params.ErrorBoundType.abs_error_bound) {
+                try swing_slide_filter.compressSwingFilter(
+                    uncompressed_values,
+                    &compressed_values,
+                    param.error_bound,
+                );
+            } else {
+                return Error.UnsupportedParameters;
+            }
         },
         .SwingFilterDisconnected => {
-            try swing_slide_filter.compressSwingFilterDisconnected(
-                uncompressed_values,
-                &compressed_values,
-                error_bound,
-            );
+            const param = try castParams(params.FunctionalParams, parameters);
+            if (param.error_bound_type == params.ErrorBoundType.abs_error_bound) {
+                try swing_slide_filter.compressSwingFilterDisconnected(
+                    uncompressed_values,
+                    &compressed_values,
+                    param.error_bound,
+                );
+            } else {
+                return Error.UnsupportedParameters;
+            }
         },
         .SlideFilter => {
-            try swing_slide_filter.compressSlideFilter(
-                uncompressed_values,
-                &compressed_values,
-                allocator,
-                error_bound,
-            );
+            const param = try castParams(params.FunctionalParams, parameters);
+            if (param.error_bound_type == params.ErrorBoundType.abs_error_bound) {
+                try swing_slide_filter.compressSlideFilter(
+                    uncompressed_values,
+                    &compressed_values,
+                    allocator,
+                    param.error_bound,
+                );
+            } else {
+                return Error.UnsupportedParameters;
+            }
         },
         .SimPiece => {
-            try sim_piece.compressSimPiece(
-                uncompressed_values,
-                &compressed_values,
-                allocator,
-                error_bound,
-            );
+            const param = try castParams(params.FunctionalParams, parameters);
+            if (param.error_bound_type == params.ErrorBoundType.abs_error_bound) {
+                try sim_piece.compressSimPiece(
+                    uncompressed_values,
+                    &compressed_values,
+                    allocator,
+                    param.error_bound,
+                );
+            } else {
+                return Error.UnsupportedParameters;
+            }
         },
         .PiecewiseConstantHistogram => {
+            const param = try castParams(params.HistogramParams, parameters);
             try piecewise_histogram.compressPWCH(
                 uncompressed_values,
                 &compressed_values,
                 allocator,
-                error_bound,
+                param.maximum_buckets,
             );
         },
         .PiecewiseLinearHistogram => {
+            const param = try castParams(params.HistogramParams, parameters);
             try piecewise_histogram.compressPWLH(
                 uncompressed_values,
                 &compressed_values,
                 allocator,
-                error_bound,
+                param.maximum_buckets,
             );
         },
         .ABCLinearApproximation => {
-            try abc_linear_compression.compress(
-                uncompressed_values,
-                &compressed_values,
-                allocator,
-                error_bound,
-            );
+            const param = try castParams(params.FunctionalParams, parameters);
+            if (param.error_bound_type == params.ErrorBoundType.abs_error_bound) {
+                try abc_linear_compression.compress(
+                    uncompressed_values,
+                    &compressed_values,
+                    allocator,
+                    param.error_bound,
+                );
+            } else {
+                return Error.UnsupportedParameters;
+            }
         },
         .VisvalingamWhyatt => {
-            try vw.compress(
-                uncompressed_values,
-                &compressed_values,
-                allocator,
-                error_bound,
-            );
+            const param = try castParams(params.LineSimplificationParams, parameters);
+            if (param.cost_function == params.CostFunction.area_under_curve) {
+                try vw.compress(
+                    uncompressed_values,
+                    &compressed_values,
+                    allocator,
+                    param.error_bound,
+                );
+            } else {
+                return Error.UnsupportedParameters;
+            }
+        },
+        .IdentityCompression => {
+            try indentity.compress(uncompressed_values, &compressed_values);
         },
     }
     try compressed_values.append(@intFromEnum(method));
@@ -189,6 +249,9 @@ pub fn decompress(
         .VisvalingamWhyatt => {
             try vw.decompress(compressed_values_slice, &decompressed_values);
         },
+        .IdentityCompression => {
+            try indentity.decompress(compressed_values_slice, &decompressed_values);
+        },
     }
 
     return decompressed_values;
@@ -214,6 +277,29 @@ pub fn isWithinErrorBound(
     return true;
 }
 
+/// Auxiliary function to validate of the decompressed time series is within the relative error
+/// bound of the uncompressed time series. The function returns true if all elements are within
+/// the relative error bound, false otherwise.
+pub fn isWithinRelativeErrorBound(
+    uncompressed_values: []const f64,
+    decompressed_values: []const f64,
+    relative_error_bound: f32,
+) bool {
+    if (uncompressed_values.len != decompressed_values.len) {
+        return false;
+    }
+
+    for (0..uncompressed_values.len) |index| {
+        const original = uncompressed_values[index];
+        const reconstructed = decompressed_values[index];
+
+        const epsilon = @abs(original) * relative_error_bound;
+
+        if (@abs(reconstructed - original) > epsilon) return false;
+    }
+    return true;
+}
+
 /// Get the maximum index of the available methods in TerseTS.
 pub fn getMaxMethodIndex() usize {
     const method_info = @typeInfo(Method).@"enum";
@@ -224,4 +310,9 @@ pub fn getMaxMethodIndex() usize {
     }
 
     return max_index;
+}
+
+fn castParams(comptime ParamsType: type, parameters: ?*const anyopaque) !*const ParamsType {
+    if (parameters == null) return Error.UnsupportedParameters;
+    return @alignCast(@ptrCast(parameters.?));
 }
