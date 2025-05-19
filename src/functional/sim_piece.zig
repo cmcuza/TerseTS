@@ -37,9 +37,9 @@ const DiscretePoint = shared.DiscretePoint;
 
 const tester = @import("../tester.zig");
 
-/// Compresses `uncompressed_values` within `error_bound` using the "Sim-Piece" algorithm, writing
-/// the result to `compressed_values`. The `allocator` is used for memory allocation of intermediate
-/// data structures. If an error occurs, it is returned.
+/// Compresses `uncompressed_values` within `error_bound` using the "Sim-Piece" algorithm.
+/// The function writes the result to `compressed_values`. The `allocator` is used for memory
+/// allocation of intermediate data structures. If an error occurs, it is returned.
 pub fn compressSimPiece(
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
@@ -92,7 +92,7 @@ pub fn compressSimPiece(
     try appendValue(usize, uncompressed_values.len, compressed_values);
 }
 
-/// Decompress `compressed_values` produced by "Sim-Piece" and write the result to
+/// Decompress `compressed_values` produced by "Sim-Piece". The function writes the result to
 /// `decompressed_values`. The `allocator` is used for memory allocation of intermediate
 /// data structures. If an error occurs it is returned.
 pub fn decompress(
@@ -192,12 +192,15 @@ fn computeSegmentsMetadata(
     uncompressed_values: []const f64,
     segments_metadata: *ArrayList(SegmentMetadata),
     error_bound: f32,
-) !void {
+) Error!void {
     // Adjust the error bound to avoid exceeding it during decompression.
     const adjusted_error_bound = error_bound - shared.ErrorBoundMargin;
 
     var upper_bound_slope: f64 = math.floatMax(f64);
     var lower_bound_slope: f64 = -math.floatMax(f64);
+
+    // Check if the first point is NaN or infinite. If so, return an error.
+    if (!math.isFinite(uncompressed_values[0])) return Error.UnsupportedInput;
 
     // Initialize the `start_point` with the first uncompressed value.
     var start_point: DiscretePoint = .{ .time = 0, .value = uncompressed_values[0] };
@@ -209,6 +212,10 @@ fn computeSegmentsMetadata(
 
     // The first point is already part of `current_segment`, the next point is at index one.
     for (1..uncompressed_values.len) |current_timestamp| {
+
+        // Check if the current point is NaN or infinite. If so, return an error.
+        if (!math.isFinite(uncompressed_values[current_timestamp])) return Error.UnsupportedInput;
+
         const end_point: DiscretePoint = .{
             .time = current_timestamp,
             .value = uncompressed_values[current_timestamp],

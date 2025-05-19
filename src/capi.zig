@@ -101,12 +101,12 @@ fn Array(comptime data_type: type) type {
 fn errorToInt(err: Error) i32 {
     switch (err) {
         Error.UnknownMethod => return 1,
-        Error.EmptyInput => return 2,
+        Error.UnsupportedInput => return 2,
         Error.UnsupportedErrorBound => return 3,
-        Error.IncorrectInput => return 4,
-        Error.OutOfMemory => return 5,
-        Error.ItemNotFound => return 6,
-        Error.EmptyConvexHull => return 7,
+        Error.OutOfMemory => return 4,
+        Error.ItemNotFound => return 5,
+        Error.EmptyConvexHull => return 6,
+        Error.EmptyQueue => return 7,
     }
 }
 
@@ -114,10 +114,12 @@ test "method enum must match method constants" {
     try testing.expectEqual(@intFromEnum(tersets.Method.PoorMansCompressionMidrange), 0);
     try testing.expectEqual(@intFromEnum(tersets.Method.PoorMansCompressionMean), 1);
     try testing.expectEqual(@intFromEnum(tersets.Method.SwingFilter), 2);
-    try testing.expectEqual(@intFromEnum(tersets.Method.SlideFilter), 3);
-    try testing.expectEqual(@intFromEnum(tersets.Method.SimPiece), 4);
-    try testing.expectEqual(@intFromEnum(tersets.Method.PiecewiseConstantHistogram), 5);
-    try testing.expectEqual(@intFromEnum(tersets.Method.PiecewiseLinearHistogram), 6);
+    try testing.expectEqual(@intFromEnum(tersets.Method.SwingFilterDisconnected), 3);
+    try testing.expectEqual(@intFromEnum(tersets.Method.SlideFilter), 4);
+    try testing.expectEqual(@intFromEnum(tersets.Method.SimPiece), 5);
+    try testing.expectEqual(@intFromEnum(tersets.Method.PiecewiseConstantHistogram), 6);
+    try testing.expectEqual(@intFromEnum(tersets.Method.PiecewiseLinearHistogram), 7);
+    try testing.expectEqual(@intFromEnum(tersets.Method.VisvalingamWhyatt), 8);
 }
 
 test "error for unknown compression method" {

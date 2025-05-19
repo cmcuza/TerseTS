@@ -23,16 +23,17 @@ const swing_slide_filter = @import("functional/swing_slide_filter.zig");
 const sim_piece = @import("functional/sim_piece.zig");
 const piecewise_histogram = @import("functional/histogram_compression.zig");
 const abc_linear_compression = @import("functional/abc_linear_compression.zig");
+const vw = @import("line_simplification/visvalingam_whyatt.zig");
 
 /// The errors that can occur in TerseTS.
 pub const Error = error{
     UnknownMethod,
-    ItemNotFound,
-    EmptyInput,
-    IncorrectInput,
+    UnsupportedInput,
     UnsupportedErrorBound,
+    ItemNotFound,
     OutOfMemory,
     EmptyConvexHull,
+    EmptyQueue,
 };
 
 /// The compression methods in TerseTS.
@@ -40,11 +41,13 @@ pub const Method = enum {
     PoorMansCompressionMidrange,
     PoorMansCompressionMean,
     SwingFilter,
+    SwingFilterDisconnected,
     SlideFilter,
     SimPiece,
     PiecewiseConstantHistogram,
     PiecewiseLinearHistogram,
     ABCLinearApproximation,
+    VisvalingamWhyatt,
 };
 
 /// Compress `uncompressed_values` within `error_bound` using `method` and returns the results
@@ -57,7 +60,7 @@ pub fn compress(
     method: Method,
     error_bound: f32,
 ) Error!ArrayList(u8) {
-    if (uncompressed_values.len == 0) return Error.EmptyInput;
+    if (uncompressed_values.len == 0) return Error.UnsupportedInput;
     if (error_bound < 0) return Error.UnsupportedErrorBound;
 
     var compressed_values = ArrayList(u8).init(allocator);
@@ -78,14 +81,21 @@ pub fn compress(
             );
         },
         .SwingFilter => {
-            try swing_slide_filter.compressSwing(
+            try swing_slide_filter.compressSwingFilter(
+                uncompressed_values,
+                &compressed_values,
+                error_bound,
+            );
+        },
+        .SwingFilterDisconnected => {
+            try swing_slide_filter.compressSwingFilterDisconnected(
                 uncompressed_values,
                 &compressed_values,
                 error_bound,
             );
         },
         .SlideFilter => {
-            try swing_slide_filter.compressSlide(
+            try swing_slide_filter.compressSlideFilter(
                 uncompressed_values,
                 &compressed_values,
                 allocator,
@@ -124,6 +134,14 @@ pub fn compress(
                 error_bound,
             );
         },
+        .VisvalingamWhyatt => {
+            try vw.compress(
+                uncompressed_values,
+                &compressed_values,
+                allocator,
+                error_bound,
+            );
+        },
     }
     try compressed_values.append(@intFromEnum(method));
     return compressed_values;
@@ -136,7 +154,7 @@ pub fn decompress(
     compressed_values: []const u8,
     allocator: Allocator,
 ) Error!ArrayList(f64) {
-    if (compressed_values.len == 0) return Error.EmptyInput;
+    if (compressed_values.len == 0) return Error.UnsupportedInput;
 
     const method_index: u8 = compressed_values[compressed_values.len - 1];
     if (method_index > getMaxMethodIndex()) return Error.UnknownMethod;
@@ -150,8 +168,11 @@ pub fn decompress(
         .PoorMansCompressionMidrange, .PoorMansCompressionMean => {
             try poor_mans_compression.decompress(compressed_values_slice, &decompressed_values);
         },
-        .SwingFilter, .SlideFilter => {
-            try swing_slide_filter.decompress(compressed_values_slice, &decompressed_values);
+        .SwingFilter => {
+            try swing_slide_filter.decompressSwingFilter(compressed_values_slice, &decompressed_values);
+        },
+        .SwingFilterDisconnected, .SlideFilter => {
+            try swing_slide_filter.decompressSlideFilter(compressed_values_slice, &decompressed_values);
         },
         .SimPiece => {
             try sim_piece.decompress(compressed_values_slice, &decompressed_values, allocator);
@@ -164,6 +185,9 @@ pub fn decompress(
         },
         .ABCLinearApproximation => {
             try abc_linear_compression.decompress(compressed_values_slice, &decompressed_values);
+        },
+        .VisvalingamWhyatt => {
+            try vw.decompress(compressed_values_slice, &decompressed_values);
         },
     }
 

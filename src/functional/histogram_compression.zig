@@ -52,7 +52,7 @@ const tester = @import("../tester.zig");
 const Approximation = enum(i8) { constant, linear };
 
 /// Compress `uncompressed_values` with the maximum number of buckets defined by the `error_bound`
-/// using "Piecewice Constant Histogram" compression method and write the result to
+/// using "Piecewice Constant Histogram" compression method. The function writes the result to
 /// `compressed_values`. If an error occurs it is returned.
 pub fn compressPWCH(
     uncompressed_values: []const f64,
@@ -73,6 +73,9 @@ pub fn compressPWCH(
     defer histogram.deinit();
 
     for (uncompressed_values, 0..) |elem, index| {
+        // Check if the current point is NaN or infinite. If so, return an error.
+        if (!math.isFinite(elem)) return Error.UnsupportedInput;
+
         try histogram.insert(index, elem);
     }
 
@@ -87,7 +90,7 @@ pub fn compressPWCH(
 }
 
 /// Compress `uncompressed_values` with the maximum number of buckets defined by the `error_bound`
-/// using "Piecewice Linear Histogram" compression method and write the result to
+/// using "Piecewice Linear Histogram" compression method. The function writes the result to
 /// `compressed_values`. If an error occurs it is returned.
 pub fn compressPWLH(
     uncompressed_values: []const f64,
@@ -108,6 +111,9 @@ pub fn compressPWLH(
     defer histogram.deinit();
 
     for (uncompressed_values, 0..) |elem, index| {
+        // Check if the current point is NaN or infinite. If so, return an error.
+        if (!math.isFinite(elem)) return Error.UnsupportedInput;
+
         try histogram.insert(index, elem);
     }
 
@@ -143,7 +149,7 @@ pub fn decompressPWCH(
 ) Error!void {
     // The compressed representation is pairs containing a 64-bit float value
     // and 64-bit integer end index.
-    if (compressed_values.len % 16 != 0) return Error.IncorrectInput;
+    if (compressed_values.len % 16 != 0) return Error.UnsupportedInput;
 
     const compressed_values_and_index = mem.bytesAsSlice(f64, compressed_values);
 
@@ -167,7 +173,7 @@ pub fn decompressPWLH(
 ) Error!void {
     // The compressed representation is composed of three values: (start_value, end_value, end_time)
     // all of type 64-bit float.
-    if (compressed_values.len % 24 != 0) return Error.IncorrectInput;
+    if (compressed_values.len % 24 != 0) return Error.UnsupportedInput;
 
     const compressed_lines_and_index = mem.bytesAsSlice(f64, compressed_values);
 
@@ -419,7 +425,7 @@ const Histogram = struct {
     /// elements in the `buckets` list.
     fn minMerge(self: *Self) !void {
         // Pop the smallest merge error (the least costly merge).
-        const min_merge_error: MergeError = try self.merge_queue.remove();
+        const min_merge_error: MergeError = try self.merge_queue.pop();
 
         // Merge the buckets at min_merge_error.index and min_merge_error.index + 1.
         const index = min_merge_error.index;
@@ -552,13 +558,13 @@ test "Hash PriorityQueue with hash_context for MergeError" {
     try pq.add(error2);
     try pq.add(error3);
 
-    const top_value = try pq.remove();
+    const top_value = try pq.pop();
     try std.testing.expect(top_value.index == 2);
 
-    const next_top = try pq.remove();
+    const next_top = try pq.pop();
     try std.testing.expect(next_top.index == 1);
 
-    const final_top = try pq.remove();
+    const final_top = try pq.pop();
     try std.testing.expect(final_top.index == 3);
 }
 
@@ -575,7 +581,7 @@ test "Histogram insert, and merge test number buckets in PWCH" {
 
     // Insert 1000 random numbers into the histogram.
     for (0..1000) |i| {
-        const rand_number = tester.generateBoundedRandomValue(0, 1000, random);
+        const rand_number = tester.generateBoundedRandomValue(f64, 0, 1000, random);
         try histogram.insert(i, rand_number);
     }
     try expectEqual(max_buckets, histogram.buckets.items.len);
@@ -654,7 +660,7 @@ test "Fixed cluster number with random values for PWCH" {
     // Generate random values for each cluster.
     for (cluster_ranges) |cluster| {
         for (0..cluster.count) |_| {
-            const value = tester.generateBoundedRandomValue(cluster.min, cluster.max, random);
+            const value = tester.generateBoundedRandomValue(f64, cluster.min, cluster.max, random);
             try data_points.append(value);
         }
     }
@@ -713,9 +719,9 @@ test "Random clusters, elements per cluster and values for PWCH" {
     defer cluster_ranges.deinit();
 
     const min_value: f64 = -1e6;
-    const cluster_width: f64 = tester.generateBoundedRandomValue(100, 1000, random);
+    const cluster_width: f64 = tester.generateBoundedRandomValue(f64, 100, 1000, random);
     // Generate min gap.
-    const gap: f64 = cluster_width + tester.generateBoundedRandomValue(100, 1000, random) + 100;
+    const gap: f64 = cluster_width + tester.generateBoundedRandomValue(f64, 100, 1000, random) + 100;
     const max_counts_per_cluster: usize = 100;
 
     var current_min_value = min_value;
@@ -740,7 +746,7 @@ test "Random clusters, elements per cluster and values for PWCH" {
     // Generate random values for each cluster.
     for (cluster_ranges.items) |cluster| {
         for (0..cluster.count) |_| {
-            const value = tester.generateBoundedRandomValue(cluster.min, cluster.max, random);
+            const value = tester.generateBoundedRandomValue(f64, cluster.min, cluster.max, random);
             try data_points.append(value);
         }
     }
@@ -924,7 +930,7 @@ test "Insert random values in an Histogram with expected number of buckets" {
 
     // Insert 1000 random numbers into the histogram.
     for (0..1000) |i| {
-        const rand_number = tester.generateBoundedRandomValue(0, 1000, random);
+        const rand_number = tester.generateBoundedRandomValue(f64, 0, 1000, random);
         try histogram.insert(i, rand_number);
     }
     try expectEqual(max_buckets, histogram.buckets.items.len);
