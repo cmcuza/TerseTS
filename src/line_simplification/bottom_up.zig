@@ -165,27 +165,10 @@ pub fn compress(
     for (0..heap.len) |index| {
         const seg_start = heap.items[index].seg_start;
         const seg_end = heap.items[index].seg_end;
-        // Check if the segment has more than two points.
-        if (seg_start + 1 < seg_end) {
-            // If the segment has only two points, directly append the start value,
-            // the end index, and the end value to the compressed representation.
-            try appendValue(f64, uncompressed_values[seg_start], compressed_values);
-            try appendValue(usize, seg_end, compressed_values);
-            try appendValue(f64, uncompressed_values[seg_end], compressed_values);
-        } else {
-            // If the segment has more than two points, compute the linear regression line
-            // for the segment and use it to calculate the start and end values.
-            const rmse_line = computeLinearRegression(uncompressed_values, seg_start, seg_end);
-            const slope: f64 = @floatCast(rmse_line.slope);
-            const intercept: f64 = @floatCast(rmse_line.slope);
-            const start_value = slope * @as(f64, @floatFromInt(seg_start)) + intercept;
-            const end_value = slope * @as(f64, @floatFromInt(seg_end)) + intercept;
-
-            // Append the computed start value, end index, and end value to the compressed representation.
-            try appendValue(f64, start_value, compressed_values);
-            try appendValue(usize, seg_end, compressed_values);
-            try appendValue(f64, end_value, compressed_values);
-        }
+        // Append the start value, the end index, and the end value to the compressed representation.
+        try appendValue(f64, uncompressed_values[seg_start], compressed_values);
+        try appendValue(usize, seg_end, compressed_values);
+        try appendValue(f64, uncompressed_values[seg_end], compressed_values);
     }
 
     return;
@@ -211,7 +194,7 @@ pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList
         };
 
         // Check if the segment has only two points. If so, we can directly append their values.
-        if (start_point.time + 1 != end_point.time) {
+        if (start_point.time + 1 < end_point.time) {
             const duration: f64 = @floatFromInt(end_point.time - start_point.time);
 
             const slope = (end_point.value - start_point.value) / duration;
@@ -229,17 +212,23 @@ pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList
             try decompressed_values.append(end_point.value);
             first_timestamp = current_timestamp + 1;
         } else {
-            // If the start and end points are the distance 1,
+            // If the start and end points are one point apart,
             // append the start point and end points directly.
             try decompressed_values.append(start_point.value);
-            try decompressed_values.append(end_point.value);
+
+            // Append the end point only if it is different from the start point.
+            // This is to avoid duplicates in the decompressed values.
+            if (start_point.time != end_point.time) {
+                try decompressed_values.append(end_point.value);
+            }
+
             first_timestamp += 2;
         }
     }
 }
 
 /// `SegmentMergeCost` represents a segment and its associated `cost` with the next segment,
-/// which is calculated based RSSE. The `cost` is used to determine the order in which segments
+/// which is calculated based on RMSE. The `cost` is used to determine the order in which segments
 /// are merged during the simplification process. The `merge_index` is the index of the segment, the
 /// `left_seg` and `right_seg`represent the IDs of the segments being merged. The `seg_start` and
 /// `seg_end` represent the start and end indices of the segment in the original data.
@@ -334,7 +323,10 @@ fn buildInitialPairwiseSegmentCost(
         previous_seg = current_seg;
     }
 
-    // Insert the previous segment which is probably the last one and has infinite cost.
+    // Inserts the previous segment, which is likely the last segment in the sequence.
+    // In the bottom-up line simplification algorithm, the last segment cannot be merged
+    // with any segment to its right, as there are no further segments. Therefore, it is
+    // added with an infinite cost to indicate that no further merging is possible.
     try heap.add(previous_seg);
 
     // If the last segment is not a pair, we need to add it to the heap.
@@ -360,42 +352,6 @@ fn mergeCost(uncompressed_values: []const f64, seg_one: SegmentMergeCost, seg_tw
     return computeRMSE(uncompressed_values, merged_start, merged_end);
 }
 
-/// Compute the linear interpolation between the bording points defined by `seg_start` and `seg_end`
-/// that minimizes the Root-Mean-Squared-Errors (RMSE).
-fn computeLinearRegression(values: []const f64, seg_start: usize, seg_end: usize) LinearFunction {
-    // Calculate the length of the segment.
-    const seg_len: f64 = @floatFromInt(seg_end - seg_start + 1);
-    if (seg_len == 1) return LinearFunction{ .slope = 0, .intercept = values[seg_start] }; // If the segment has one or no points, return zero error.
-
-    // Initialize variables for summation.
-    var sum_x: f64 = 0;
-    var sum_y: f64 = 0;
-    var sum_x2: f64 = 0;
-    var sum_xy: f64 = 0;
-
-    // Compute the sums required for linear regression.
-    var i: usize = seg_start;
-    while (i <= seg_end) : (i += 1) {
-        const x: f64 = @floatFromInt(i); // Independent variable (index).
-        const y: f64 = values[i]; // Dependent variable (value).
-        sum_x += x;
-        sum_y += y;
-        sum_x2 += x * x;
-        sum_xy += x * y;
-    }
-
-    // Calculate the variance of x and the covariance of x and y.
-    const var_x: f64 = sum_x2 - (sum_x * sum_x / seg_len);
-    const cov_xy = sum_xy - (sum_x * sum_y / seg_len);
-
-    // Compute the slope and intercept of the best-fit line.
-    const slope = cov_xy / var_x;
-    const mean_x = sum_x / seg_len;
-    const mean_y = sum_y / seg_len;
-    const intercept = mean_y - slope * mean_x;
-    return LinearFunction{ .slope = slope, .intercept = intercept };
-}
-
 /// Computes the Root-Mean-Squared-Errors (RMSE) for a segment of the `uncompressed_values`.
 /// This function calculates the error between the actual values and the predicted values
 /// based on a linear interpolation fitted to the segment defined by `seg_start` and `seg_end`.
@@ -403,10 +359,9 @@ fn computeRMSE(uncompressed_values: []const f64, seg_start: usize, seg_end: usiz
     const seg_len: f64 = @floatFromInt(seg_end - seg_start + 1);
     if (seg_len <= 1) return 0.0; // If the segment has one or no points, return zero error.
 
-    const rmse_line = computeLinearRegression(uncompressed_values, seg_start, seg_end);
+    const slope: f64 = (uncompressed_values[seg_end] - uncompressed_values[seg_start]) / (seg_len - 1);
+    const intercept: f64 = uncompressed_values[seg_start] - slope * @as(f64, @floatFromInt(seg_start));
 
-    const slope: f64 = @floatCast(rmse_line.slope);
-    const intercept: f64 = @floatCast(rmse_line.intercept);
     // Calculate the sum of squared errors (SSE) between actual and predicted values.
     var sse: f64 = 0;
     var i = seg_start;
@@ -458,7 +413,32 @@ test "bottom-up can compress and decompress with zero error bound" {
     const error_bound: f32 = 0.0;
 
     // Bottom Up cannot handle very large value due to numerical issues with `math.order()`.
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0, 1000000, undefined);
+    try tester.generateBoundedRandomValues(&uncompressed_values, -1e16, 1e16, undefined);
+
+    // Call the compress and decompress functions.
+    try compress(uncompressed_values.items, &compressed_values, allocator, error_bound);
+    try decompress(compressed_values.items, &decompressed_values);
+
+    // Check if the decompressed values have the same lenght as the compressed ones.
+    try testing.expectEqual(uncompressed_values.items.len, decompressed_values.items.len);
+}
+
+test "bottom-up can compress and decompress with zero error bound odd size" {
+    const allocator = testing.allocator;
+
+    // Output buffer.
+    var uncompressed_values = ArrayList(f64).init(allocator);
+    defer uncompressed_values.deinit();
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+    var decompressed_values = ArrayList(f64).init(allocator);
+    defer decompressed_values.deinit();
+    const error_bound: f32 = 0.0;
+
+    // Bottom Up cannot handle very large value due to numerical issues with `math.order()`.
+    try tester.generateBoundedRandomValues(&uncompressed_values, -1e16, 1e16, undefined);
+
+    try uncompressed_values.append(tester.generateBoundedRandomValue(f64, -1e16, 1e16, undefined));
 
     // Call the compress and decompress functions.
     try compress(uncompressed_values.items, &compressed_values, allocator, error_bound);
