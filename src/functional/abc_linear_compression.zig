@@ -48,7 +48,7 @@ pub fn compress(
     allocator: mem.Allocator,
     error_bound: f32,
 ) Error!void {
-    if (uncompressed_values.len < 2) return Error.IncorrectInput;
+    if (uncompressed_values.len < 2) return Error.UnsupportedInput;
     if (error_bound <= 0.0) return Error.UnsupportedErrorBound;
 
     var convex_hull = try ConvexHull.init(allocator);
@@ -123,7 +123,7 @@ pub fn decompress(
     decompressed_values: *ArrayList(f64),
 ) Error!void {
     // 3 fields x 8 bytes
-    if (compressed_values.len % 24 != 0) return Error.IncorrectInput;
+    if (compressed_values.len % 24 != 0) return Error.UnsupportedInput;
 
     const fields = mem.bytesAsSlice(f64, compressed_values);
     var field_index: usize = 0;
