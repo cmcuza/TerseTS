@@ -73,9 +73,12 @@ pub fn compress(
     }
 
     // Check if the last point was not enconded by checking if seg_start is at that point.
-    // If that happens, then we need to insert the element twice to mantain the compressed
-    // representation as a multiple of 3.This has no significant impact on the compression
-    // ratio as it only happens once if it happens at all.
+    // If the last point was not encoded, we need to insert it as a single-point segment to
+    // maintain the compressed representation as a multiple of 3 values (start_value, end_time,
+    // end_value). This is important because the decompression logic expects the compressed
+    // data to be a sequence of 3-tuples, allowing safe and correct decoding. Adding one extra
+    // value for the last point (if needed) has negligible impact on the compression ratio,
+    // since it only occurs once per time series (if at all), regardless of the input size.
     if (seg_start == uncompressed_values.len - 1) {
         try appendValue(f64, uncompressed_values[seg_start], compressed_values);
         try appendValue(usize, seg_start, compressed_values);
@@ -133,41 +136,6 @@ pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList
     }
 }
 
-/// Compute the linear regression that minimizes the Root-Mean-Squared-Errors (RMSE).
-fn computeLinearRegression(values: []const f64, seg_start: usize, seg_end: usize) LinearFunction {
-    // Calculate the length of the segment.
-    const seg_len: f64 = @floatFromInt(seg_end - seg_start + 1);
-    if (seg_len == 1) return LinearFunction{ .slope = 0, .intercept = values[seg_start] }; // If the segment has one or no points, return zero error.
-
-    // Initialize variables for summation.
-    var sum_x: f64 = 0;
-    var sum_y: f64 = 0;
-    var sum_x2: f64 = 0;
-    var sum_xy: f64 = 0;
-
-    // Compute the sums required for linear regression.
-    var i: usize = seg_start;
-    while (i <= seg_end) : (i += 1) {
-        const x: f64 = @floatFromInt(i); // Independent variable (index).
-        const y: f64 = values[i]; // Dependent variable (value).
-        sum_x += x;
-        sum_y += y;
-        sum_x2 += x * x;
-        sum_xy += x * y;
-    }
-
-    // Calculate the variance of x and the covariance of x and y.
-    const var_x: f64 = sum_x2 - (sum_x * sum_x / seg_len);
-    const cov_xy = sum_xy - (sum_x * sum_y / seg_len);
-
-    // Compute the slope and intercept of the best-fit line.
-    const slope = cov_xy / var_x;
-    const mean_x = sum_x / seg_len;
-    const mean_y = sum_y / seg_len;
-    const intercept = mean_y - slope * mean_x;
-    return LinearFunction{ .slope = slope, .intercept = intercept };
-}
-
 /// Computes the Root-Mean-Squared-Errors (RMSE) for a segment of the `uncompressed_values`.
 /// This function calculates the error between the actual values and the predicted values
 /// based on a linear regression model fitted to the segment defined by `seg_start` and `seg_end`.
@@ -175,11 +143,10 @@ fn computeRMSE(uncompressed_values: []const f64, seg_start: usize, seg_end: usiz
     const seg_len: f64 = @floatFromInt(seg_end - seg_start + 1);
     if (seg_len <= 1) return 0.0; // If the segment has one or no points, return zero error.
 
-    const rmse_line = computeLinearRegression(uncompressed_values, seg_start, seg_end);
+    const slope: f64 = (uncompressed_values[seg_end] - uncompressed_values[seg_start]) / (seg_len - 1);
+    const intercept: f64 = uncompressed_values[seg_start] - slope * @as(f64, @floatFromInt(seg_start));
 
-    const slope: f64 = @floatCast(rmse_line.slope);
-    const intercept: f64 = @floatCast(rmse_line.intercept);
-    // Calculate the sum of squared errors (SSE) between actual and predicted values.
+    // Calculate the RMSE between actual and predicted values.
     var sse: f64 = 0;
     var i = seg_start;
     while (i <= seg_end) : (i += 1) {
@@ -189,36 +156,36 @@ fn computeRMSE(uncompressed_values: []const f64, seg_start: usize, seg_end: usiz
     }
 
     // Return the RMSE.
-    return std.math.sqrt(sse / seg_len);
+    return math.sqrt(sse / seg_len);
 }
 
-/// Computes the maximum L-infinity (Chebyshev) error between the actual values and the
+/// Computes the maximum absolute (Chebyshev, L-infinity) error between the actual values and the
 /// linear interpolation over a segment of the input array. This function fits a straight
 /// line between the values at `seg_start` and `seg_end` in `uncompressed_values`, then
 /// calculates the maximum absolute difference between the actual values and the predicted
 /// values (from the fitted line) for all indices in the segment `[seg_start, seg_end]`.
-fn computeMaxLinfError(uncompressed_values: []const f64, seg_start: usize, seg_end: usize) f64 {
+fn computeMaxAbsoluteError(uncompressed_values: []const f64, seg_start: usize, seg_end: usize) f64 {
     const seg_len: f64 = @floatFromInt(seg_end - seg_start + 1);
-    if (seg_len <= 2) return 0.0; // If the segment has one or no points, return zero error.
+    if (seg_len <= 2) return 0.0; // If the segment has less than 3 points, return zero error.
 
     const slope: f64 = (uncompressed_values[seg_end] - uncompressed_values[seg_start]) / (seg_len - 1);
     const intercept: f64 = uncompressed_values[seg_start] - slope * @as(f64, @floatFromInt(seg_start));
 
-    // Calculate the maximum L_infinity error in the segment.
+    // Calculate the maximum absolute error of the segment.
     var linf: f64 = 0;
     var i = seg_start;
     while (i <= seg_end) : (i += 1) {
         const pred = slope * @as(f64, @floatFromInt(i)) + intercept; // Predicted value.
-        const diff = uncompressed_values[i] - pred; // Difference between actual and predicted.
+        const diff = @abs(uncompressed_values[i] - pred); // Difference between actual and predicted.
         linf = @max(diff, linf);
     }
 
-    // Return max Linf.
+    // Return max abs.
     return linf;
 }
 
 /// Append `value` of `type` determined at compile time to `compressed_values`.
-fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)) !void {
+fn appendValue(comptime T: type, value: T, compressed_values: *ArrayList(u8)) !void {
     // Compile-time type check
     switch (@TypeOf(value)) {
         f64, usize => {
@@ -239,11 +206,11 @@ pub fn testRMSEisWithinErrorBound(
     if (values.len < 2) return;
 
     const rmse = computeRMSE(values, 0, values.len - 1);
-    try std.testing.expect(rmse <= error_bound);
+    try testing.expect(rmse <= error_bound);
 }
 
 test "sliding-window can compress and decompress with zero error bound" {
-    const allocator = std.testing.allocator;
+    const allocator = testing.allocator;
 
     // Output buffer.
     var uncompressed_values = ArrayList(f64).init(allocator);
@@ -264,7 +231,7 @@ test "sliding-window can compress and decompress with zero error bound" {
     try decompress(compressed_values.items, &decompressed_values);
 
     // Check if the decompressed values have the same lenght as the compressed ones.
-    try std.testing.expectEqual(uncompressed_values.items.len, decompressed_values.items.len);
+    try testing.expectEqual(uncompressed_values.items.len, decompressed_values.items.len);
 }
 
 test "sliding-window random lines and random error bound compress and decompress" {
@@ -294,7 +261,7 @@ test "sliding-window random lines and random error bound compress and decompress
     try decompress(compressed_values.items, &decompressed_values);
 
     // Check if the decompressed values have the same lenght as the compressed ones.
-    try std.testing.expectEqual(uncompressed_values.items.len, decompressed_values.items.len);
+    try testing.expectEqual(uncompressed_values.items.len, decompressed_values.items.len);
 
     // In theory, the linear interpolation of all segments formed by the slices of preserved points, should have a RMSE
     // within the error bound otherwise there a mistake. Since the error bound and the poitns are unknown, we need to
