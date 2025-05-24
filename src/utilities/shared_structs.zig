@@ -32,7 +32,7 @@ pub const Segment = struct {
     end_point: DiscretePoint,
 };
 
-/// Linear function of the form y = slope*x+intercept. It uses f80 for numerical stability.
+/// Linear function of the form y = slope*x+intercept.
 pub const LinearFunction = struct {
     slope: f64,
     intercept: f64,

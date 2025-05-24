@@ -104,7 +104,10 @@ pub fn compressSwingFilter(
         // Check if the current point is NaN or infinite. If so, return an error.
         if (!math.isFinite(uncompressed_values[current_timestamp])) return Error.UnsupportedInput;
 
-        if ((upper_limit < (uncompressed_values[current_timestamp] - adjusted_error_bound)) or
+        // Check if the current point is outside the limits defined by the upper and lower bounds.
+        // If `upper_limit` or `lower_limit` are NaN or infinite, the point is outside the limits.
+        if (!math.isFinite(upper_limit + lower_limit) or
+            (upper_limit < (uncompressed_values[current_timestamp] - adjusted_error_bound)) or
             (lower_limit > (uncompressed_values[current_timestamp] + adjusted_error_bound)))
         {
             // Recording mechanism (the current point is outside the limits).
@@ -171,12 +174,12 @@ pub fn compressSwingFilter(
             updateSwingLinearFunction(current_segment, &new_upper_bound, adjusted_error_bound);
             updateSwingLinearFunction(current_segment, &new_lower_bound, -adjusted_error_bound);
 
-            const new_upper_limit: f80 = evaluateLinearFunctionAtTime(
+            const new_upper_limit: f64 = evaluateLinearFunctionAtTime(
                 new_upper_bound,
                 usize,
                 current_timestamp,
             );
-            const new_lower_limit: f80 = evaluateLinearFunctionAtTime(
+            const new_lower_limit: f64 = evaluateLinearFunctionAtTime(
                 new_lower_bound,
                 usize,
                 current_timestamp,
@@ -309,7 +312,10 @@ pub fn compressSlideFilter(
         // Check if the point at the current timestamp is NaN or infinite. If so, return an error.
         if (!math.isFinite(uncompressed_values[current_timestamp])) return Error.UnsupportedInput;
 
-        if ((upper_limit < (uncompressed_values[current_timestamp] - adjusted_error_bound)) or
+        // Check if the current point is outside the limits defined by the upper and lower bounds.
+        // If `upper_limit` or `lower_limit` are NaN or infinite, the point is outside the limits.
+        if (!math.isFinite(upper_limit + lower_limit) or
+            (upper_limit < (uncompressed_values[current_timestamp] - adjusted_error_bound)) or
             (lower_limit > (uncompressed_values[current_timestamp] + adjusted_error_bound)))
         {
             // Recording mechanism. The current points is outside the limits. The linear approximation
@@ -502,7 +508,10 @@ pub fn compressSwingFilterDisconnected(
         // Check if the current point is NaN or infinite. If so, return an error.
         if (!math.isFinite(uncompressed_values[current_timestamp])) return Error.UnsupportedInput;
 
-        if ((upper_limit < (uncompressed_values[current_timestamp] - adjusted_error_bound)) or
+        // Check if the current point is outside the limits defined by the upper and lower bounds.
+        // If `upper_limit` or `lower_limit` are NaN or infinite, the point is outside the limits.
+        if (!math.isFinite(upper_limit + lower_limit) or
+            (upper_limit < (uncompressed_values[current_timestamp] - adjusted_error_bound)) or
             (lower_limit > (uncompressed_values[current_timestamp] + adjusted_error_bound)))
         {
             // Recording mechanism (the current point is outside the limits).
@@ -574,12 +583,12 @@ pub fn compressSwingFilterDisconnected(
             updateSwingLinearFunction(current_segment, &new_upper_bound, adjusted_error_bound);
             updateSwingLinearFunction(current_segment, &new_lower_bound, -adjusted_error_bound);
 
-            const new_upper_limit: f80 = evaluateLinearFunctionAtTime(
+            const new_upper_limit: f64 = evaluateLinearFunctionAtTime(
                 new_upper_bound,
                 usize,
                 current_timestamp,
             );
-            const new_lower_limit: f80 = evaluateLinearFunctionAtTime(
+            const new_lower_limit: f64 = evaluateLinearFunctionAtTime(
                 new_lower_bound,
                 usize,
                 current_timestamp,
@@ -1060,8 +1069,6 @@ test "slide filter zero error bound and even size compress and decompress" {
     var decompressed_values = ArrayList(f64).init(allocator);
     defer decompressed_values.deinit();
 
-    // Zero error bound is curently failing due to numerical instabilities at very high precision levels.
-    // The error occurs
     const error_bound: f32 = 0.0;
 
     try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, undefined);
