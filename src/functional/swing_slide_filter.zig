@@ -84,7 +84,7 @@ pub fn compressSwingFilter(
     };
 
     // Compute the numerator Eq. (6).
-    var slope_derivate: f80 = computeSlopeDerivate(current_segment);
+    var slope_derivate: f64 = computeSlopeDerivate(current_segment);
 
     updateSwingLinearFunction(current_segment, &upper_bound, adjusted_error_bound);
     updateSwingLinearFunction(current_segment, &lower_bound, -adjusted_error_bound);
@@ -104,19 +104,22 @@ pub fn compressSwingFilter(
         // Check if the current point is NaN or infinite. If so, return an error.
         if (!math.isFinite(uncompressed_values[current_timestamp])) return Error.UnsupportedInput;
 
-        if ((upper_limit < (uncompressed_values[current_timestamp] - adjusted_error_bound)) or
+        // Check if the current point is outside the limits defined by the upper and lower bounds.
+        // If `upper_limit` or `lower_limit` are NaN or infinite, the point is outside the limits.
+        if (!math.isFinite(upper_limit + lower_limit) or
+            (upper_limit < (uncompressed_values[current_timestamp] - adjusted_error_bound)) or
             (lower_limit > (uncompressed_values[current_timestamp] + adjusted_error_bound)))
         {
             // Recording mechanism (the current point is outside the limits).
             const segment_size = current_timestamp - current_segment.start_point.time - 1;
             if (segment_size > 1) {
                 // Denominator of Eq. (6).
-                const sum_square: f80 = @floatFromInt(
+                const sum_square: f64 = @floatFromInt(
                     segment_size * (segment_size + 1) * (2 * segment_size + 1) / 6,
                 );
 
                 // Get optimal slope that minimizes the squared error Eq. (5).
-                const slope: f80 = @max(
+                const slope: f64 = @max(
                     @min(slope_derivate / sum_square, upper_bound.slope),
                     lower_bound.slope,
                 );
@@ -171,12 +174,12 @@ pub fn compressSwingFilter(
             updateSwingLinearFunction(current_segment, &new_upper_bound, adjusted_error_bound);
             updateSwingLinearFunction(current_segment, &new_lower_bound, -adjusted_error_bound);
 
-            const new_upper_limit: f80 = evaluateLinearFunctionAtTime(
+            const new_upper_limit: f64 = evaluateLinearFunctionAtTime(
                 new_upper_bound,
                 usize,
                 current_timestamp,
             );
-            const new_lower_limit: f80 = evaluateLinearFunctionAtTime(
+            const new_lower_limit: f64 = evaluateLinearFunctionAtTime(
                 new_lower_bound,
                 usize,
                 current_timestamp,
@@ -204,12 +207,12 @@ pub fn compressSwingFilter(
 
     if (segment_size > 1) {
         // Denominator of Eq. (6).
-        const sum_square: f80 = @floatFromInt(
+        const sum_square: f64 = @floatFromInt(
             segment_size * (segment_size + 1) * (2 * segment_size + 1) / 6,
         );
 
         // Get optimal slope that minimizes the squared error Eq. (5).
-        const slope: f80 = @max(
+        const slope: f64 = @max(
             @min(slope_derivate / sum_square, upper_bound.slope),
             lower_bound.slope,
         );
@@ -309,7 +312,10 @@ pub fn compressSlideFilter(
         // Check if the point at the current timestamp is NaN or infinite. If so, return an error.
         if (!math.isFinite(uncompressed_values[current_timestamp])) return Error.UnsupportedInput;
 
-        if ((upper_limit < (uncompressed_values[current_timestamp] - adjusted_error_bound)) or
+        // Check if the current point is outside the limits defined by the upper and lower bounds.
+        // If `upper_limit` or `lower_limit` are NaN or infinite, the point is outside the limits.
+        if (!math.isFinite(upper_limit + lower_limit) or
+            (upper_limit < (uncompressed_values[current_timestamp] - adjusted_error_bound)) or
             (lower_limit > (uncompressed_values[current_timestamp] + adjusted_error_bound)))
         {
             // Recording mechanism. The current points is outside the limits. The linear approximation
@@ -487,7 +493,7 @@ pub fn compressSwingFilterDisconnected(
     };
 
     // Compute the numerator Eq. (6).
-    var slope_derivate: f80 = computeSlopeDerivate(current_segment);
+    var slope_derivate: f64 = computeSlopeDerivate(current_segment);
 
     updateSwingLinearFunction(current_segment, &upper_bound, adjusted_error_bound);
     updateSwingLinearFunction(current_segment, &lower_bound, -adjusted_error_bound);
@@ -502,7 +508,10 @@ pub fn compressSwingFilterDisconnected(
         // Check if the current point is NaN or infinite. If so, return an error.
         if (!math.isFinite(uncompressed_values[current_timestamp])) return Error.UnsupportedInput;
 
-        if ((upper_limit < (uncompressed_values[current_timestamp] - adjusted_error_bound)) or
+        // Check if the current point is outside the limits defined by the upper and lower bounds.
+        // If `upper_limit` or `lower_limit` are NaN or infinite, the point is outside the limits.
+        if (!math.isFinite(upper_limit + lower_limit) or
+            (upper_limit < (uncompressed_values[current_timestamp] - adjusted_error_bound)) or
             (lower_limit > (uncompressed_values[current_timestamp] + adjusted_error_bound)))
         {
             // Recording mechanism (the current point is outside the limits).
@@ -510,12 +519,12 @@ pub fn compressSwingFilterDisconnected(
             const segment_size = current_timestamp - current_segment.start_point.time - 1;
             if (segment_size > 1) {
                 // Denominator of Eq. (6).
-                const sum_square: f80 = @floatFromInt(
+                const sum_square: f64 = @floatFromInt(
                     segment_size * (segment_size + 1) * (2 * segment_size + 1) / 6,
                 );
 
                 // Get optimal slope that minimizes the squared error Eq. (5).
-                const slope: f80 = @max(
+                const slope: f64 = @max(
                     @min(slope_derivate / sum_square, upper_bound.slope),
                     lower_bound.slope,
                 );
@@ -574,12 +583,12 @@ pub fn compressSwingFilterDisconnected(
             updateSwingLinearFunction(current_segment, &new_upper_bound, adjusted_error_bound);
             updateSwingLinearFunction(current_segment, &new_lower_bound, -adjusted_error_bound);
 
-            const new_upper_limit: f80 = evaluateLinearFunctionAtTime(
+            const new_upper_limit: f64 = evaluateLinearFunctionAtTime(
                 new_upper_bound,
                 usize,
                 current_timestamp,
             );
-            const new_lower_limit: f80 = evaluateLinearFunctionAtTime(
+            const new_lower_limit: f64 = evaluateLinearFunctionAtTime(
                 new_lower_bound,
                 usize,
                 current_timestamp,
@@ -609,12 +618,12 @@ pub fn compressSwingFilterDisconnected(
     // Check if the last segment has more than one point. If so, the recording mechanism is triggered.
     if (segment_size > 1) {
         // Denominator of Eq. (6).
-        const sum_square: f80 = @floatFromInt(
+        const sum_square: f64 = @floatFromInt(
             segment_size * (segment_size + 1) * (2 * segment_size + 1) / 6,
         );
 
         // Get optimal slope that minimizes the squared error Eq. (5).
-        const slope: f80 = @max(
+        const slope: f64 = @max(
             @min(slope_derivate / sum_square, upper_bound.slope),
             lower_bound.slope,
         );
@@ -755,9 +764,9 @@ pub fn decompressSlideFilter(
 }
 
 /// Computes the numerator of the slope derivate as in Eq. (6).
-fn computeSlopeDerivate(segment: Segment) f80 {
+fn computeSlopeDerivate(segment: Segment) f64 {
     return (segment.end_point.value - segment.start_point.value) *
-        usizeToF80(segment.end_point.time - segment.start_point.time);
+        usizeToF64(segment.end_point.time - segment.start_point.time);
 }
 
 /// Updates the linear function coeficients in `linear_function` that passes throught the two
@@ -769,11 +778,11 @@ fn updateSwingLinearFunction(
     error_bound: f32,
 ) void {
     if (segment.end_point.time != segment.start_point.time) {
-        const duration: f80 = @floatFromInt(segment.end_point.time - segment.start_point.time);
+        const duration: f64 = @floatFromInt(segment.end_point.time - segment.start_point.time);
         linear_function.slope = (segment.end_point.value + error_bound -
             segment.start_point.value) / duration;
         linear_function.intercept = segment.start_point.value - linear_function.slope *
-            usizeToF80(segment.start_point.time);
+            usizeToF64(segment.start_point.time);
     } else {
         linear_function.slope = 0.0;
         linear_function.intercept = segment.start_point.value;
@@ -787,7 +796,7 @@ fn evaluateLinearFunctionAtTime(
     time: time_type,
 ) f64 {
     if (time_type == usize) {
-        return @floatCast(linear_function.slope * usizeToF80(time) + linear_function.intercept);
+        return @floatCast(linear_function.slope * usizeToF64(time) + linear_function.intercept);
     } else {
         return @floatCast(linear_function.slope * time + linear_function.intercept);
     }
@@ -807,9 +816,9 @@ fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)
 
 /// Computes the intercept coefficient of a linear function that passes through the `DiscretePoint`
 /// `point` with the given `slope` coefficient.
-fn computeInterceptCoefficient(slope: f80, comptime point_type: type, point: point_type) f80 {
+fn computeInterceptCoefficient(slope: f64, comptime point_type: type, point: point_type) f64 {
     if (point_type == DiscretePoint) {
-        return point.value - slope * usizeToF80(point.time);
+        return point.value - slope * usizeToF64(point.time);
     } else {
         return point.value - slope * point.time;
     }
@@ -826,11 +835,11 @@ fn updateSlideLinearFunction(
     error_bound: f32,
 ) void {
     if (segment.end_point.time != segment.start_point.time) {
-        const duration: f80 = @floatFromInt(segment.end_point.time - segment.start_point.time);
+        const duration: f64 = @floatFromInt(segment.end_point.time - segment.start_point.time);
         linear_function.slope = (segment.end_point.value + 2 * error_bound -
             segment.start_point.value) / duration;
         linear_function.intercept = segment.start_point.value - error_bound -
-            linear_function.slope * usizeToF80(segment.start_point.time);
+            linear_function.slope * usizeToF64(segment.start_point.time);
     } else {
         linear_function.slope = 0.0;
         linear_function.intercept = segment.start_point.value;
@@ -856,9 +865,9 @@ fn computeInterceptionPoint(
     }
 }
 
-/// Converts `value` of `usize` to `f80`.
-fn usizeToF80(value: usize) f80 {
-    return @as(f80, @floatFromInt(value));
+/// Converts `value` of `usize` to `f64`.
+fn usizeToF64(value: usize) f64 {
+    return @as(f64, @floatFromInt(value));
 }
 
 test "swing filter can always compress and decompress" {
@@ -1060,8 +1069,6 @@ test "slide filter zero error bound and even size compress and decompress" {
     var decompressed_values = ArrayList(f64).init(allocator);
     defer decompressed_values.deinit();
 
-    // Zero error bound is curently failing due to numerical instabilities at very high precision levels.
-    // The error occurs
     const error_bound: f32 = 0.0;
 
     try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, undefined);

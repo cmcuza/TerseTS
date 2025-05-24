@@ -192,7 +192,7 @@ pub fn decompressPWLH(
 
         if (current_segment.start_point.time < current_segment.end_point.time) {
             if (current_segment.end_point.time != current_segment.start_point.time) {
-                const duration: f80 = @floatFromInt(current_segment.end_point.time -
+                const duration: f64 = @floatFromInt(current_segment.end_point.time -
                     current_segment.start_point.time);
                 linear_approximation.slope = (current_segment.end_point.value -
                     current_segment.start_point.value) / duration;
