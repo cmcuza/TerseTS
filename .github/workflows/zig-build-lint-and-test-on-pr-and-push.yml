@@ -33,7 +33,7 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - uses: mlugg/setup-zig@v1.7.1
+    - uses: mlugg/setup-zig@v2
       with:
         version: 0.14.0  # Use a stable Zig version
 
@@ -68,7 +68,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: mlugg/setup-zig@v1.7.1
-
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.14.0  # Use a stable Zig version
       - name: Zig Fmt Check
         run: zig fmt --check .
