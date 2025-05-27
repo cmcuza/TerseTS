@@ -224,7 +224,7 @@ test "sliding-window can compress and decompress with zero error bound" {
     const max_lines: usize = @intFromFloat(@round(tester.generateBoundedRandomValue(f64, 4, 25, undefined)));
     // Sliding-Window cannot handle very large value due to numerical issues with `math.order()`.
     for (0..max_lines) |_| {
-        try tester.generateBoundedRandomValues(&uncompressed_values, 0, 1000000, undefined);
+        try tester.generateBoundedRandomValues(&uncompressed_values, -1e16, 1e16, undefined);
     }
     // Call the compress and decompress functions.
     try compress(uncompressed_values.items, &compressed_values, error_bound);
