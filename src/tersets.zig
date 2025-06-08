@@ -21,6 +21,7 @@ const ArrayList = std.ArrayList;
 const poor_mans_compression = @import("functional/poor_mans_compression.zig");
 const swing_slide_filter = @import("functional/swing_slide_filter.zig");
 const sim_piece = @import("functional/sim_piece.zig");
+const mix_piece = @import("functional/mix_piece.zig");
 const piecewise_histogram = @import("functional/histogram_compression.zig");
 const abc_linear_compression = @import("functional/abc_linear_compression.zig");
 const vw = @import("line_simplification/visvalingam_whyatt.zig");
@@ -48,6 +49,7 @@ pub const Method = enum {
     PiecewiseLinearHistogram,
     ABCLinearApproximation,
     VisvalingamWhyatt,
+    MixPiece,
 };
 
 /// Compress `uncompressed_values` within `error_bound` using `method` and returns the results
@@ -104,6 +106,14 @@ pub fn compress(
         },
         .SimPiece => {
             try sim_piece.compressSimPiece(
+                uncompressed_values,
+                &compressed_values,
+                allocator,
+                error_bound,
+            );
+        },
+        .MixPiece => {
+            try mix_piece.compressMixPiece(
                 uncompressed_values,
                 &compressed_values,
                 allocator,
@@ -176,6 +186,9 @@ pub fn decompress(
         },
         .SimPiece => {
             try sim_piece.decompress(compressed_values_slice, &decompressed_values, allocator);
+        },
+        .MixPiece => {
+            try mix_piece.decompressMixPiece(compressed_values_slice, &decompressed_values, allocator);
         },
         .PiecewiseConstantHistogram => {
             try piecewise_histogram.decompressPWCH(compressed_values_slice, &decompressed_values);
