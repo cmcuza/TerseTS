@@ -1103,7 +1103,7 @@ test "mix-piece can compress, decompress and merge many segments with non-zero e
     const seed: u64 = @bitCast(time.milliTimestamp());
     var prng = rand.DefaultPrng.init(seed);
     const random = prng.random();
-    const error_bound = 0.1;
+    const error_bound = 0.01;
     const allocator = testing.allocator;
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
@@ -1185,7 +1185,7 @@ test "mix-piece handles time series with trend" {
     const seed: u64 = @bitCast(time.milliTimestamp());
     var prng = rand.DefaultPrng.init(seed);
     const random = prng.random();
-    const error_bound = 0.05;
+    const error_bound = 0.01;
     const allocator = testing.allocator;
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
@@ -1207,7 +1207,7 @@ test "mix-piece handles time series with trend" {
 }
 
 test "mix-piece handles cross-intercept grouping" {
-    const error_bound = 0.1;
+    const error_bound = 0.01;
     const allocator = testing.allocator;
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
@@ -1263,7 +1263,7 @@ test "mix-piece handles single point segments" {
 }
 
 test "mix-piece floor vs ceil quantization selection" {
-    const error_bound = 0.5;
+    const error_bound = 0.01;
     const allocator = testing.allocator;
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
