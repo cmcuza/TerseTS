@@ -23,6 +23,8 @@ const tersets = @import("tersets.zig");
 const Error = tersets.Error;
 const Method = tersets.Method;
 
+const params = @import("params.zig");
+
 /// Global memory allocator used by tersets.
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const allocator = gpa.allocator();
@@ -33,8 +35,8 @@ pub const UncompressedValues = Array(f64);
 /// A pointer to compressed values and the number of bytes.
 pub const CompressedValues = Array(u8);
 
-/// Configuration to use for compression and/or decompression.
-pub const Configuration = extern struct { method: u8, error_bound: f32 };
+/// Configuration to use for compression.
+pub const Configuration = extern struct { method: u8, parameters: ?*const anyopaque };
 
 /// Compress `uncompressed_values` to `compressed_values` according to `configuration`.
 /// The General Purpose Allocator `allocator` is passed as a parameter to tersets for
@@ -60,7 +62,7 @@ export fn compress(
         uncompressed_values,
         allocator,
         method,
-        configuration.error_bound,
+        configuration.parameters,
     ) catch |err| return errorToInt(err);
 
     compressed_values_array.data = compressed_values.items.ptr;
@@ -97,17 +99,53 @@ fn Array(comptime data_type: type) type {
     return extern struct { data: [*]const data_type, len: usize };
 }
 
+/// Returns a human-readable description of a TerseTS error code.
+export fn tersets_strerror(code: i32) [*:0]const u8 {
+    return switch (code) {
+        1 => "Unknown method",
+        2 => "Unsupported input",
+        3 => "Unsupported error bound",
+        4 => "Unsupported parameters",
+        5 => "Item not found",
+        6 => "Out of memory",
+        7 => "Empty convex hull",
+        8 => "Empty queue",
+        else => "Unknown error",
+    };
+}
+
 // Convert `err` to an `i32` as is not guaranteed to be stable `@intFromError`.
 fn errorToInt(err: Error) i32 {
     switch (err) {
         Error.UnknownMethod => return 1,
         Error.UnsupportedInput => return 2,
         Error.UnsupportedErrorBound => return 3,
-        Error.OutOfMemory => return 4,
-        Error.ItemNotFound => return 5,
-        Error.EmptyConvexHull => return 6,
-        Error.EmptyQueue => return 7,
+        Error.UnsupportedParameters => return 4,
+        Error.OutOfMemory => return 5,
+        Error.ItemNotFound => return 6,
+        Error.EmptyConvexHull => return 7,
+        Error.EmptyQueue => return 8,
     }
+}
+
+/// Force link the functional parameters to ensure they are included in the binary.
+export fn _force_link_functional(p: *const params.FunctionalParams) f32 {
+    return p.error_bound;
+}
+
+/// Force link the basic parameters to ensure they are included in the binary.
+export fn _force_link_basic(p: *const params.BasicParams) f32 {
+    return p.error_bound;
+}
+
+/// Force link the histogram parameters to ensure they are included in the binary.
+export fn _force_link_histogram(p: *const params.HistogramParams) usize {
+    return p.maximum_buckets;
+}
+
+/// Force link the line simplification parameters to ensure they are included in the binary.
+export fn _force_link_linesimp(p: *const params.LineSimplificationParams) f32 {
+    return p.error_bound;
 }
 
 test "method enum must match method constants" {
@@ -121,6 +159,7 @@ test "method enum must match method constants" {
     try testing.expectEqual(@intFromEnum(tersets.Method.PiecewiseLinearHistogram), 7);
     try testing.expectEqual(@intFromEnum(tersets.Method.ABCLinearApproximation), 8);
     try testing.expectEqual(@intFromEnum(tersets.Method.VisvalingamWhyatt), 9);
+    try testing.expectEqual(@intFromEnum(tersets.Method.IdentityCompression), 10);
 }
 
 test "error for unknown compression method" {
@@ -132,7 +171,12 @@ test "error for unknown compression method" {
         .data = undefined,
         .len = undefined,
     };
-    var configuration = Configuration{ .method = 0, .error_bound = 0 };
+
+    var configuration = Configuration{
+        .method = 0,
+        .parameters = undefined,
+    };
+
     configuration.method = math.maxInt(@TypeOf(configuration.method));
 
     const return_code = compress(
@@ -153,7 +197,11 @@ test "error for empty input when compressing" {
         .data = undefined,
         .len = undefined,
     };
-    const configuration = Configuration{ .method = 0, .error_bound = 0 };
+
+    const configuration = Configuration{
+        .method = 0,
+        .parameters = undefined,
+    };
 
     const return_code = compress(
         uncompressed_values,
@@ -162,21 +210,6 @@ test "error for empty input when compressing" {
     );
 
     try testing.expectEqual(2, return_code);
-}
-
-test "error for negative error bound when compressing" {
-    const uncompressed_values = UncompressedValues{ .data = undefined, .len = 1 };
-    var compressed_values = CompressedValues{ .data = undefined, .len = undefined };
-
-    const configuration = Configuration{ .method = 0, .error_bound = -1 };
-
-    const return_code = compress(
-        uncompressed_values,
-        &compressed_values,
-        configuration,
-    );
-
-    try testing.expectEqual(3, return_code);
 }
 
 test "error for unknown decompression method" {
@@ -210,7 +243,9 @@ test "can compress and decompress" {
         .data = &uncompressed_array,
         .len = uncompressed_array.len,
     };
-    const configuration = Configuration{ .method = 0, .error_bound = 0 };
+
+    // Calling "Identity" compression with value equal 10, which does not need configuration.
+    const configuration = Configuration{ .method = 10, .parameters = undefined };
 
     const compress_return_code = compress(
         uncompressed_values,
