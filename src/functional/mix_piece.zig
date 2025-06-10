@@ -39,13 +39,11 @@ const DiscretePoint = shared.DiscretePoint;
 const HashMap = std.HashMap;
 
 /// Compresses `uncompressed_values` within `error_bound` using the "Sim-Piece" algorithm.
-/// The function writes the result to `compressed_values`. The `allocator` is used for memory
-/// allocation of intermediate data structures. If an error occurs, it is returned.
-/// This function handles 3 structures subsequently and stores them in 'compressed_values':
-/// Part 1. Segment groups that share the same intercept
-/// Part 2. Segment groups that don't share the same intercept but the same slope
-/// Part 3. Umerged segments
-// Output format: [part1_count][part2_count][part3_count][Part1 data...][Part2 data...][Part3 data...][last_timestamp]
+/// The function writes the result to `compressed_values`.
+/// The `allocator` is used for memory allocation of intermediate data structures.
+/// If an error occurs, it is returned.
+// Output format: [part1_count][part2_count][part3_count]
+//                [Part1 data...][Part2 data...][Part3 data...][last_timestamp]
 pub fn compressMixPiece(
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
@@ -56,7 +54,7 @@ pub fn compressMixPiece(
         return Error.UnsupportedErrorBound;
     }
 
-    // Mix-Piece Phase 1: Compute segments metadata
+    // Mix-Piece Phase 1: Compute segments metadata.
     var segments_metadata = ArrayList(SegmentMetadata).init(allocator);
     defer segments_metadata.deinit();
     try computeSegmentsMetadata(
@@ -65,7 +63,7 @@ pub fn compressMixPiece(
         error_bound,
     );
 
-    // Mix-Piece Phase 2: Merge segments metadata
+    // Mix-Piece Phase 2: Merge segments metadata.
     var same_intercept_groups = ArrayList(SegmentMetadata).init(allocator);
     defer same_intercept_groups.deinit();
 
@@ -75,14 +73,21 @@ pub fn compressMixPiece(
     var ungrouped_segments = ArrayList(SegmentMetadata).init(allocator);
     defer ungrouped_segments.deinit();
 
-    try mergeSegmentsMetadata(segments_metadata, &same_intercept_groups, &cross_intercept_groups, &ungrouped_segments, allocator);
+    try mergeSegmentsMetadata(
+        segments_metadata, 
+        &same_intercept_groups, 
+        &cross_intercept_groups, 
+        &ungrouped_segments, allocator);
 
-    // Mix-Piece Phase 3: Populate the three data structures
+    // Mix-Piece Phase 3: Populate the three data structures. Separately handle three parts:
+    // Part 1. Segment groups that share the same intercept
+    // Part 2. Segment groups that don't share the same intercept but the same slope
+    // Part 3. Umerged segments
 
-    // Part 1: Same intercept groups
+    // Part 1: Handle same intercept groups.
     var same_intercept_groups_map = HashMapf64(HashMapf64(ArrayList(usize))).init(allocator);
     defer {
-        // Deinit all ArrayList instances within the inner HashMaps and then deinit the inner HashMaps
+        // Deinit all ArrayList instances within the inner HashMaps and then deinit the inner HashMaps.
         // themselves before finally deinit the outer HashMap.
         var hash_to_hash_iterator = same_intercept_groups_map.iterator();
         while (hash_to_hash_iterator.next()) |hash_to_hash_entry| {
@@ -100,7 +105,7 @@ pub fn compressMixPiece(
         allocator,
     );
 
-    // Part 2: Cross-intercept groups
+    // Part 2: Handle cross-intercept groups.
     var cross_intercept_groups_map = CrossInterceptGroupsMap.init(allocator);
     defer {
         var iterator = cross_intercept_groups_map.iterator();
@@ -110,55 +115,76 @@ pub fn compressMixPiece(
         cross_intercept_groups_map.deinit();
     }
 
-    try populateCrossInterceptGroupsAsHashMap(cross_intercept_groups, &cross_intercept_groups_map, allocator);
+    try populateCrossInterceptGroupsAsHashMap(
+        cross_intercept_groups, 
+        &cross_intercept_groups_map, allocator);
 
-    // Part 3: Ungrouped segments
+    // Part 3: Handle ungrouped segments.
     var ungrouped_segments_array = ArrayList(UngroupedSegment).init(allocator);
     defer ungrouped_segments_array.deinit();
 
-    try populateUngroupedSegmentsArray(ungrouped_segments, &ungrouped_segments_array);
+    try populateUngroupedSegmentsArray(
+        ungrouped_segments, 
+        &ungrouped_segments_array);
 
-    // Mix-Piece Phase 4: Create compressed representation with boundaries
+    // Mix-Piece Phase 4: Create compressed representation with boundaries.
+    // Store the number of intercept groups (Part 1).
+    try appendValue(
+        usize, 
+        same_intercept_groups_map.count(), 
+        compressed_values);
 
-    // Store the number of intercept groups (Part 1)
-    try appendValue(usize, same_intercept_groups_map.count(), compressed_values);
+    // Store the number of slope groups (Part 2).
+    try appendValue(
+        usize, 
+        cross_intercept_groups_map.count(), 
+        compressed_values);
 
-    // Store the number of slope groups (Part 2)
-    try appendValue(usize, cross_intercept_groups_map.count(), compressed_values);
+    // Store the number of ungrouped segments (Part 3).
+    try appendValue(
+        usize, 
+        ungrouped_segments_array.items.len, 
+        compressed_values);
 
-    // Store the number of ungrouped segments (Part 3)
-    try appendValue(usize, ungrouped_segments_array.items.len, compressed_values);
-
-    // Now write the actual data for each part
+    // Now write the actual data for each part.
 
     // Part 1: Same intercept groups
-    try createCompressedRepresentationMergedSegments(same_intercept_groups_map, compressed_values);
+    try createCompressedRepresentationMergedSegments(
+        same_intercept_groups_map, 
+        compressed_values);
 
     // Part 2: Cross-intercept groups
-    try createCompressedRepresentationCrossInterceptGroups(cross_intercept_groups_map, compressed_values);
+    try createCompressedRepresentationCrossInterceptGroups(
+        cross_intercept_groups_map, 
+        compressed_values);
 
     // Part 3: Ungrouped segments
-    try createCompressedRepresentationUngroupedSegments(ungrouped_segments_array, compressed_values);
+    try createCompressedRepresentationUngroupedSegments(
+        ungrouped_segments_array, 
+        compressed_values);
 
     // The last timestamp must be stored, otherwise the end time during decompression is unknown.
-    try appendValue(usize, uncompressed_values.len, compressed_values);
+    try appendValue(
+        usize, 
+        uncompressed_values.len, 
+        compressed_values);
 }
 
 /// Decompress `compressed_values` produced by "Mix-Piece".
-///
-/// The function writes the result to `decompressed_values`. The `allocator` is used for memory allocation of intermediate
-/// data structures. If an error occurs it is returned.
+/// The function writes the result to `decompressed_values`.
+/// The `allocator` is used for memory allocation of intermediate data structures.
+/// If an error occurs it is returned.
 pub fn decompressMixPiece(
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
     allocator: mem.Allocator,
 ) Error!void {
 
-    // Initialize temp array to store all segments
+    // Initialize temp array to store all segments.
     var all_segments = ArrayList(SegmentMetadata).init(allocator);
     defer all_segments.deinit();
 
-    // Read header to get structure counts (not sizes!)
+    // Read header to get structure counts.
     const header = mem.bytesAsSlice(usize, compressed_values[0 .. 3 * @sizeOf(usize)]);
     const part1_count = header[0]; // Number of intercept groups in Part 1
     const part2_count = header[1]; // Number of slope groups in Part 2
@@ -166,28 +192,34 @@ pub fn decompressMixPiece(
 
     var offset: usize = 3 * @sizeOf(usize);
 
-    // Part 1. Parse Same Intercept Groups
+    // Part 1. Parse Same Intercept Groups.
     if (part1_count > 0) {
-        // We need to parse part1_count intercept groups
-        // Each group has: intercept, slopes_count, then for each slope: slope, timestamps_count, timestamps
+        // We need to parse part1_count intercept groups.
+        // Each group has: intercept, slopes_count,
+        // then for each slope: slope, timestamps_count, timestamps.
 
         for (0..part1_count) |_| {
-            const intercept = mem.bytesAsSlice(f64, compressed_values[offset .. offset + @sizeOf(f64)])[0];
+            const intercept = mem.bytesAsSlice(
+                f64, compressed_values[offset .. offset + @sizeOf(f64)])[0];
             offset += @sizeOf(f64);
 
-            const slopes_count = @as(usize, @bitCast(mem.bytesAsSlice(f64, compressed_values[offset .. offset + @sizeOf(f64)])[0]));
+            const slopes_count = @as(usize, @bitCast(mem.bytesAsSlice(
+                f64, compressed_values[offset .. offset + @sizeOf(f64)])[0]));
             offset += @sizeOf(f64);
 
             for (0..slopes_count) |_| {
-                const slope = mem.bytesAsSlice(f64, compressed_values[offset .. offset + @sizeOf(f64)])[0];
+                const slope = mem.bytesAsSlice(
+                    f64, compressed_values[offset .. offset + @sizeOf(f64)])[0];
                 offset += @sizeOf(f64);
 
-                const timestamps_count = @as(usize, @bitCast(mem.bytesAsSlice(f64, compressed_values[offset .. offset + @sizeOf(f64)])[0]));
+                const timestamps_count = @as(usize, @bitCast(mem.bytesAsSlice(
+                    f64, compressed_values[offset .. offset + @sizeOf(f64)])[0]));
                 offset += @sizeOf(f64);
 
                 var timestamp: usize = 0;
                 for (0..timestamps_count) |_| {
-                    const delta = @as(usize, @bitCast(mem.bytesAsSlice(f64, compressed_values[offset .. offset + @sizeOf(f64)])[0]));
+                    const delta = @as(usize, @bitCast(mem.bytesAsSlice(
+                        f64, compressed_values[offset .. offset + @sizeOf(f64)])[0]));
                     offset += @sizeOf(f64);
 
                     timestamp += delta;
@@ -204,22 +236,26 @@ pub fn decompressMixPiece(
 
     // Part 2. Parse Cross Intercept Groups
     if (part2_count > 0) {
-        // We need to parse part2_count slope groups
-        // Each group has: slope, pair_count, then for each pair: intercept, timestamp_delta
+        // We need to parse part2_count slope groups.
+        // Each group has: slope, pair_count, then for each pair: intercept, timestamp_delta.
 
         for (0..part2_count) |_| {
-            const slope = mem.bytesAsSlice(f64, compressed_values[offset .. offset + @sizeOf(f64)])[0];
+            const slope = mem.bytesAsSlice(
+                f64, compressed_values[offset .. offset + @sizeOf(f64)])[0];
             offset += @sizeOf(f64);
 
-            const pair_count = @as(usize, @bitCast(mem.bytesAsSlice(f64, compressed_values[offset .. offset + @sizeOf(f64)])[0]));
+            const pair_count = @as(usize, @bitCast(mem.bytesAsSlice(
+                f64, compressed_values[offset .. offset + @sizeOf(f64)])[0]));
             offset += @sizeOf(f64);
 
             var timestamp: usize = 0;
             for (0..pair_count) |_| {
-                const intercept = mem.bytesAsSlice(f64, compressed_values[offset .. offset + @sizeOf(f64)])[0];
+                const intercept = mem.bytesAsSlice(
+                    f64, compressed_values[offset .. offset + @sizeOf(f64)])[0];
                 offset += @sizeOf(f64);
 
-                const delta = @as(usize, @bitCast(mem.bytesAsSlice(f64, compressed_values[offset .. offset + @sizeOf(f64)])[0]));
+                const delta = @as(usize, @bitCast(mem.bytesAsSlice(
+                    f64, compressed_values[offset .. offset + @sizeOf(f64)])[0]));
                 offset += @sizeOf(f64);
 
                 timestamp += delta;
@@ -233,19 +269,22 @@ pub fn decompressMixPiece(
         }
     }
 
-    // Part 3. Parse Ungrouped Segments
+    // Part 3. Parse Ungrouped Segments.
     if (part3_count > 0) {
 
-        // Each segment has: slope, intercept, timestamp_delta
+        // Each segment has: slope, intercept, timestamp_delta.
         var timestamp: usize = 0;
         for (0..part3_count) |_| {
-            const slope = mem.bytesAsSlice(f64, compressed_values[offset .. offset + @sizeOf(f64)])[0];
+            const slope = mem.bytesAsSlice(
+                f64, compressed_values[offset .. offset + @sizeOf(f64)])[0];
             offset += @sizeOf(f64);
 
-            const intercept = mem.bytesAsSlice(f64, compressed_values[offset .. offset + @sizeOf(f64)])[0];
+            const intercept = mem.bytesAsSlice(
+                f64, compressed_values[offset .. offset + @sizeOf(f64)])[0];
             offset += @sizeOf(f64);
 
-            const delta = @as(usize, @bitCast(mem.bytesAsSlice(f64, compressed_values[offset .. offset + @sizeOf(f64)])[0]));
+            const delta = @as(usize, @bitCast(mem.bytesAsSlice(
+                f64, compressed_values[offset .. offset + @sizeOf(f64)])[0]));
             offset += @sizeOf(f64);
 
             timestamp += delta;
@@ -258,16 +297,17 @@ pub fn decompressMixPiece(
         }
     }
 
-    // Sort all segments by timestamp
+    // Sort all segments by timestamp.
     mem.sort(SegmentMetadata, all_segments.items, {}, struct {
         fn compare(_: void, a: SegmentMetadata, b: SegmentMetadata) bool {
             return a.start_time < b.start_time;
         }
     }.compare);
 
-    const final_timestamp = mem.bytesAsSlice(usize, compressed_values[offset .. offset + @sizeOf(usize)])[0];
+    const final_timestamp = mem.bytesAsSlice(
+        usize, compressed_values[offset .. offset + @sizeOf(usize)])[0];
 
-    // Decompress each segment separately
+    // Decompress each segment separately.
     for (0..all_segments.items.len) |i| {
         const segment = all_segments.items[i];
         const start_time = segment.start_time;
@@ -276,7 +316,7 @@ pub fn decompressMixPiece(
         else
             final_timestamp;
 
-        // Generate points for the current segment
+        // Generate points for the current segment.
         try decompressSegment(
             segment,
             start_time,
@@ -313,17 +353,21 @@ fn computeSegmentsMetadata(
 
     // The quantization can only be done using the original error bound. Afterwards, we add
     // `shared.ErrorBoundMargin` to avoid exceeding the error bound during decompression.
-    var quantized_intercept_floor = quantize_floor(uncompressed_values[0], error_bound) +
+    var quantized_intercept_floor = quantize_floor(
+        uncompressed_values[0],
+        error_bound) +
         shared.ErrorBoundMargin;
 
-    var quantized_intercept_ceil = quantize_ceil(uncompressed_values[0], error_bound) +
+    var quantized_intercept_ceil = quantize_ceil(
+        uncompressed_values[0], 
+        error_bound) +
         shared.ErrorBoundMargin;
 
-    // Track which quantization mode is still valid
+    // Track which quantization mode is still valid.
     var floor_valid = true;
     var ceil_valid = true;
 
-    // Track the last valid index for each quantization mode
+    // Track the last valid index for each quantization mode.
     var last_valid_floor: usize = 0;
     var last_valid_ceil: usize = 0;
 
@@ -341,10 +385,12 @@ fn computeSegmentsMetadata(
         // `segment_size` of type f64 to avoid casting from usize when computing other variables.
         const segment_size: f64 = @floatFromInt(current_timestamp - start_point.time);
 
-        // Check floor quantization bounds
+        // Check floor quantization bounds.
         if (floor_valid) {
-            const upper_limit_floor: f64 = upper_bound_slope_floor * segment_size + quantized_intercept_floor;
-            const lower_limit_floor: f64 = lower_bound_slope_floor * segment_size + quantized_intercept_floor;
+            const upper_limit_floor: f64 = upper_bound_slope_floor * segment_size +
+                quantized_intercept_floor;
+            const lower_limit_floor: f64 = lower_bound_slope_floor * segment_size +
+                quantized_intercept_floor;
 
             if ((upper_limit_floor < (end_point.value - adjusted_error_bound)) or
                 (lower_limit_floor > (end_point.value + adjusted_error_bound)))
@@ -352,11 +398,13 @@ fn computeSegmentsMetadata(
                 floor_valid = false;
                 last_valid_floor = current_timestamp - 1;
             } else {
-                // Update floor bounds
+                // Update floor bounds.
                 const new_upper_bound_slope: f64 =
-                    (end_point.value + adjusted_error_bound - quantized_intercept_floor) / segment_size;
+                    (end_point.value + adjusted_error_bound - quantized_intercept_floor) /
+                    segment_size;
                 const new_lower_bound_slope: f64 =
-                    (end_point.value - adjusted_error_bound - quantized_intercept_floor) / segment_size;
+                    (end_point.value - adjusted_error_bound - quantized_intercept_floor) /
+                    segment_size;
 
                 if (end_point.value + adjusted_error_bound < upper_limit_floor)
                     upper_bound_slope_floor = @max(new_upper_bound_slope, lower_bound_slope_floor);
@@ -365,10 +413,12 @@ fn computeSegmentsMetadata(
             }
         }
 
-        // Check ceil quantization bounds
+        // Check ceil quantization bounds.
         if (ceil_valid) {
-            const upper_limit_ceil: f64 = upper_bound_slope_ceil * segment_size + quantized_intercept_ceil;
-            const lower_limit_ceil: f64 = lower_bound_slope_ceil * segment_size + quantized_intercept_ceil;
+            const upper_limit_ceil: f64 = upper_bound_slope_ceil * segment_size +
+                quantized_intercept_ceil;
+            const lower_limit_ceil: f64 = lower_bound_slope_ceil * segment_size +
+                quantized_intercept_ceil;
 
             if ((upper_limit_ceil < (end_point.value - adjusted_error_bound)) or
                 (lower_limit_ceil > (end_point.value + adjusted_error_bound)))
@@ -376,11 +426,13 @@ fn computeSegmentsMetadata(
                 ceil_valid = false;
                 last_valid_ceil = current_timestamp - 1;
             } else {
-                // Update ceil bounds
+                // Update ceil bounds.
                 const new_upper_bound_slope: f64 =
-                    (end_point.value + adjusted_error_bound - quantized_intercept_ceil) / segment_size;
+                    (end_point.value + adjusted_error_bound - quantized_intercept_ceil) /
+                    segment_size;
                 const new_lower_bound_slope: f64 =
-                    (end_point.value - adjusted_error_bound - quantized_intercept_ceil) / segment_size;
+                    (end_point.value - adjusted_error_bound - quantized_intercept_ceil) /
+                    segment_size;
 
                 if (end_point.value + adjusted_error_bound < upper_limit_ceil)
                     upper_bound_slope_ceil = @max(new_upper_bound_slope, lower_bound_slope_ceil);
@@ -389,7 +441,7 @@ fn computeSegmentsMetadata(
             }
         }
 
-        // If both quantizations have failed, choose the one that went further
+        // If both quantizations have failed, choose the one that went further.
         if (!floor_valid and !ceil_valid) {
             if (last_valid_floor >= last_valid_ceil) {
                 // Use floor quantization
@@ -400,7 +452,7 @@ fn computeSegmentsMetadata(
                     .lower_bound_slope = lower_bound_slope_floor,
                 });
             } else {
-                // Use ceil quantization
+                // Use ceil quantization.
                 try segments_metadata.append(.{
                     .start_time = start_point.time,
                     .intercept = quantized_intercept_ceil,
@@ -409,12 +461,15 @@ fn computeSegmentsMetadata(
                 });
             }
 
-            // Reset for next segment
+            // Reset for next segment.
             start_point = end_point;
 
-            quantized_intercept_floor = quantize_floor(start_point.value, error_bound) +
+            quantized_intercept_floor = quantize_floor(
+                start_point.value, 
+                error_bound) +
                 shared.ErrorBoundMargin;
-            quantized_intercept_ceil = quantize_ceil(start_point.value, error_bound) +
+            quantized_intercept_ceil = quantize_ceil(
+                start_point.value, error_bound) +
                 shared.ErrorBoundMargin;
 
             upper_bound_slope_floor = math.floatMax(f64);
@@ -428,10 +483,10 @@ fn computeSegmentsMetadata(
         }
     }
 
-    // Handle the final segment
+    // Handle the final segment.
     const segment_size = uncompressed_values.len - start_point.time;
     if (segment_size > 0) {
-        // Choose the quantization that remained valid longer
+        // Choose the quantization that remained valid longer.
         if (floor_valid and !ceil_valid) {
             // Floor is still valid
             if (segment_size == 1) {
@@ -445,7 +500,7 @@ fn computeSegmentsMetadata(
                 .lower_bound_slope = lower_bound_slope_floor,
             });
         } else if (ceil_valid and !floor_valid) {
-            // Ceil is still valid
+            // Ceil is still valid.
             if (segment_size == 1) {
                 upper_bound_slope_ceil = 0;
                 lower_bound_slope_ceil = 0;
@@ -457,7 +512,7 @@ fn computeSegmentsMetadata(
                 .lower_bound_slope = lower_bound_slope_ceil,
             });
         } else {
-            // Both are valid or both invalid - choose the one that is closer to the original value
+            // Both are valid or both invalid - choose the one that is closer to the original value.
             const original_value = uncompressed_values[start_point.time];
             if (@round(original_value / error_bound) == @ceil(original_value / error_bound)) {
                 // Ceil quantization
@@ -489,14 +544,10 @@ fn computeSegmentsMetadata(
 }
 
 /// Mix-Piece Phase 2. Merge the elements in `segments_metadata` using Algorithm 4 from the paper.
-/// This algorithm has two parts:
-/// 1. Group segments with the same starting point
-/// 2. Group remaining ungrouped segments regardless of starting point
-///
 /// The results are stored in three output arrays:
-/// - `same_intercept_groups`: Groups formed from segments sharing the same quantized intercept value
-/// - `cross_intercept_groups`: Groups formed from segments with different intercept values
-/// - `ungrouped_segments`: Segments that couldn't be grouped with any other segment
+/// `same_intercept_groups`: Groups formed from segments sharing the same quantized intercept value
+/// `cross_intercept_groups`: Groups formed from segments with different intercept values
+/// `ungrouped_segments`: Segments that couldn't be grouped with any other segment
 /// The `allocator` is used to allocate memory for the intermediate representations needed.
 fn mergeSegmentsMetadata(
     segments_metadata: ArrayList(SegmentMetadata),
@@ -524,7 +575,7 @@ fn mergeSegmentsMetadata(
         segments_by_intercept.deinit();
     }
 
-    // Populate the HashMap with segments grouped by their quantized intercept value
+    // Populate the HashMap with segments grouped by their quantized intercept value.
     for (segments_metadata.items) |segment_metadata| {
         try appendSegmentMetadata(
             &segments_by_intercept,
@@ -533,14 +584,13 @@ fn mergeSegmentsMetadata(
         );
     }
 
-    // 1. Group segments with the same starting point
-
+    // 1. Group segments with the same starting point.
     var iterator = segments_by_intercept.iterator();
     while (iterator.next()) |entry| {
         const segments_same_intercept_val = entry.value_ptr.*;
 
-        // Sort segments by ascending lower bound slope
-        // This ordering allows us to find the optimal grouping using a greedy approach
+        // Sort segments by ascending lower bound slope.
+        // This ordering allows us to find the optimal grouping using a greedy approach.
         mem.sort(
             SegmentMetadata,
             segments_same_intercept_val.items,
@@ -548,16 +598,16 @@ fn mergeSegmentsMetadata(
             compareMetadataBySlope,
         );
 
-        // Initialize the first group with the first segment
+        // Initialize the first group with the first segment.
         var current_group: SegmentMetadata = .{
-            .start_time = 0.0, // Not used for group metadata
+            .start_time = 0.0, // Not used for group metadata.
             .intercept = segments_same_intercept_val.items[0].intercept,
             .lower_bound_slope = segments_same_intercept_val.items[0].lower_bound_slope,
             .upper_bound_slope = segments_same_intercept_val.items[0].upper_bound_slope,
         };
         try timestamps_array.append(segments_same_intercept_val.items[0].start_time);
 
-        // Process remaining segments for this intercept value
+        // Process remaining segments for this intercept value.
         for (segments_same_intercept_val.items[1..]) |segment| {
             // Check if the current segment's interval overlaps with the group's interval
             // (Algorithm 4, Line 8)
@@ -575,9 +625,9 @@ fn mergeSegmentsMetadata(
                     segment.upper_bound_slope,
                 );
             } else {
-                // Cannot merge - finalize current group
+                // Cannot merge - finalize current group.
                 if (timestamps_array.items.len > 1) {
-                    // Multiple segments in group - add to same_intercept_groups
+                    // Multiple segments in group - add to same_intercept_groups.
                     for (timestamps_array.items) |timestamp| {
                         try same_intercept_groups.append(.{
                             .start_time = timestamp,
@@ -587,7 +637,7 @@ fn mergeSegmentsMetadata(
                         });
                     }
                 } else {
-                    // Single segment - save for Part 2 processing
+                    // Single segment - save for Part 2 processing.
                     try single_segment_groups.append(.{
                         .start_time = timestamps_array.items[0],
                         .intercept = current_group.intercept,
@@ -596,7 +646,7 @@ fn mergeSegmentsMetadata(
                     });
                 }
 
-                // Start new group with current segment
+                // Start new group with current segment.
                 timestamps_array.clearRetainingCapacity();
                 current_group = .{
                     .start_time = 0.0,
@@ -608,7 +658,7 @@ fn mergeSegmentsMetadata(
             }
         }
 
-        // Handle the final group for this intercept value
+        // Handle the final group for this intercept value.
         if (timestamps_array.items.len > 1) {
             for (timestamps_array.items) |timestamp| {
                 try same_intercept_groups.append(.{
@@ -629,9 +679,8 @@ fn mergeSegmentsMetadata(
         timestamps_array.clearRetainingCapacity();
     }
 
-    // 2. Group remaining ungrouped segments across different intercept values
-
-    // Sort ungrouped segments by lower bound slope
+    // 2. Group remaining ungrouped segments across different intercept values.
+    // Sort ungrouped segments by lower bound slope.
     mem.sort(
         SegmentMetadata,
         single_segment_groups.items,
@@ -639,15 +688,17 @@ fn mergeSegmentsMetadata(
         compareMetadataBySlope,
     );
 
-    // For cross-intercept grouping, we need to track both intercept and timestamp values for each segment
-    var cross_intercept_segment_info = ArrayList(struct { intercept: f64, start_time: usize }).init(allocator);
+    // For cross-intercept grouping,
+    // we need to track both intercept and timestamp values for each segment.
+    var cross_intercept_segment_info =
+        ArrayList(struct { intercept: f64, start_time: usize }).init(allocator);
     defer cross_intercept_segment_info.deinit();
 
     if (single_segment_groups.items.len > 0) {
-        // Initialize with the first ungrouped segment
+        // Initialize with the first ungrouped segment.
         var current_cross_group: SegmentMetadata = .{
-            .start_time = 0.0, // Not used for group metadata
-            .intercept = 0.0, // Will vary for each segment in the group
+            .start_time = 0.0, // Not used for group metadata.
+            .intercept = 0.0, // Will vary for each segment in the group.
             .lower_bound_slope = single_segment_groups.items[0].lower_bound_slope,
             .upper_bound_slope = single_segment_groups.items[0].upper_bound_slope,
         };
@@ -656,13 +707,13 @@ fn mergeSegmentsMetadata(
             .start_time = single_segment_groups.items[0].start_time,
         });
 
-        // Process remaining ungrouped segments
+        // Process remaining ungrouped segments.
         for (single_segment_groups.items[1..]) |segment| {
-            // Check if intervals overlap (Algorithm 4, Line 27)
+            // Check if intervals overlap.
             if (segment.lower_bound_slope <= current_cross_group.upper_bound_slope and
                 segment.upper_bound_slope >= current_cross_group.lower_bound_slope)
             {
-                // Can merge - update group interval
+                // Can merge - update group interval.
                 current_cross_group.lower_bound_slope = @max(
                     current_cross_group.lower_bound_slope,
                     segment.lower_bound_slope,
@@ -676,9 +727,9 @@ fn mergeSegmentsMetadata(
                     .start_time = segment.start_time,
                 });
             } else {
-                // Cannot merge - finalize current cross-intercept group
+                // Cannot merge - finalize current cross-intercept group.
                 if (cross_intercept_segment_info.items.len > 1) {
-                    // Multiple segments - add to cross_intercept_groups
+                    // Multiple segments - add to cross_intercept_groups.
                     for (cross_intercept_segment_info.items) |info| {
                         try cross_intercept_groups.append(.{
                             .start_time = info.start_time,
@@ -688,7 +739,7 @@ fn mergeSegmentsMetadata(
                         });
                     }
                 } else {
-                    // Single segment - add to ungrouped_segments
+                    // Single segment - add to ungrouped_segments.
                     for (cross_intercept_segment_info.items) |info| {
                         try ungrouped_segments.append(.{
                             .start_time = info.start_time,
@@ -699,7 +750,7 @@ fn mergeSegmentsMetadata(
                     }
                 }
 
-                // Start new cross-intercept group
+                // Start new cross-intercept group.
                 cross_intercept_segment_info.clearRetainingCapacity();
                 current_cross_group = .{
                     .start_time = 0.0,
@@ -714,7 +765,7 @@ fn mergeSegmentsMetadata(
             }
         }
 
-        // Handle the final cross-intercept group
+        // Handle the final cross-intercept group.
         if (cross_intercept_segment_info.items.len > 1) {
             for (cross_intercept_segment_info.items) |info| {
                 try cross_intercept_groups.append(.{
@@ -736,7 +787,7 @@ fn mergeSegmentsMetadata(
         }
     }
 
-    // Sort all output arrays by start time
+    // Sort all output arrays by start time.
     mem.sort(
         SegmentMetadata,
         same_intercept_groups.items,
@@ -761,8 +812,8 @@ fn mergeSegmentsMetadata(
 
 /// Mix-Piece Phase 3.1. Populate the `SegmentMetadata` HashMap from intercept points in
 /// `same_intercept_groups` to a HashMap from the approximation slope to an array list of
-/// timestamps and store it in `same_intercept_groups_map`. The `allocator` is used to allocate
-/// memory of intermediates.
+/// timestamps and store it in `same_intercept_groups_map`.
+/// The `allocator` is used to allocate memory of intermediates.
 fn populateSameInterceptGroupsHashMap(
     same_intercept_groups: ArrayList(SegmentMetadata),
     same_intercept_groups_map: *HashMapf64(HashMapf64(ArrayList(usize))),
@@ -794,15 +845,12 @@ fn populateSameInterceptGroupsHashMap(
     }
 }
 
-/// Mix-Piece Phase 3.2. Populate HashMap of cross_intercept_groups
-/// Groups segments by their slope and stores intercept-timestamp pairs
-/// The `allocator` is used to allocate memory of intermediates.
+/// Mix-Piece Phase 3.2. Populate HashMap of cross_intercept_groups by grouping theit
+///  segments by their slope and stores intercept-timestamp pairs.
 /// Output format: slope -> ArrayList(InterceptTimestampPair)
-/// Which corresponds to: a_j; k_j; b_j,1; t_j,1; b_j,k_j; t_j,k_j
-/// where:
-/// - a_j = slope
-/// - k_j = number of intercept-timestamp pairs
-/// - b_j,i; t_j,i = intercept and timestamp pairs
+/// Which corresponds to: a_j; k_j; b_j,1; t_j,1; b_j,k_j; t_j,k_j, where a_j is the slope,
+/// k_j is the number of intercept-timestamp pairs, b_j,i; t_j,i are the intercept and timestamp pairs
+/// The `allocator` is used to allocate memory of intermediates.
 fn populateCrossInterceptGroupsAsHashMap(
     cross_intercept_groups: ArrayList(SegmentMetadata),
     cross_intercept_groups_map: *CrossInterceptGroupsMap,
@@ -832,11 +880,7 @@ fn populateCrossInterceptGroupsAsHashMap(
 /// Mix-Piece Phase 3.3. Save ungrouped values in an array
 /// Takes ungrouped segments and converts them to UngroupedSegment structs
 /// for final output representation
-/// Output format a1, b1, t1... etc.
-/// where:
-/// a = slope
-/// b = intercept
-/// t = timestamp
+/// Output format a1, b1, t1..., where a is the slope, b is the intercept, t is the timestamp
 fn populateUngroupedSegmentsArray(
     ungrouped_segments: ArrayList(SegmentMetadata),
     ungrouped_segments_array: *ArrayList(UngroupedSegment),
@@ -878,7 +922,10 @@ fn createCompressedRepresentationMergedSegments(
         try appendValue(f64, current_intercept, compressed_values);
 
         // Append the number of slopes N_i associated to `current_intercept` b_i.
-        try appendValue(usize, hash_to_hash_entry.value_ptr.*.count(), compressed_values);
+        try appendValue(
+            usize, 
+            hash_to_hash_entry.value_ptr.*.count(), 
+            compressed_values);
 
         // Iterate over the inner HashMap to append the slopes a_ij associated to b_i.
         var hash_to_array_iterator = hash_to_hash_entry.value_ptr.*.iterator();
@@ -887,12 +934,18 @@ fn createCompressedRepresentationMergedSegments(
             try appendValue(f64, current_slope, compressed_values);
 
             // Append the number of timestamps M_ij associated to `current_slope` a_ij.
-            try appendValue(usize, hash_to_array_entry.value_ptr.*.items.len, compressed_values);
+            try appendValue(
+                usize, 
+                hash_to_array_entry.value_ptr.*.items.len, 
+                compressed_values);
             var previous_timestamp: usize = 0;
 
             // Iterate over the ArrayList to append the timestamps t_k.
             for (hash_to_array_entry.value_ptr.*.items) |timestamp| {
-                try appendValue(usize, timestamp - previous_timestamp, compressed_values);
+                try appendValue(
+                    usize, 
+                    timestamp - previous_timestamp, 
+                    compressed_values);
                 previous_timestamp = timestamp;
             }
         }
@@ -902,11 +955,8 @@ fn createCompressedRepresentationMergedSegments(
 /// Mix-Piece Phase 4.2. Create compressed representation from the 'cross_intercept_groups_map'
 /// Output format: For each slope a_j, store the count k_j of intercept-timestamp pairs,
 /// followed by the pairs themselves: [a_j, k_j, b_j,1, t_j,1, b_j,2, t_j,2, ..., b_j,k_j, t_j,k_j]
-/// where:
-/// - a_j = slope
-/// - k_j = number of intercept-timestamp pairs for this slope
-/// - b_j,i = i-th intercept for slope a_j
-/// - t_j,i = i-th timestamp for slope a_j
+/// where a_j is the  slope, k_j is the  number of intercept-timestamp pairs for this slope
+/// b_j,i is the i-th intercept for slope a_j, t_j,i is the i-th timestamp for slope a_j
 fn createCompressedRepresentationCrossInterceptGroups(
     cross_intercept_groups_map: CrossInterceptGroupsMap,
     compressed_values: *ArrayList(u8),
@@ -920,7 +970,10 @@ fn createCompressedRepresentationCrossInterceptGroups(
         try appendValue(f64, current_slope, compressed_values);
 
         // Append the number of intercept-timestamp pairs k_j for this slope
-        try appendValue(usize, slope_entry.value_ptr.*.items.len, compressed_values);
+        try appendValue(
+            usize, 
+            slope_entry.value_ptr.*.items.len, 
+            compressed_values);
 
         // Store previous timestamp for delta encoding
         var previous_timestamp: usize = 0;
@@ -928,21 +981,24 @@ fn createCompressedRepresentationCrossInterceptGroups(
         // Iterate over all intercept-timestamp pairs for this slope
         for (slope_entry.value_ptr.*.items) |pair| {
             // Append the intercept b_j,i
-            try appendValue(f64, pair.intercept, compressed_values);
+            try appendValue(
+                f64, 
+                pair.intercept, 
+                compressed_values);
 
             // Append the timestamp t_j,i
-            try appendValue(usize, pair.timestamp - previous_timestamp, compressed_values);
+            try appendValue(
+                usize, 
+                pair.timestamp - previous_timestamp, 
+                compressed_values);
             previous_timestamp = pair.timestamp;
         }
     }
 }
 
 /// Mix-Piece Phase 4.3. Create compressed representation from the 'ungrouped_segments_array'
-/// Output format: For each ungrouped segment, store [a_i, b_i, t_i]
-/// where:
-/// - a_i = slope of segment i
-/// - b_i = intercept of segment i
-/// - t_i = timestamp of segment i
+/// Output format: For each ungrouped segment, store [a_i, b_i, t_i],
+/// where a_i is the slope of segment i, b_i is the intercept of segment i, t_i is the  timestamp of segment i
 fn createCompressedRepresentationUngroupedSegments(
     ungrouped_segments_array: ArrayList(UngroupedSegment),
     compressed_values: *ArrayList(u8),
@@ -958,7 +1014,10 @@ fn createCompressedRepresentationUngroupedSegments(
         try appendValue(f64, segment.intercept, compressed_values);
 
         // Append the timestamp t_i (delta encoded for consistency with other phases)
-        try appendValue(usize, segment.timestamp - previous_timestamp, compressed_values);
+        try appendValue(
+            usize, 
+            segment.timestamp - previous_timestamp, 
+            compressed_values);
         previous_timestamp = segment.timestamp;
     }
 }
@@ -978,21 +1037,25 @@ fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)
     }
 }
 
-/// Struct for keeping ungrouped segments
+/// Struct for keeping ungrouped segments.
 const UngroupedSegment = struct {
     slope: f64,
     intercept: f64,
     timestamp: usize,
 };
 
-/// Struct for the grouping of cross intercept groups
+/// Struct for the grouping of cross intercept groups.
 const InterceptTimestampPair = struct {
     intercept: f64,
     timestamp: usize,
 };
 
 /// HashMap for cross_intercept_groups
-const CrossInterceptGroupsMap = HashMap(f64, ArrayList(InterceptTimestampPair), HashF64Context, std.hash_map.default_max_load_percentage);
+const CrossInterceptGroupsMap = HashMap(
+    f64, 
+    ArrayList(InterceptTimestampPair), 
+    HashF64Context, 
+    std.hash_map.default_max_load_percentage);
 
 /// `HashF64Context` provides context for hashing and comparing `f64` values for use in `HashMap`.
 /// This context is essential when using `f64` as keys in a `HashMap`. It defines how the keys are
@@ -1047,7 +1110,11 @@ fn appendSegmentMetadata(
 
 /// Returns a HashMap with key type f64 and `value_type` given by the user.
 fn HashMapf64(comptime value_type: type) type {
-    return HashMap(f64, value_type, HashF64Context, std.hash_map.default_max_load_percentage);
+    return HashMap(
+        f64, 
+        value_type, 
+        HashF64Context, 
+        std.hash_map.default_max_load_percentage);
 }
 
 /// `SegmentMetadata` stores the information about an approximated segment during the execution
@@ -1093,12 +1160,12 @@ fn decompressSegment(
     const slope = (segment_metadata.upper_bound_slope + segment_metadata.lower_bound_slope) / 2.0;
 
     for (start_time..end_time) |t| {
-        const decompressed_value = slope * @as(f64, @floatFromInt(t - start_time)) + segment_metadata.intercept;
+        const decompressed_value = slope * @as(f64, @floatFromInt(t - start_time)) +
+            segment_metadata.intercept;
         try decompressed_values.append(decompressed_value);
     }
 }
 
-// Tests
 test "mix-piece can compress, decompress and merge many segments with non-zero error bound" {
     const seed: u64 = @bitCast(time.milliTimestamp());
     var prng = rand.DefaultPrng.init(seed);
@@ -1107,10 +1174,15 @@ test "mix-piece can compress, decompress and merge many segments with non-zero e
     const allocator = testing.allocator;
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
+
     for (0..20) |_| {
-        // Generate floating points numbers between 0 and 10. This will generate many merged
+        // Generate floating points numbers between 0 and 10. This will generate many merged.
         // segments when applying Mix-Piece.
-        try tester.generateBoundedRandomValues(&uncompressed_values, 0, 10, random);
+        try tester.generateBoundedRandomValues(
+            &uncompressed_values, 
+            0, 
+            10, 
+            random);
     }
     try tester.testCompressAndDecompress(
         uncompressed_values.items,
@@ -1129,7 +1201,11 @@ test "mix-piece even size compress and decompress" {
     const allocator = testing.allocator;
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, random);
+    try tester.generateBoundedRandomValues(
+        &uncompressed_values, 
+        0.0, 
+        1.0, 
+        random);
     try tester.testCompressAndDecompress(
         uncompressed_values.items,
         allocator,
@@ -1147,7 +1223,11 @@ test "mix-piece odd size compress and decompress" {
     const allocator = testing.allocator;
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, random);
+    try tester.generateBoundedRandomValues(
+        &uncompressed_values, 
+        0.0, 
+        1.0, 
+        random);
     // Add another element to make the uncompressed values of odd size.
     try uncompressed_values.append(random.float(f64));
     try tester.testCompressAndDecompress(
@@ -1168,7 +1248,9 @@ test "mix-piece random lines and error bound compress and decompress" {
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
     for (0..20) |_| {
-        try tester.generateRandomLinearFunction(&uncompressed_values, random);
+        try tester.generateRandomLinearFunction(
+            &uncompressed_values, 
+            random);
     }
     try tester.testCompressAndDecompress(
         uncompressed_values.items,
