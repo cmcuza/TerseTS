@@ -86,7 +86,8 @@ class Method(Enum):
     PiecewiseLinearHistogram = 7
     ABCLinearApproximation = 8
     VisvalingamWhyatt = 9
-    SlidingWindow = 10
+    BottomUp = 10
+    SlidingWindow = 11
 
 # Public Functions.
 def compress(values: List[float], method: Method, error_bound: float) -> bytes:
