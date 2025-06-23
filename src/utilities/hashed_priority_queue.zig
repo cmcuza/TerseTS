@@ -107,7 +107,7 @@ pub fn HashedPriorityQueue(
 
         /// Removes and returns the element at the specified index.
         pub fn removeIndex(self: *Self, index: usize) !T {
-            if (self.len < index) return Error.ItemNotFound;
+            if (index >= self.len) return Error.ItemNotFound;
 
             const last = self.items[self.len - 1];
             const item = self.items[index];
@@ -170,7 +170,7 @@ pub fn HashedPriorityQueue(
 
         /// Returns the `elem` in the queue at `index` in the queue.
         pub fn get(self: *Self, index: usize) !T {
-            if (index > self.items.len)
+            if (index >= self.len)
                 return Error.ItemNotFound;
 
             return self.items[index];
