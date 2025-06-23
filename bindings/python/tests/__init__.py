@@ -52,7 +52,7 @@ class TerseTSPythonTest(unittest.TestCase):
         method = random.choice([Method.PoorMansCompressionMean, 
                                 Method.PoorMansCompressionMidrange, 
                                 Method.SwingFilter,
-                                Method.ABCLinearCompression,
+                                Method.ABCLinearApproximation,
                                 Method.SwingFilterDisconnected,
                                 Method.SlideFilter])
         
