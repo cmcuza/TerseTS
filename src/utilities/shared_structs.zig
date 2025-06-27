@@ -13,6 +13,8 @@
 // limitations under the License.
 
 //! Contains all shared variables and structures used across TerseTS.
+const std = @import("std");
+pub const HashMap = std.HashMap;
 
 /// Margin to adjust the error bound for numerical stability. Reducing the error bound by this
 /// margin ensures that all the elements of the decompressed time series are within the error bound
@@ -42,3 +44,14 @@ pub const LinearFunction = struct {
 fn Point(comptime time_type: type) type {
     return struct { time: time_type, value: f64 };
 }
+
+/// `SegmentMetadata` stores the information about an approximated segment during the execution
+/// of Sim-Piece. It stores the starting time of the segment in `start_time`, the
+/// `intercept` point used to create the linear function approximation, and the slopes of
+/// the upper and lower bounds that constraint the linear approximation in that segment.
+pub const SegmentMetadata = struct {
+    start_time: usize,
+    intercept: f64,
+    upper_bound_slope: f64,
+    lower_bound_slope: f64,
+};

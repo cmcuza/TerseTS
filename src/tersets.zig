@@ -105,7 +105,7 @@ pub fn compress(
             );
         },
         .SimPiece => {
-            try sim_piece.compressSimPiece(
+            try sim_piece.compress(
                 uncompressed_values,
                 &compressed_values,
                 allocator,
@@ -113,7 +113,7 @@ pub fn compress(
             );
         },
         .MixPiece => {
-            try mix_piece.compressMixPiece(
+            try mix_piece.compress(
                 uncompressed_values,
                 &compressed_values,
                 allocator,
@@ -188,7 +188,7 @@ pub fn decompress(
             try sim_piece.decompress(compressed_values_slice, &decompressed_values, allocator);
         },
         .MixPiece => {
-            try mix_piece.decompressMixPiece(compressed_values_slice, &decompressed_values, allocator);
+            try mix_piece.decompress(compressed_values_slice, &decompressed_values, allocator);
         },
         .PiecewiseConstantHistogram => {
             try piecewise_histogram.decompressPWCH(compressed_values_slice, &decompressed_values);
