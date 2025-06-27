@@ -49,7 +49,7 @@ pub fn compress(
     if (error_bound <= 0.0) {
         return Error.UnsupportedErrorBound;
     }
-    // Sim-Piece Phase 1: Compute `` for all segments that can be approximated
+    // Sim-Piece Phase 1: Compute `SegmentMetadata` for all segments that can be approximated
     // by the given `error_bound`.
     var segments_metadata = ArrayList(shared.SegmentMetadata).init(allocator);
     defer segments_metadata.deinit();
@@ -79,7 +79,11 @@ pub fn compress(
         }
         merged_segments_metadata_map.deinit();
     }
-    try populateSegmentsMetadataHashMap(merged_segments_metadata, &merged_segments_metadata_map, allocator);
+    try populateSegmentsMetadataHashMap(
+        merged_segments_metadata,
+        &merged_segments_metadata_map,
+        allocator,
+    );
 
     // Sim-Piece Phase 4: Create the final compressed representation and store in compressed values.
     try createCompressedRepresentation(merged_segments_metadata_map, compressed_values);
@@ -156,17 +160,6 @@ pub fn decompress(
         decompressed_values,
     );
 }
-
-/// `SegmentMetadata` stores the information about an approximated segment during the execution
-/// of Sim-Piece. It stores the starting time of the segment in `start_time`, the
-/// `intercept` point used to create the linear function approximation, and the slopes of
-/// the upper and lower bounds that constraint the linear approximation in that segment.
-// pub const shared.segmentMetadata = struct {
-//     start_time: usize,
-//     intercept: f64,
-//     upper_bound_slope: f64,
-//     lower_bound_slope: f64,
-// };
 
 /// `HashF64Context` provides context for hashing and comparing `f64` values for use in `HashMap`.
 /// This context is essential when using `f64` as keys in a `HashMap`. It defines how the keys are
