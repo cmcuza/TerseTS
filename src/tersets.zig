@@ -21,9 +21,8 @@ const ArrayList = std.ArrayList;
 const poor_mans_compression = @import("functional_approximation/poor_mans_compression.zig");
 const swing_slide_filter = @import("functional_approximation/swing_slide_filter.zig");
 const sim_piece = @import("functional_approximation/sim_piece.zig");
-const abc_compression = @import("functional_approximation/abc_linear_compression.zig");
-const piecewise_histogram = @import("histogram_representation/histogram_compression.zig");
-const abc_linear_compression = @import("functional_approximation/abc_linear_compression.zig");
+const abc_approximation = @import("functional_approximation/abc_linear_approximation.zig");
+const piecewise_histogram = @import("histogram_representation/constant_linear_representation.zig");
 const vw = @import("line_simplification/visvalingam_whyatt.zig");
 const sliding_window = @import("line_simplification/sliding_window.zig");
 const bottom_up = @import("line_simplification/bottom_up.zig");
@@ -132,7 +131,7 @@ pub fn compress(
             );
         },
         .ABCLinearApproximation => {
-            try abc_linear_compression.compress(
+            try abc_approximation.compress(
                 uncompressed_values,
                 &compressed_values,
                 allocator,
@@ -204,7 +203,7 @@ pub fn decompress(
             try piecewise_histogram.decompressPWLH(compressed_values_slice, &decompressed_values);
         },
         .ABCLinearApproximation => {
-            try abc_linear_compression.decompress(compressed_values_slice, &decompressed_values);
+            try abc_approximation.decompress(compressed_values_slice, &decompressed_values);
         },
         .VisvalingamWhyatt => {
             try vw.decompress(compressed_values_slice, &decompressed_values);
