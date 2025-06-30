@@ -107,7 +107,7 @@ pub fn compress(
             );
         },
         .SimPiece => {
-            try sim_piece.compressSimPiece(
+            try sim_piece.compress(
                 uncompressed_values,
                 &compressed_values,
                 allocator,

@@ -40,7 +40,7 @@ const tester = @import("../tester.zig");
 /// Compresses `uncompressed_values` within `error_bound` using the "Sim-Piece" algorithm.
 /// The function writes the result to `compressed_values`. The `allocator` is used for memory
 /// allocation of intermediate data structures. If an error occurs, it is returned.
-pub fn compressSimPiece(
+pub fn compress(
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
     allocator: mem.Allocator,
@@ -205,8 +205,7 @@ fn computeSegmentsMetadata(
     // Initialize the `start_point` with the first uncompressed value.
     var start_point: DiscretePoint = .{ .time = 0, .value = uncompressed_values[0] };
 
-    // The quantization can only be done using the original error bound. Afterwards, we add
-    // `tersets.ErrorBoundMargin` to avoid exceeding the error bound during decompression.
+    // The quantization can only be done using the original error bound.
     var quantized_interception = quantize(uncompressed_values[0], error_bound);
 
     // The first point is already part of `current_segment`, the next point is at index one.
