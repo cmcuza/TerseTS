@@ -18,15 +18,15 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
-const poor_mans_compression = @import("functional/poor_mans_compression.zig");
-const swing_slide_filter = @import("functional/swing_slide_filter.zig");
-const sim_piece = @import("functional/sim_piece.zig");
-const piecewise_histogram = @import("functional/histogram_compression.zig");
-const abc_linear_compression = @import("functional/abc_linear_compression.zig");
+const poor_mans_compression = @import("functional_approximation/poor_mans_compression.zig");
+const swing_slide_filter = @import("functional_approximation/swing_slide_filter.zig");
+const sim_piece = @import("functional_approximation/sim_piece.zig");
+const abc_compression = @import("functional_approximation/abc_linear_compression.zig");
+const piecewise_histogram = @import("histogram_representation/histogram_compression.zig");
+const abc_linear_compression = @import("functional_approximation/abc_linear_compression.zig");
 const vw = @import("line_simplification/visvalingam_whyatt.zig");
 const sliding_window = @import("line_simplification/sliding_window.zig");
 const bottom_up = @import("line_simplification/bottom_up.zig");
-const abc_compression = @import("functional/abc_linear_compression.zig");
 
 /// The errors that can occur in TerseTS.
 pub const Error = error{

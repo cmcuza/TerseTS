@@ -207,8 +207,7 @@ fn computeSegmentsMetadata(
 
     // The quantization can only be done using the original error bound. Afterwards, we add
     // `tersets.ErrorBoundMargin` to avoid exceeding the error bound during decompression.
-    var quantized_interception = quantize(uncompressed_values[0], error_bound) +
-        shared.ErrorBoundMargin;
+    var quantized_interception = quantize(uncompressed_values[0], error_bound);
 
     // The first point is already part of `current_segment`, the next point is at index one.
     for (1..uncompressed_values.len) |current_timestamp| {
