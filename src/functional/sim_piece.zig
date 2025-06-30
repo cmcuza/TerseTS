@@ -617,19 +617,17 @@ test "hashmap can map f64 to segment metadata array list" {
 }
 
 test "sim-piece can compress, decompress and merge many segments with non-zero error bound" {
-    const seed: u64 = @bitCast(time.milliTimestamp());
-    var prng = rand.DefaultPrng.init(seed);
-    const random = prng.random();
-    const error_bound = 0.1;
-
     const allocator = testing.allocator;
+
+    const error_bound = tester.generateBoundedRandomValue(f32, 0, 3, undefined);
+
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
 
     for (0..20) |_| {
         // Generate floating points numbers between 0 and 10. This will generate many merged
         // segments when applying Sim-Piece.
-        try tester.generateBoundedRandomValues(&uncompressed_values, 0, 10, random);
+        try tester.generateBoundedRandomValues(&uncompressed_values, 0, 10, undefined);
     }
 
     try tester.testCompressAndDecompress(
@@ -642,15 +640,12 @@ test "sim-piece can compress, decompress and merge many segments with non-zero e
 }
 
 test "sim-piece even size compress and decompress" {
-    const seed: u64 = @bitCast(time.milliTimestamp());
-    var prng = rand.DefaultPrng.init(seed);
-    const random = prng.random();
-    const error_bound = 0.01;
-
     const allocator = testing.allocator;
+    const error_bound = tester.generateBoundedRandomValue(f32, 0, 1, undefined);
+
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, random);
+    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, undefined);
 
     try tester.testCompressAndDecompress(
         uncompressed_values.items,
@@ -662,18 +657,15 @@ test "sim-piece even size compress and decompress" {
 }
 
 test "sim-piece odd size compress and decompress" {
-    const seed: u64 = @bitCast(time.milliTimestamp());
-    var prng = rand.DefaultPrng.init(seed);
-    const random = prng.random();
-    const error_bound = 0.01;
-
     const allocator = testing.allocator;
+    const error_bound = tester.generateBoundedRandomValue(f32, 0, 1, undefined);
+
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, random);
+    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, undefined);
 
     // Add another element to make the uncompressed values of odd size.
-    try uncompressed_values.append(random.float(f64));
+    try uncompressed_values.append(tester.generateBoundedRandomValue(f64, 0, 1, undefined));
 
     try tester.testCompressAndDecompress(
         uncompressed_values.items,
@@ -685,17 +677,14 @@ test "sim-piece odd size compress and decompress" {
 }
 
 test "sim-piece random lines and error bound compress and decompress" {
-    const seed: u64 = @bitCast(time.milliTimestamp());
-    var prng = rand.DefaultPrng.init(seed);
-    const random = prng.random();
-    const error_bound = 0.01;
+    const error_bound = tester.generateBoundedRandomValue(f32, 0, 1, undefined);
 
     const allocator = testing.allocator;
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
 
     for (0..20) |_| {
-        try tester.generateRandomLinearFunction(&uncompressed_values, random);
+        try tester.generateRandomLinearFunction(&uncompressed_values, undefined);
     }
 
     try tester.testCompressAndDecompress(

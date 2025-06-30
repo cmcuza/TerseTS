@@ -25,6 +25,9 @@ const mix_piece = @import("functional/mix_piece.zig");
 const piecewise_histogram = @import("functional/histogram_compression.zig");
 const abc_linear_compression = @import("functional/abc_linear_compression.zig");
 const vw = @import("line_simplification/visvalingam_whyatt.zig");
+const sliding_window = @import("line_simplification/sliding_window.zig");
+const bottom_up = @import("line_simplification/bottom_up.zig");
+const abc_compression = @import("functional/abc_linear_compression.zig");
 
 /// The errors that can occur in TerseTS.
 pub const Error = error{
@@ -49,6 +52,8 @@ pub const Method = enum {
     PiecewiseLinearHistogram,
     ABCLinearApproximation,
     VisvalingamWhyatt,
+    SlidingWindow,
+    BottomUp,
     MixPiece,
 };
 
@@ -152,6 +157,21 @@ pub fn compress(
                 error_bound,
             );
         },
+        .SlidingWindow => {
+            try sliding_window.compress(
+                uncompressed_values,
+                &compressed_values,
+                error_bound,
+            );
+        },
+        .BottomUp => {
+            try bottom_up.compress(
+                uncompressed_values,
+                &compressed_values,
+                allocator,
+                error_bound,
+            );
+        },
     }
     try compressed_values.append(@intFromEnum(method));
     return compressed_values;
@@ -201,6 +221,12 @@ pub fn decompress(
         },
         .VisvalingamWhyatt => {
             try vw.decompress(compressed_values_slice, &decompressed_values);
+        },
+        .SlidingWindow => {
+            try sliding_window.decompress(compressed_values, &decompressed_values);
+        },
+        .BottomUp => {
+            try bottom_up.decompress(compressed_values_slice, &decompressed_values);
         },
     }
 
