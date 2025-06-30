@@ -118,9 +118,9 @@ pub const ConvexHull = struct {
         if (convex_hull_len == 2) {
             const first_point = self.at(0);
             const second_point = self.at(1);
-            const delta_time: f80 = @floatFromInt(second_point.time - first_point.time);
+            const delta_time: f64 = @floatFromInt(second_point.time - first_point.time);
             const slope = (second_point.value - first_point.value) / delta_time;
-            const intercept_value: f80 = first_point.value - slope * @as(f80, @floatFromInt(first_point.time));
+            const intercept_value: f64 = first_point.value - slope * @as(f64, @floatFromInt(first_point.time));
             return LinearFunction{
                 .slope = slope,
                 .intercept = intercept_value,
