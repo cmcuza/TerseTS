@@ -79,7 +79,7 @@ pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList
 
 /// Append `value` of `type` determined at compile time to `compressed_values`.
 fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)) !void {
-    // Compile-time type check
+    // Compile-time type check.
     switch (@TypeOf(value)) {
         f64, usize => {
             const value_as_bytes: [8]u8 = @bitCast(value);
