@@ -13,9 +13,11 @@
 // limitations under the License.
 
 //! Implementation of the "Fixed-width Uniform Quantization Method" based on the description at
-//! https://en.wikipedia.org/wiki/Quantization_(signal_processing). Quantization is the process of mapping input values
-//! from a large set (often continuous) to output values in a smaller set (often discrete).
-//! https://en.wikipedia.org/wiki/Quantization_(signal_processing)
+//! https://en.wikipedia.org/wiki/Quantization_(signal_processing). Quantization is the process
+//! of mapping input values from a large set (often continuous) to output values in a smaller set.
+//! It can be used to compress data by reducing the precision of the values, which is particularly
+//! useful in time series compression. It can be in combination with other methods to achieve better
+//! compression ratios.
 
 const std = @import("std");
 const ArrayList = std.ArrayList;
@@ -28,31 +30,54 @@ const Method = tersets.Method;
 const Error = tersets.Error;
 const tester = @import("../tester.zig");
 
-/// Compress `uncompressed_values` within `error_bound` using "Quantization".
+/// Compress `uncompressed_values` within `error_bound` using "Bucket Quantization".
 /// The function writes the result to `compressed_values`. If an error occurs it is returned.
 pub fn compress(
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
     error_bound: f32,
-) Error!ArrayList(f64) {
+) Error!void {
     if (error_bound < 0.0) return Error.UnsupportedErrorBound;
+
+    // Multiply by 1.999 instead of 2 to avoid potential overflow or rounding issues
+    // during quantization. Using 2 could cause values at the upper bound to exceed
+    // the maximum representable value, while 1.999 ensures results stay within range.
+    const buket_size = 1.9999 * error_bound;
 
     for (uncompressed_values) |value| {
         if (!std.math.isFinite(value)) return Error.UnsupportedInput;
 
         // Map the value to a quantized value within the error bound.
         const quantized_value = if (error_bound != 0.0)
-            @floor(value / error_bound) * error_bound
+            @floor(value / buket_size + 0.5) * buket_size
         else
             value;
 
-        try appendValue(f64, quantized_value, &compressed_values);
+        try appendValue(f64, quantized_value, compressed_values);
+    }
+
+    return;
+}
+
+/// Decompress `compressed_values` produced by "Bucket Quantization". The function writes the
+/// result to `decompressed_values`. If an error occurs it is returned.
+pub fn decompress(
+    compressed_values: []const u8,
+    decompressed_values: *ArrayList(f64),
+) Error!void {
+    // Ensure the compressed values are not empty.
+    if (compressed_values.len == 0) return Error.UnsupportedInput;
+
+    const compressed_representation = mem.bytesAsSlice(f64, compressed_values);
+    // Iterate over the compressed values and convert them back to f64.
+    for (compressed_representation) |value| {
+        try decompressed_values.append(value);
     }
 }
 
 /// Append `value` of `type` determined at compile time to `compressed_values`.
-fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)) !void {
-    // Compile-time type check
+fn appendValue(comptime T: type, value: T, compressed_values: *ArrayList(u8)) !void {
+    // Compile-time type check.
     switch (@TypeOf(value)) {
         f64, usize => {
             const value_as_bytes: [8]u8 = @bitCast(value);
@@ -62,25 +87,34 @@ fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)
     }
 }
 
-test "quantized values are within the error bound" {
+test "bucket quantization can always compress and decompress" {
     const allocator = testing.allocator;
-    var prng = std.Random.DefaultPrng.init(0);
-    const random = prng.random();
-    const error_bound: f32 = 0.5;
+    try tester.testGenerateCompressAndDecompress(
+        tester.generateFiniteRandomValues,
+        allocator,
+        Method.BucketQuantization,
+        0,
+        tersets.isWithinErrorBound,
+    );
+}
 
-    var values = ArrayList(f64).init(allocator);
-    defer values.deinit();
-    for (0..100) |_| {
-        try values.append(random.float(f64) * 100.0);
+test "bucket quantization can compress and decompress bounded values" {
+    const allocator = testing.allocator;
+    const error_bound = tester.generateBoundedRandomValue(f32, 0, 1e5, undefined);
+
+    var uncompressed_values = ArrayList(f64).init(allocator);
+    defer uncompressed_values.deinit();
+
+    // Generate 500 random values within the range of -1e7 to 1e7.
+    for (0..5) |_| {
+        try tester.generateBoundedRandomValues(&uncompressed_values, -1e7, 1e7, undefined);
     }
 
-    const quantized = try quantizeValues(values.items, allocator, error_bound);
-    defer quantized.deinit();
-
-    try testing.expectEqual(values.items.len, quantized.items.len);
-
-    for (quantized.items, 0..) |q, i| {
-        const original = values.items[i];
-        try testing.expect(@abs(original - q) <= error_bound);
-    }
+    try tester.testCompressAndDecompress(
+        uncompressed_values.items,
+        allocator,
+        Method.BucketQuantization,
+        error_bound,
+        tersets.isWithinErrorBound,
+    );
 }
