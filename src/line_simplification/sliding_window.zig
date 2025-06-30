@@ -65,8 +65,8 @@ pub fn compress(
 
         // Store the segment's start value, end index, and end value in the compressed output.
         try appendValue(f64, uncompressed_values[seg_start], compressed_values);
-        try appendValue(usize, seg_end - 1, compressed_values);
         try appendValue(f64, uncompressed_values[seg_end - 1], compressed_values);
+        try appendValue(usize, seg_end - 1, compressed_values);
 
         // Move to the next segment.
         seg_start = seg_end;
@@ -74,23 +74,23 @@ pub fn compress(
 
     // Check if the last point was not enconded by checking if seg_start is at that point.
     // If the last point was not encoded, we need to insert it as a single-point segment to
-    // maintain the compressed representation as a multiple of 3 values (start_value, end_time,
-    // end_value). This is important because the decompression logic expects the compressed
+    // maintain the compressed representation as a multiple of 3 values (start_value, end_value,
+    // end_time). This is important because the decompression logic expects the compressed
     // data to be a sequence of 3-tuples, allowing safe and correct decoding. Adding one extra
     // value for the last point (if needed) has negligible impact on the compression ratio,
     // since it only occurs once per time series (if at all), regardless of the input size.
     if (seg_start == uncompressed_values.len - 1) {
         try appendValue(f64, uncompressed_values[seg_start], compressed_values);
-        try appendValue(usize, seg_start, compressed_values);
         try appendValue(f64, uncompressed_values[seg_start], compressed_values);
+        try appendValue(usize, seg_start, compressed_values);
     }
 }
 
 /// Decompress `compressed_values` produced by "Sliding Window". The function writes the result to
 /// `decompressed_values`. If an error occurs it is returned.
 pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList(f64)) Error!void {
-    // The compressed representation is composed of three values: (start_value, end_time, end_value)
-    // all of type 64-bit float.
+    // The compressed representation is composed of three values: (start_value, end_value, end_time)
+    // all of type 64-bit float, except end_time which is usize.
     if (compressed_values.len % 24 != 0) return Error.UnsupportedInput;
 
     const compressed_lines_and_index = mem.bytesAsSlice(f64, compressed_values);
@@ -101,8 +101,8 @@ pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList
     while (index < compressed_lines_and_index.len) : (index += 3) {
         const start_point = .{ .time = first_timestamp, .value = compressed_lines_and_index[index] };
         const end_point = .{
-            .time = @as(usize, @bitCast(compressed_lines_and_index[index + 1])),
-            .value = compressed_lines_and_index[index + 2],
+            .time = @as(usize, @bitCast(compressed_lines_and_index[index + 2])),
+            .value = compressed_lines_and_index[index + 1],
         };
 
         // Check if the segment has only two points. If so, we can directly append their values.
@@ -274,7 +274,7 @@ test "sliding-window random lines and random error bound compress and decompress
     var previous_point_index: usize = 0;
     while (index < compressed_representation.len - 1) : (index += 3) {
         const current_point_index = @min(
-            @as(usize, @bitCast(compressed_representation[index + 1])),
+            @as(usize, @bitCast(compressed_representation[index + 2])),
             uncompressed_values.items.len - 1,
         );
 

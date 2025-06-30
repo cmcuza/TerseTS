@@ -62,8 +62,8 @@ pub fn compress(
     // If we have 2 or fewer points, we store them without compression.
     if (uncompressed_values.len <= 2) {
         try appendValue(f64, uncompressed_values[0], compressed_values);
-        try appendValue(usize, 1, compressed_values);
         try appendValue(f64, uncompressed_values[1], compressed_values);
+        try appendValue(usize, 1, compressed_values);
         return;
     }
 
@@ -167,8 +167,8 @@ pub fn compress(
         const seg_end = heap.items[index].seg_end;
         // Append the start value, the end index, and the end value to the compressed representation.
         try appendValue(f64, uncompressed_values[seg_start], compressed_values);
-        try appendValue(usize, seg_end, compressed_values);
         try appendValue(f64, uncompressed_values[seg_end], compressed_values);
+        try appendValue(usize, seg_end, compressed_values);
     }
 
     return;
@@ -177,8 +177,8 @@ pub fn compress(
 /// Decompress `compressed_values` produced by "Bottom-Up". The function writes the result to
 /// `decompressed_values`. If an error occurs it is returned.
 pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList(f64)) Error!void {
-    // The compressed representation is composed of three values: (start_value, end_time, end_value)
-    // all of type 64-bit float.
+    // The compressed representation is composed of three values: (start_value, end_value, end_time)
+    // all of type 64-bit float, except end_time which is usize.
     if (compressed_values.len % 24 != 0) return Error.UnsupportedInput;
 
     const compressed_lines_and_index = mem.bytesAsSlice(f64, compressed_values);
@@ -189,8 +189,8 @@ pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList
     while (index < compressed_lines_and_index.len) : (index += 3) {
         const start_point = .{ .time = first_timestamp, .value = compressed_lines_and_index[index] };
         const end_point = .{
-            .time = @as(usize, @bitCast(compressed_lines_and_index[index + 1])),
-            .value = compressed_lines_and_index[index + 2],
+            .time = @as(usize, @bitCast(compressed_lines_and_index[index + 2])),
+            .value = compressed_lines_and_index[index + 1],
         };
 
         // Check if the segment has only two points. If so, we can directly append their values.
@@ -489,7 +489,7 @@ test "bottom-up random lines and random error bound compress and decompress" {
     var previous_point_index: usize = 0;
     while (index < compressed_representation.len - 1) : (index += 3) {
         const current_point_index = @min(
-            @as(usize, @bitCast(compressed_representation[index + 1])),
+            @as(usize, @bitCast(compressed_representation[index + 2])),
             uncompressed_values.items.len - 1,
         );
 
