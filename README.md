@@ -85,9 +85,9 @@ int main() {
    printf("Uncompressed data length: %lu\n", uncompressed_values.len);
 
    // Configuration for compression.
-   // The supported compression methods are specified in tersets.zig.
-   // Method 2 is SwingFilter and 0.1 error bound.
-   struct Configuration config = {2, 0.1};
+   // The C-API mirrors the Method enum from tersets.zig.
+   // Use the SwingFilter method with an error bound of 0.1.
+   struct Configuration config = {SwingFilter, 0.1};
 
    // Prepare for compressed data.
    // The compressed values point to dynamically allocated data that should be deallocated.
