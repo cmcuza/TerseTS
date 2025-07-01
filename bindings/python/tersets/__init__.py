@@ -88,6 +88,7 @@ class Method(Enum):
     VisvalingamWhyatt = 9
     BottomUp = 10
     SlidingWindow = 11
+    RunLengthEncoding = 12
 
 # Public Functions.
 def compress(values: List[float], method: Method, error_bound: float) -> bytes:
