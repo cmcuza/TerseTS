@@ -189,5 +189,9 @@ TerseTS provides `./bindings/python/tersets/__init__.py` as binding for Python w
 - **Linux**: Link the `tersets.so` to the project. It can be found in the output folder after compiling TerseTS, by default: `zig-out/lib/tersets.so`.
 - **macOS**: Link the `tersets.dylib` to the project. It can be found in the output folder after compiling TerseTS, by default: `zig-out/lib/tersets.dylib`.
 
+## Contributing:
+
+We welcome pull requests and bug reports. Please follow the [CONTRIBUTING.md](.github/CONTRIBUTING.md) guidelines before submitting.
+
 # License
 TerseTS is licensed under version 2.0 of the Apache License and a copy of the license is bundled with the program.
