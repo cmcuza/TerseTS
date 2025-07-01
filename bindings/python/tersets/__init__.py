@@ -86,6 +86,9 @@ class Method(Enum):
     PiecewiseLinearHistogram = 7
     ABCLinearApproximation = 8
     VisvalingamWhyatt = 9
+    MixPiece = 10
+    ABCLinearApproximation = 8
+    VisvalingamWhyatt = 9
     BottomUp = 10
     SlidingWindow = 11
 
