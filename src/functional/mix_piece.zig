@@ -1011,15 +1011,15 @@ fn createCompressedRepresentationUngroupedSegments(
 ) !void {
     var previous_timestamp: usize = 0;
 
-    // Iterate over all ungrouped segments
+    // Iterate over all ungrouped segments.
     for (ungrouped_segments_array.items) |segment| {
-        // Append the slope a_i
+        // Append the slope a_i.
         try sp.appendValue(f64, segment.slope, compressed_values);
 
-        // Append the intercept b_i
+        // Append the intercept b_i.
         try sp.appendValue(f64, segment.intercept, compressed_values);
 
-        // Append the timestamp t_i (delta encoded for consistency with other phases)
+        // Append the timestamp t_i (delta encoded for consistency with other phases).
         try sp.appendValue(usize, segment.timestamp - previous_timestamp, compressed_values);
         previous_timestamp = segment.timestamp;
     }
@@ -1038,7 +1038,7 @@ const InterceptTimestampPair = struct {
     timestamp: usize,
 };
 
-/// HashMap for cross_intercept_groups
+/// HashMap for cross_intercept_groups.
 const CrossInterceptGroupsMap = sp.HashMap(
     f64,
     ArrayList(InterceptTimestampPair),
@@ -1067,10 +1067,12 @@ fn quantizeCeil(value: f64, error_bound: f32) f64 {
 }
 
 test "mix-piece can compress, decompress and merge many segments with non-zero error bound" {
-    const seed: u64 = @bitCast(time.milliTimestamp());
-    var prng = rand.DefaultPrng.init(seed);
-    const random = prng.random();
-    const error_bound = 0.01;
+    const error_bound = tester.generateBoundedRandomValue(
+        f32,
+        0,
+        1,
+        undefined,
+    );
     const allocator = testing.allocator;
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
@@ -1078,7 +1080,12 @@ test "mix-piece can compress, decompress and merge many segments with non-zero e
     for (0..20) |_| {
         // Generate floating points numbers between 0 and 10. This will generate many merged.
         // segments when applying Mix-Piece.
-        try tester.generateBoundedRandomValues(&uncompressed_values, 0, 10, random);
+        try tester.generateBoundedRandomValues(
+            &uncompressed_values,
+            0,
+            10,
+            undefined,
+        );
     }
     try tester.testCompressAndDecompress(
         uncompressed_values.items,
@@ -1090,14 +1097,21 @@ test "mix-piece can compress, decompress and merge many segments with non-zero e
 }
 
 test "mix-piece even size compress and decompress" {
-    const seed: u64 = @bitCast(time.milliTimestamp());
-    var prng = rand.DefaultPrng.init(seed);
-    const random = prng.random();
-    const error_bound = 0.01;
+    const error_bound = tester.generateBoundedRandomValue(
+        f32,
+        0,
+        3,
+        undefined,
+    );
     const allocator = testing.allocator;
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, random);
+    try tester.generateBoundedRandomValues(
+        &uncompressed_values,
+        0.0,
+        1.0,
+        undefined,
+    );
     try tester.testCompressAndDecompress(
         uncompressed_values.items,
         allocator,
@@ -1108,16 +1122,28 @@ test "mix-piece even size compress and decompress" {
 }
 
 test "mix-piece odd size compress and decompress" {
-    const seed: u64 = @bitCast(time.milliTimestamp());
-    var prng = rand.DefaultPrng.init(seed);
-    const random = prng.random();
-    const error_bound = 0.01;
+    const error_bound = tester.generateBoundedRandomValue(
+        f32,
+        0,
+        1,
+        undefined,
+    );
     const allocator = testing.allocator;
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, random);
+    try tester.generateBoundedRandomValues(
+        &uncompressed_values,
+        0.0,
+        1.0,
+        undefined,
+    );
     // Add another element to make the uncompressed values of odd size.
-    try uncompressed_values.append(random.float(f64));
+    try uncompressed_values.append(tester.generateBoundedRandomValue(
+        f64,
+        0,
+        1,
+        undefined,
+    ));
     try tester.testCompressAndDecompress(
         uncompressed_values.items,
         allocator,
@@ -1128,15 +1154,20 @@ test "mix-piece odd size compress and decompress" {
 }
 
 test "mix-piece random lines and error bound compress and decompress" {
-    const seed: u64 = @bitCast(time.milliTimestamp());
-    var prng = rand.DefaultPrng.init(seed);
-    const random = prng.random();
-    const error_bound = 0.01;
+    const error_bound = tester.generateBoundedRandomValue(
+        f32,
+        0,
+        1,
+        undefined,
+    );
     const allocator = testing.allocator;
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
     for (0..20) |_| {
-        try tester.generateRandomLinearFunction(&uncompressed_values, random);
+        try tester.generateRandomLinearFunction(
+            &uncompressed_values,
+            undefined,
+        );
     }
     try tester.testCompressAndDecompress(
         uncompressed_values.items,
@@ -1149,10 +1180,12 @@ test "mix-piece random lines and error bound compress and decompress" {
 
 // Additional Mix-Piece specific tests to cover its unique features.
 test "mix-piece handles time series with trend" {
-    const seed: u64 = @bitCast(time.milliTimestamp());
-    var prng = rand.DefaultPrng.init(seed);
-    const random = prng.random();
-    const error_bound = 0.01;
+    const error_bound = tester.generateBoundedRandomValue(
+        f32,
+        0,
+        1,
+        undefined,
+    );
     const allocator = testing.allocator;
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
@@ -1160,7 +1193,13 @@ test "mix-piece handles time series with trend" {
     // Generate data with a clear upward trend.
     for (0..100) |i| {
         const trend_value = @as(f64, @floatFromInt(i)) * 0.1;
-        const noise = (random.float(f64) - 0.5) * 0.2;
+        const noise = (tester.generateBoundedRandomValue(
+            f64,
+            0,
+            1,
+            undefined,
+        ) - 0.5) * 0.2;
+
         try uncompressed_values.append(trend_value + noise);
     }
 
@@ -1207,19 +1246,26 @@ test "mix-piece handles cross-intercept grouping" {
 }
 
 test "mix-piece handles single point segments" {
-    const seed: u64 = @bitCast(time.milliTimestamp());
-    var prng = rand.DefaultPrng.init(seed);
-    const random = prng.random();
-    const error_bound = 0.001; // Very small error bound to force single-point segments
+    const error_bound = tester.generateBoundedRandomValue(
+        f32,
+        0,
+        1,
+        undefined,
+    );
     const allocator = testing.allocator;
+
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
 
     // Generate highly variable data that will create many single-point segments.
     for (0..50) |_| {
-        try uncompressed_values.append(random.float(f64) * 100.0);
+        try uncompressed_values.append(tester.generateBoundedRandomValue(
+            f32,
+            0,
+            1,
+            undefined,
+        ));
     }
-
     try tester.testCompressAndDecompress(
         uncompressed_values.items,
         allocator,
