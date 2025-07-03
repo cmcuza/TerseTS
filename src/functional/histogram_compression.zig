@@ -809,8 +809,8 @@ test "PWCH can compress and decompress with bounded values and expected maximum 
     // Nevertheless, since all `uncompressed_values` are between 0 and 10, the `error_bound=10`
     // should be fulfilled as the PWCH finds the mean value over the buckets.
     try tester.testCompressAndDecompress(
-        uncompressed_values.items,
         allocator,
+        uncompressed_values.items,
         tersets.Method.PiecewiseConstantHistogram,
         error_bound,
         tersets.isWithinErrorBound,
@@ -956,8 +956,8 @@ test "PWLH can compress and decompress with bounded values and expected maximum 
     // Nevertheless, since all `uncompressed_values` are between 0 and error_bound/4.0, the `error_bound=10`
     // should be fulfilled as the PWLH finds the mean value over the buckets.
     try tester.testCompressAndDecompress(
-        uncompressed_values.items,
         allocator,
+        uncompressed_values.items,
         tersets.Method.PiecewiseLinearHistogram,
         error_bound,
         tersets.isWithinErrorBound,

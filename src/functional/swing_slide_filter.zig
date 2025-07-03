@@ -74,9 +74,6 @@ pub fn compressSwingFilter(
     var new_upper_bound: LinearFunction = .{ .slope = undefined, .intercept = undefined };
     var new_lower_bound: LinearFunction = .{ .slope = undefined, .intercept = undefined };
 
-    // Check if the first two points are NaN or infinite. If so, return an error.
-    if (!(math.isFinite(uncompressed_values[0]) and math.isFinite(uncompressed_values[1]))) return Error.UnsupportedInput;
-
     // Initialize the current segment with first two points.
     var current_segment: Segment = .{
         .start_point = .{ .time = 0, .value = uncompressed_values[0] },
@@ -101,12 +98,11 @@ pub fn compressSwingFilter(
         const lower_limit = evaluateLinearFunctionAtTime(lower_bound, usize, current_timestamp);
         var end_value: f64 = 0;
 
-        // Check if the current point is NaN or infinite. If so, return an error.
-        if (!math.isFinite(uncompressed_values[current_timestamp])) return Error.UnsupportedInput;
-
         // Check if the current point is outside the limits defined by the upper and lower bounds.
-        // If `upper_limit` or `lower_limit` are NaN or infinite, the point is outside the limits.
-        if (!math.isFinite(upper_limit + lower_limit) or
+        // If `upper_limit`, `lower_limit` or the `uncompressed_values[current_timestamp]` are NaN
+        // or infinite, the point is outside the limits. Thus, we can use the recording mechanism.
+        // This initial condition enables swing filter to work even with NaN and infinite values.
+        if (!math.isFinite(upper_limit + lower_limit + uncompressed_values[current_timestamp]) or
             (upper_limit < (uncompressed_values[current_timestamp] - adjusted_error_bound)) or
             (lower_limit > (uncompressed_values[current_timestamp] + adjusted_error_bound)))
         {
@@ -271,9 +267,6 @@ pub fn compressSlideFilter(
     var new_upper_bound: LinearFunction = .{ .slope = undefined, .intercept = undefined };
     var new_lower_bound: LinearFunction = .{ .slope = undefined, .intercept = undefined };
 
-    // Check if the first two points are NaN or infinite. If so, return an error.
-    if (!(math.isFinite(uncompressed_values[0]) and math.isFinite(uncompressed_values[1]))) return Error.UnsupportedInput;
-
     // Initialize the current segment with first two points.
     var current_segment: Segment = .{
         .start_point = .{ .time = 0, .value = uncompressed_values[0] },
@@ -309,12 +302,11 @@ pub fn compressSlideFilter(
             current_timestamp,
         );
 
-        // Check if the point at the current timestamp is NaN or infinite. If so, return an error.
-        if (!math.isFinite(uncompressed_values[current_timestamp])) return Error.UnsupportedInput;
-
         // Check if the current point is outside the limits defined by the upper and lower bounds.
-        // If `upper_limit` or `lower_limit` are NaN or infinite, the point is outside the limits.
-        if (!math.isFinite(upper_limit + lower_limit) or
+        // If `upper_limit`, `lower_limit` or the `uncompressed_values[current_timestamp]` are NaN
+        // or infinite, the point is outside the limits. Thus, we can use the recording mechanism.
+        // This initial condition enables slide filter to work even with NaN and infinite values.
+        if (!math.isFinite(upper_limit + lower_limit + uncompressed_values[current_timestamp]) or
             (upper_limit < (uncompressed_values[current_timestamp] - adjusted_error_bound)) or
             (lower_limit > (uncompressed_values[current_timestamp] + adjusted_error_bound)))
         {
@@ -364,9 +356,6 @@ pub fn compressSlideFilter(
 
             // Edge case as only one point is left.
             if (current_timestamp + 1 < uncompressed_values.len) {
-
-                // Check if the point at the current timestamp is NaN or infinite. If so, return an error.
-                if (!math.isFinite(uncompressed_values[current_timestamp + 1])) return Error.UnsupportedInput;
 
                 // Update the current segment.
                 current_segment.end_point = .{
@@ -476,9 +465,6 @@ pub fn compressSwingFilterDisconnected(
     else
         error_bound;
 
-    // Check if the first two points are NaN or infinite. If so, return an error.
-    if (!(math.isFinite(uncompressed_values[0]) and math.isFinite(uncompressed_values[1]))) return Error.UnsupportedInput;
-
     // Create the upper lower and upper bounds used throughout the function. They are uninitialized
     // as they will be modified throughout the function.
     var upper_bound: LinearFunction = .{ .slope = undefined, .intercept = undefined };
@@ -505,12 +491,11 @@ pub fn compressSwingFilterDisconnected(
         const upper_limit = evaluateLinearFunctionAtTime(upper_bound, usize, current_timestamp);
         const lower_limit = evaluateLinearFunctionAtTime(lower_bound, usize, current_timestamp);
 
-        // Check if the current point is NaN or infinite. If so, return an error.
-        if (!math.isFinite(uncompressed_values[current_timestamp])) return Error.UnsupportedInput;
-
         // Check if the current point is outside the limits defined by the upper and lower bounds.
-        // If `upper_limit` or `lower_limit` are NaN or infinite, the point is outside the limits.
-        if (!math.isFinite(upper_limit + lower_limit) or
+        // If `upper_limit`, `lower_limit` or the `uncompressed_values[current_timestamp]` are NaN
+        // or infinite, the point is outside the limits. Thus, we can use the recording mechanism.
+        // This initial condition enables swing filter to work even with NaN and infinite values.
+        if (!math.isFinite(upper_limit + lower_limit + uncompressed_values[current_timestamp]) or
             (upper_limit < (uncompressed_values[current_timestamp] - adjusted_error_bound)) or
             (lower_limit > (uncompressed_values[current_timestamp] + adjusted_error_bound)))
         {
@@ -556,10 +541,6 @@ pub fn compressSwingFilterDisconnected(
             // Check if there is only one point left. If so, update only the `end_point`.
             // Otherwise, update the `end_point`, the upper and lower bounds and the `current_timestamp`.
             if (current_timestamp + 1 < uncompressed_values.len) {
-
-                // Check if the current point is NaN or infinite. If so, return an error.
-                if (!math.isFinite(uncompressed_values[current_timestamp + 1])) return Error.UnsupportedInput;
-
                 current_segment.end_point.time = current_timestamp + 1;
                 current_segment.end_point.value = uncompressed_values[current_timestamp + 1];
 
@@ -870,285 +851,92 @@ fn usizeToF64(value: usize) f64 {
     return @as(f64, @floatFromInt(value));
 }
 
-test "swing filter can always compress and decompress" {
+test "swing filter can always compress and decompress with zero error bound" {
     const allocator = testing.allocator;
     try tester.testGenerateCompressAndDecompress(
-        tester.generateFiniteRandomValues,
         allocator,
+        tester.generateFiniteRandomValues,
         Method.SwingFilter,
         0,
         tersets.isWithinErrorBound,
     );
 }
 
-test "swing filter disconnected can always compress and decompress" {
+test "swing filter can always compress and decompress with any error bound" {
+    const allocator = testing.allocator;
+    const data_distributions = &[_]tester.DataDistribution{
+        .FiniteRandomValues,
+        .LinearFunctions,
+        .BoundedRandomValues,
+        .SinusoidalFunction,
+        .RandomValuesWithNansAndInfinities,
+        .LinearFunctionsWithNansAndInfinities,
+        .SinusoidalFunctionWithNansAndInfinities,
+        .BoundedRandomValuesWithNansAndInfinities,
+    };
+    try tester.testErrorBoundedCompressionMethod(
+        allocator,
+        Method.SwingFilter,
+        data_distributions,
+    );
+}
+
+test "swing filter disconnected can always compress and decompress with zero error bound" {
     const allocator = testing.allocator;
     try tester.testGenerateCompressAndDecompress(
-        tester.generateFiniteRandomValues,
         allocator,
+        tester.generateFiniteRandomValues,
         Method.SwingFilterDisconnected,
         0,
         tersets.isWithinErrorBound,
     );
 }
 
-test "slide filter disconnected can always compress and decompress" {
+test "swing filter disconnected can always compress and decompress with any error bound" {
+    const allocator = testing.allocator;
+    const data_distributions = &[_]tester.DataDistribution{
+        .FiniteRandomValues,
+        .LinearFunctions,
+        .BoundedRandomValues,
+        .SinusoidalFunction,
+        .RandomValuesWithNansAndInfinities,
+        .LinearFunctionsWithNansAndInfinities,
+        .SinusoidalFunctionWithNansAndInfinities,
+        .BoundedRandomValuesWithNansAndInfinities,
+    };
+    try tester.testErrorBoundedCompressionMethod(
+        allocator,
+        Method.SwingFilterDisconnected,
+        data_distributions,
+    );
+}
+
+test "slide filter can always compress and decompress with zero error bound" {
     const allocator = testing.allocator;
     try tester.testGenerateCompressAndDecompress(
-        tester.generateFiniteRandomValues,
         allocator,
+        tester.generateFiniteRandomValues,
         Method.SlideFilter,
         0,
         tersets.isWithinErrorBound,
     );
 }
 
-test "swing and slide filter fail if NaN or infinite values are present" {
+test "slide filter can always compress and decompress with any error bound" {
     const allocator = testing.allocator;
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, undefined);
-    try uncompressed_values.append(math.nan(f64));
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, undefined);
-
-    compressSwingFilter(uncompressed_values.items, &compressed_values, 0.0) catch |err| {
-        try testing.expectEqual(err, Error.UnsupportedInput);
+    const data_distributions = &[_]tester.DataDistribution{
+        .FiniteRandomValues,
+        .LinearFunctions,
+        .BoundedRandomValues,
+        .SinusoidalFunction,
+        .RandomValuesWithNansAndInfinities,
+        .LinearFunctionsWithNansAndInfinities,
+        .SinusoidalFunctionWithNansAndInfinities,
+        .BoundedRandomValuesWithNansAndInfinities,
     };
-    compressSwingFilterDisconnected(uncompressed_values.items, &compressed_values, 0.0) catch |err| {
-        try testing.expectEqual(err, Error.UnsupportedInput);
-    };
-    compressSlideFilter(uncompressed_values.items, &compressed_values, allocator, 0.0) catch |err| {
-        try testing.expectEqual(err, Error.UnsupportedInput);
-    };
-}
-
-test "swing filter zero error bound and even size compress and decompress" {
-    const allocator = testing.allocator;
-
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
-
-    const error_bound: f32 = 0.0;
-
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, undefined);
-
-    try compressSwingFilter(uncompressed_values.items, &compressed_values, error_bound);
-    try decompressSwingFilter(compressed_values.items, &decompressed_values);
-
-    try testing.expect(tersets.isWithinErrorBound(
-        uncompressed_values.items,
-        decompressed_values.items,
-        error_bound,
-    ));
-}
-
-test "swing filter disconnected zero error bound and even size compress and decompress" {
-    const allocator = testing.allocator;
-
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
-
-    const error_bound: f32 = 0.0;
-
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, undefined);
-
-    try compressSwingFilterDisconnected(uncompressed_values.items, &compressed_values, error_bound);
-    // Uses the same decompress function as the "Slide Filter" since the compressed values are
-    // expected to have the same structure.
-    try decompressSlideFilter(compressed_values.items, &decompressed_values);
-
-    try testing.expect(tersets.isWithinErrorBound(
-        uncompressed_values.items,
-        decompressed_values.items,
-        error_bound,
-    ));
-}
-
-test "swing filter zero error bound and odd size compress and decompress" {
-    const allocator = testing.allocator;
-
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
-
-    const error_bound: f32 = 0.0;
-
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, undefined);
-
-    //  Extra element to make the size odd.
-    try uncompressed_values.append(0.1);
-
-    try compressSwingFilter(uncompressed_values.items, &compressed_values, error_bound);
-    try decompressSwingFilter(compressed_values.items, &decompressed_values);
-
-    try testing.expect(tersets.isWithinErrorBound(
-        uncompressed_values.items,
-        decompressed_values.items,
-        error_bound,
-    ));
-}
-
-test "swing filter random lines and random error bound compress and decompress" {
-    const allocator = testing.allocator;
-
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
-
-    const error_bound: f32 = tester.generateBoundedRandomValue(f32, 1, 10, undefined);
-
-    const max_lines: usize = @intFromFloat(@round(tester.generateBoundedRandomValue(f64, 4, 25, undefined)));
-    for (0..max_lines) |_| {
-        // Generate a random linear function and add it to the uncompressed values.
-        try tester.generateRandomLinearFunction(&uncompressed_values, undefined);
-    }
-
-    try compressSwingFilter(uncompressed_values.items, &compressed_values, error_bound);
-    try decompressSwingFilter(compressed_values.items, &decompressed_values);
-
-    try testing.expect(tersets.isWithinErrorBound(
-        uncompressed_values.items,
-        decompressed_values.items,
-        error_bound,
-    ));
-}
-
-test "swing filter disconnected random lines and random error bound compress and decompress" {
-    const allocator = testing.allocator;
-
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
-
-    const error_bound: f32 = tester.generateBoundedRandomValue(f32, 1, 10, undefined);
-
-    const max_lines: usize = @intFromFloat(@round(tester.generateBoundedRandomValue(f64, 4, 25, undefined)));
-
-    for (0..max_lines) |_| {
-        // Generate a random linear function and add it to the uncompressed values.
-        try tester.generateRandomLinearFunction(&uncompressed_values, undefined);
-    }
-
-    try compressSwingFilterDisconnected(uncompressed_values.items, &compressed_values, error_bound);
-    try decompressSlideFilter(compressed_values.items, &decompressed_values);
-
-    try testing.expect(tersets.isWithinErrorBound(
-        uncompressed_values.items,
-        decompressed_values.items,
-        error_bound,
-    ));
-}
-
-test "slide filter zero error bound and even size compress and decompress" {
-    const allocator = testing.allocator;
-
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
-
-    const error_bound: f32 = 0.0;
-
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, undefined);
-
-    try compressSlideFilter(
-        uncompressed_values.items,
-        &compressed_values,
+    try tester.testErrorBoundedCompressionMethod(
         allocator,
-        error_bound,
+        Method.SlideFilter,
+        data_distributions,
     );
-    try decompressSlideFilter(compressed_values.items, &decompressed_values);
-
-    try testing.expect(tersets.isWithinErrorBound(
-        uncompressed_values.items,
-        decompressed_values.items,
-        error_bound,
-    ));
-}
-
-test "slide filter zero error bound and odd size compress and decompress" {
-    const allocator = testing.allocator;
-
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
-
-    const error_bound: f32 = 0.0;
-
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, undefined);
-    //  Extra element to make the size odd.
-    try uncompressed_values.append(0.1);
-
-    try compressSlideFilter(
-        uncompressed_values.items,
-        &compressed_values,
-        allocator,
-        error_bound,
-    );
-    try decompressSlideFilter(compressed_values.items, &decompressed_values);
-
-    try testing.expect(tersets.isWithinErrorBound(
-        uncompressed_values.items,
-        decompressed_values.items,
-        error_bound,
-    ));
-}
-
-test "slide filter random lines and random error bound compress and decompress" {
-    const allocator = testing.allocator;
-
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
-
-    const error_bound: f32 = tester.generateBoundedRandomValue(f32, 1, 10, undefined);
-
-    const max_lines: usize = @intFromFloat(@round(tester.generateBoundedRandomValue(f64, 4, 25, undefined)));
-
-    for (0..max_lines) |_| {
-        // Generate a random linear function and add it to the uncompressed values.
-        try tester.generateRandomLinearFunction(&uncompressed_values, undefined);
-    }
-
-    try compressSlideFilter(
-        uncompressed_values.items,
-        &compressed_values,
-        allocator,
-        error_bound,
-    );
-    try decompressSlideFilter(compressed_values.items, &decompressed_values);
-
-    try testing.expect(tersets.isWithinErrorBound(
-        uncompressed_values.items,
-        decompressed_values.items,
-        error_bound,
-    ));
 }

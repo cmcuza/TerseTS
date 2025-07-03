@@ -133,24 +133,62 @@ fn appendValueAndIndexToArrayList(
     try compressed_values.appendSlice(indexAsBytes[0..]);
 }
 
-test "midrange can always compress and decompress" {
+test "midrange can always compress and decompress with zero error bound" {
     const allocator = testing.allocator;
     try tester.testGenerateCompressAndDecompress(
-        tester.generateRandomValues,
         allocator,
+        tester.generateRandomValues,
         Method.PoorMansCompressionMidrange,
         0,
         tersets.isWithinErrorBound,
     );
 }
 
-test "mean can always compress and decompress" {
+test "midrange can always compress and decompress with any error bound" {
+    const allocator = testing.allocator;
+    const data_distributions = &[_]tester.DataDistribution{
+        .FiniteRandomValues,
+        .LinearFunctions,
+        .BoundedRandomValues,
+        .SinusoidalFunction,
+        .LinearFunctionsWithNansAndInfinities,
+        .RandomValuesWithNansAndInfinities,
+        .SinusoidalFunctionWithNansAndInfinities,
+        .BoundedRandomValuesWithNansAndInfinities,
+    };
+    try tester.testErrorBoundedCompressionMethod(
+        allocator,
+        Method.PoorMansCompressionMidrange,
+        data_distributions,
+    );
+}
+
+test "mean can always compress and decompress with zero error bound" {
     const allocator = testing.allocator;
     try tester.testGenerateCompressAndDecompress(
-        tester.generateRandomValues,
         allocator,
+        tester.generateRandomValues,
         Method.PoorMansCompressionMean,
         0,
         tersets.isWithinErrorBound,
+    );
+}
+
+test "mean can always compress and decompress with any error bound" {
+    const allocator = testing.allocator;
+    const data_distributions = &[_]tester.DataDistribution{
+        .FiniteRandomValues,
+        .LinearFunctions,
+        .BoundedRandomValues,
+        .SinusoidalFunction,
+        .LinearFunctionsWithNansAndInfinities,
+        .RandomValuesWithNansAndInfinities,
+        .SinusoidalFunctionWithNansAndInfinities,
+        .BoundedRandomValuesWithNansAndInfinities,
+    };
+    try tester.testErrorBoundedCompressionMethod(
+        allocator,
+        Method.PoorMansCompressionMean,
+        data_distributions,
     );
 }

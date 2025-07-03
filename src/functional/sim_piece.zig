@@ -199,8 +199,10 @@ fn computeSegmentsMetadata(
     var upper_bound_slope: f64 = math.floatMax(f64);
     var lower_bound_slope: f64 = -math.floatMax(f64);
 
-    // Check if the first point is NaN or infinite. If so, return an error.
-    if (!math.isFinite(uncompressed_values[0])) return Error.UnsupportedInput;
+    // Check if the first point is NaN, infinite or a reduced precision floating point.
+    // If so, return an error.
+    if (!math.isFinite(uncompressed_values[0]) or
+        uncompressed_values[0] > 1e15) return Error.UnsupportedInput;
 
     // Initialize the `start_point` with the first uncompressed value.
     var start_point: DiscretePoint = .{ .time = 0, .value = uncompressed_values[0] };
@@ -213,8 +215,10 @@ fn computeSegmentsMetadata(
     // The first point is already part of `current_segment`, the next point is at index one.
     for (1..uncompressed_values.len) |current_timestamp| {
 
-        // Check if the current point is NaN or infinite. If so, return an error.
-        if (!math.isFinite(uncompressed_values[current_timestamp])) return Error.UnsupportedInput;
+        // Check if the current point is NaN, infinite or a reduced precision floating point.
+        // If so, return an error.
+        if (!math.isFinite(uncompressed_values[current_timestamp]) or
+            uncompressed_values[current_timestamp] > 1e15) return Error.UnsupportedInput;
 
         const end_point: DiscretePoint = .{
             .time = current_timestamp,
@@ -627,10 +631,24 @@ test "hashmap can map f64 to segment metadata array list" {
     }
 }
 
+test "sim-piece can compress and decompress bounded values with any error bound" {
+    const allocator = testing.allocator;
+    const data_distributions = &[_]tester.DataDistribution{
+        .LinearFunctions,
+        .BoundedRandomValues,
+        .SinusoidalFunction,
+    };
+    try tester.testErrorBoundedCompressionMethod(
+        allocator,
+        Method.SimPiece,
+        data_distributions,
+    );
+}
+
 test "sim-piece can compress, decompress and merge many segments with non-zero error bound" {
     const allocator = testing.allocator;
 
-    const error_bound = tester.generateBoundedRandomValue(f32, 0, 3, undefined);
+    const error_bound = tester.generateBoundedRandomValue(f32, 0.5, 3, undefined);
 
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
@@ -642,67 +660,85 @@ test "sim-piece can compress, decompress and merge many segments with non-zero e
     }
 
     try tester.testCompressAndDecompress(
-        uncompressed_values.items,
         allocator,
+        uncompressed_values.items,
         Method.SimPiece,
         error_bound,
         tersets.isWithinErrorBound,
     );
 }
 
-test "sim-piece even size compress and decompress" {
+test "sim-piece cannot compress nan values" {
     const allocator = testing.allocator;
-    const error_bound = tester.generateBoundedRandomValue(f32, 0, 1, undefined);
 
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, undefined);
+    const uncompressed_values = &[4]f64{ 19.0, 48.0, math.nan(f64), 3.0 };
 
-    try tester.testCompressAndDecompress(
-        uncompressed_values.items,
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+
+    compressSimPiece(
+        uncompressed_values,
+        &compressed_values,
         allocator,
-        Method.SimPiece,
-        error_bound,
-        tersets.isWithinErrorBound,
+        0.1,
+    ) catch |err| {
+        try testing.expectEqual(Error.UnsupportedInput, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The Sim-Piece algorithm cannot compress nan values",
+        .{},
     );
 }
 
-test "sim-piece odd size compress and decompress" {
+test "sim-piece cannot compress inf values" {
     const allocator = testing.allocator;
-    const error_bound = tester.generateBoundedRandomValue(f32, 0, 1, undefined);
 
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, undefined);
+    const uncompressed_values = &[4]f64{ 19.0, 48.0, math.inf(f64), 3.0 };
 
-    // Add another element to make the uncompressed values of odd size.
-    try uncompressed_values.append(tester.generateBoundedRandomValue(f64, 0, 1, undefined));
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
 
-    try tester.testCompressAndDecompress(
-        uncompressed_values.items,
+    compressSimPiece(
+        uncompressed_values,
+        &compressed_values,
         allocator,
-        Method.SimPiece,
-        error_bound,
-        tersets.isWithinErrorBound,
+        0.1,
+    ) catch |err| {
+        try testing.expectEqual(Error.UnsupportedInput, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The Sim-Piece algorithm cannot compress inf values",
+        .{},
     );
 }
 
-test "sim-piece random lines and error bound compress and decompress" {
-    const error_bound = tester.generateBoundedRandomValue(f32, 0, 1, undefined);
-
+test "sim-piece cannot compress f64 with reduced precision" {
     const allocator = testing.allocator;
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
 
-    for (0..20) |_| {
-        try tester.generateRandomLinearFunction(&uncompressed_values, undefined);
-    }
+    const uncompressed_values = &[4]f64{ 19.0, 48.0, 1e17, 3.0 };
 
-    try tester.testCompressAndDecompress(
-        uncompressed_values.items,
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+
+    compressSimPiece(
+        uncompressed_values,
+        &compressed_values,
         allocator,
-        Method.SimPiece,
-        error_bound,
-        tersets.isWithinErrorBound,
+        0.1,
+    ) catch |err| {
+        try testing.expectEqual(Error.UnsupportedInput, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The Sim-Piece algorithm cannot compress reduced precision floating point values",
+        .{},
     );
 }
