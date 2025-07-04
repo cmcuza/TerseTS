@@ -35,10 +35,10 @@ pub const Segment = struct {
     end_point: DiscretePoint,
 };
 
-/// Linear function of the form y = slope*x+intercept. It uses f80 for numerical stability.
+/// Linear function of the form y = slope*x+intercept. 
 pub const LinearFunction = struct {
-    slope: f80,
-    intercept: f80,
+    slope: f64,
+    intercept: f64,
 };
 
 /// `Point` is a point represented by `time` and `value`. `time` is of datatype `time_type`.
