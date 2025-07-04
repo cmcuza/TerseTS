@@ -17,7 +17,7 @@
 //! Sim-Piece: Highly Accurate Piecewise Linear Approximation through Similar Segment Merging.
 //! Proc. VLDB Endow. 16, 8 2023.
 //! https://doi.org/10.14778/3594512.3594521".
-//! The implementation is partially based on the author's implementation at
+//! The implementation is partially based on the authors implementation at
 //! https://github.com/xkitsios/Sim-Piece (accessed on 20-06-24).
 
 const std = @import("std");
@@ -94,7 +94,7 @@ pub fn compress(
 
 /// Decompress `compressed_values` produced by "Sim-Piece". The function writes the result to
 /// `decompressed_values`. The `allocator` is used for memory allocation of intermediate
-/// data structures. If an error occurs, it is returned.
+/// data structures. If an error occurs it is returned.
 pub fn decompress(
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
@@ -209,7 +209,7 @@ fn computeSegmentsMetadata(
         if ((upper_limit < (end_point.value - adjusted_error_bound)) or
             ((lower_limit > (end_point.value + adjusted_error_bound))))
         {
-            // The new point is outside the upper and lower limits. Record a new segment's metadata in
+            // The new point is outside the upper and lower limit. Record a new segment metadata in
             // `segments_metadata_map` associated to `intercept`.
             try segments_metadata.append(.{
                 .start_time = start_point.time,
@@ -290,8 +290,8 @@ fn mergeSegmentsMetadata(
     while (iterator.next()) |entry| {
         const metadata_array = entry.value_ptr.*;
 
-        // Sort in ascending order based on the lower bound's slope. Alg 2. Line 5. This enables 
-        // finding the segments contained inside other segments and merging them.
+        // Sort in asc order based on the lower bound's slope. Alg 2. Line 5. This enables finding
+        // the segments contained inside other segments and merge them.
         mem.sort(
             shared.SegmentMetadata,
             metadata_array.items,
@@ -313,7 +313,7 @@ fn mergeSegmentsMetadata(
             if ((current_metadata.lower_bound_slope <= merge_metadata.upper_bound_slope) and
                 (current_metadata.upper_bound_slope >= merge_metadata.lower_bound_slope))
             {
-                // The current segment metadata can be merged. Update the bounds' slopes.
+                // The current segment metadata can be merged. Update the bounds's slopes.
                 try timestamps_array.append(current_metadata.start_time);
                 merge_metadata.lower_bound_slope = @max(
                     merge_metadata.lower_bound_slope,
@@ -367,8 +367,8 @@ fn mergeSegmentsMetadata(
 }
 
 /// Sim-Piece Phase 3. Populate the `SegmentMetadata` HashMap from intercept points in
-/// `merged_segments_metadata` to a HashMap from the approximation slope to an ArrayList of
-/// timestamps and store them in `merged_segments_metadata_map`. The `allocator` is used to allocate
+/// `merged_segments_metadata` to a HashMap from the approximation slope to an array list of
+/// timestamps and store it in `merged_segments_metadata_map`. The `allocator` is used to allocate
 /// memory of intermediates.
 fn populateSegmentsMetadataHashMap(
     merged_segments_metadata: ArrayList(shared.SegmentMetadata),
@@ -391,8 +391,8 @@ fn populateSegmentsMetadataHashMap(
                 std.hash_map.default_max_load_percentage,
             ).init(allocator);
         }
-        // Get or put the ArrayList of timestamps mapped to the given `slope`, which is at the same
-        // time associated with the given `intercept`.
+        // Get or put the ArrayList of timestamps mapped to the given `slope` which is at the same
+        // time associated to the given `intercept`.
         const hash_to_array_result = try hash_to_hash_result.value_ptr.*.getOrPut(slope);
         if (!hash_to_array_result.found_existing) {
             hash_to_array_result.value_ptr.* = ArrayList(usize).init(allocator);
@@ -401,14 +401,14 @@ fn populateSegmentsMetadataHashMap(
     }
 }
 
-/// Sim-Piece Phase 4. Create a compressed representation from the `merged_segments_metadata_map`
-/// that can be decoded during decompression and stored in `compressed_values`. The compressed
-/// representation is a byte array containing the intercepts, slopes, and timestamps per segment.
+/// Sim-Piece Phase 4. Create compressed representation from the `merged_segments_metadata_map`
+/// that can be decoded during decompression and store it in `compressed_values`. The compressed
+/// representation is a byte array containing the intercepts, slopes and timestamps per segment.
 /// Specifically, the compressed representation has the following structure:
 /// [b_1, N_1, a_11, M_11, t_1, t_2, ..., a_12, M_12, t_1, ...., b_2, N_2, a_21, M_21, t1, t2, ...,
 ///  b_n, N_n, a_n1, M_n1, t_1, ...], where b_i are the intercepts, N_i are the number of slopes
 /// associated to intercept b_i, a_ij are the slopes associated to intercept b_i, M_ij are
-/// the number of timestamps associated with the slope a_ij, and t_k are the timestamps.
+/// the number of timestamps associated to the slope a_ij, and t_k are the timestamps.
 pub fn createCompressedRepresentation(
     merged_segments_metadata_map: shared.HashMapf64(shared.HashMapf64(ArrayList(usize))),
     compressed_values: *ArrayList(u8),
@@ -504,7 +504,7 @@ pub fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList
     }
 }
 
-/// Computes and stores in `decompressed_values` the decompressed representation of the points from
+/// Computes and stores in `decompressed_values` the decompress representation of the points from
 /// the `start_time` to the `end_time` based on the information stored in `segment_metadata`.
 pub fn decompressSegment(
     segment_metadata: shared.SegmentMetadata,
@@ -531,7 +531,7 @@ test "f64 context can hash" {
     defer f64_hash_map.deinit();
     var rnd = std.Random.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
 
-    // Add 100 elements into the HashMap. For each element, add two more with a small deviation of
+    // Add 100 elements into the HashMap. For each element, add two more with small deviation of
     // 1e-16 to test that the numbers are different and a new key is created.
     const deviation = 1e-16;
     for (0..100) |_| {
@@ -602,7 +602,7 @@ test "hashmap can map f64 to segment metadata array list" {
     }
 }
 
-test "sim-piece can compress, decompress, and merge many segments with non-zero error bound" {
+test "sim-piece can compress, decompress and merge many segments with non-zero error bound" {
     const allocator = testing.allocator;
 
     const error_bound = tester.generateBoundedRandomValue(f32, 0, 3, undefined);
@@ -611,7 +611,7 @@ test "sim-piece can compress, decompress, and merge many segments with non-zero 
     defer uncompressed_values.deinit();
 
     for (0..20) |_| {
-        // Generate floating-point numbers between 0 and 10. This will generate many merged
+        // Generate floating points numbers between 0 and 10. This will generate many merged
         // segments when applying Sim-Piece.
         try tester.generateBoundedRandomValues(&uncompressed_values, 0, 10, undefined);
     }
