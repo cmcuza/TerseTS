@@ -22,5 +22,3 @@ __pycache__
 build
 zig-out
 dist
-venv
-benchmarking/*
