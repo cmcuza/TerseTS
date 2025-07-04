@@ -18,7 +18,7 @@
 //! Proc. VLDB Endow. 15, 7 2024.
 //! https://doi.org/10.1007/s00778-024-00862-z".
 //!
-//! The implementation is partially based on the authors implementation at
+//! The implementation is partially based on the author's implementation at
 //! https://github.com/xkitsios/Mix-Piece (accessed on 20-05-2025).
 
 const std = @import("std");
@@ -29,6 +29,7 @@ const time = std.time;
 const testing = std.testing;
 const rand = std.Random;
 const Method = tersets.Method;
+const HashMap = std.HashMap;
 
 const tersets = @import("../tersets.zig");
 const shared = @import("../utilities/shared_structs.zig");
@@ -37,13 +38,10 @@ const sp = @import("sim_piece.zig");
 
 const Error = tersets.Error;
 const DiscretePoint = shared.DiscretePoint;
-const HashMap = std.HashMap;
 
-/// Compresses `uncompressed_values` within `error_bound` using the "Mim-Piece" algorithm.
+/// Compresses `uncompressed_values` within `error_bound` using the "Mix-Piece" algorithm.
 /// The function writes the result to `compressed_values`. The `allocator` is used for memory
 /// allocation of intermediate data structures. If an error occurs, it is returned.
-// Output format: [part1_count][part2_count][part3_count][part1 data...][part2 data...]
-// [part3 data...][last_timestamp].
 pub fn compress(
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
@@ -81,12 +79,13 @@ pub fn compress(
         allocator,
     );
 
-    // Mix-Piece Phase 3: Populate the three data structures. Separately handle three parts:
-    // part 1: segment groups that share the same intercept, part 2: segment groups that don't share
-    // the same intercept but the same slope, part 3: segment unmerged segments.
+    // Mix-Piece Phase 3: Populate the three data structures. Separately handle three parts.
+    // Part 1: segment groups that share the same intercept.
+    // Part 2: segment groups that don't share the same intercept but the same slope.
+    // Part 3: segment unmerged segments.
 
     // Part 1: Handle same intercept groups.
-    var same_intercept_groups_map = sp.HashMapf64(sp.HashMapf64(ArrayList(usize))).init(allocator);
+    var same_intercept_groups_map = shared.HashMapf64(shared.HashMapf64(ArrayList(usize))).init(allocator);
     defer {
         // Deinit all ArrayList instances within the inner HashMaps and then deinit the inner HashMaps.
         // themselves before finally deinit the outer HashMap.
@@ -132,28 +131,28 @@ pub fn compress(
     );
 
     // Mix-Piece Phase 4: Create compressed representation with boundaries.
-    // Store the number of intercept groups (Part 1).
+    // Part 1: Store the number of intercept groups.
     try sp.appendValue(
         usize,
         same_intercept_groups_map.count(),
         compressed_values,
     );
 
-    // Store the number of slope groups (Part 2).
+    // Part 2: Store the number of slope groups.
     try sp.appendValue(
         usize,
         cross_intercept_groups_map.count(),
         compressed_values,
     );
 
-    // Store the number of ungrouped segments (Part 3).
+    // part 3: Store the number of ungrouped segments.
     try sp.appendValue(
         usize,
         ungrouped_segments_array.items.len,
         compressed_values,
     );
 
-    // Now write the actual data for each part.
+    // Write the actual data for each part.
     // Part 1: Same intercept groups.
     try sp.createCompressedRepresentation(
         same_intercept_groups_map,
@@ -178,7 +177,7 @@ pub fn compress(
 
 /// Decompress `compressed_values` produced by "Mix-Piece". The function writes the result to
 /// `decompressed_values`. The `allocator` is used for memory allocation of intermediate data
-/// structures. If an error occurs it is returned.
+/// structures. If an error occurs, it is returned.
 pub fn decompress(
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
@@ -203,7 +202,6 @@ pub fn decompress(
         // We need to parse part1_count intercept groups.
         // Each group has: intercept, slopes_count,
         // then for each slope: slope, timestamps_count, timestamps.
-
         for (0..part1_count) |_| {
             const intercept = mem.bytesAsSlice(
                 f64,
@@ -254,7 +252,6 @@ pub fn decompress(
     if (part2_count > 0) {
         // We need to parse part2_count slope groups.
         // Each group has: slope, pair_count, then for each pair: intercept, timestamp_delta.
-
         for (0..part2_count) |_| {
             const slope = mem.bytesAsSlice(
                 f64,
@@ -295,7 +292,6 @@ pub fn decompress(
 
     // Part 3. Parse Ungrouped Segments.
     if (part3_count > 0) {
-
         // Each segment has: slope, intercept, timestamp_delta.
         var timestamp: usize = 0;
         for (0..part3_count) |_| {
@@ -377,8 +373,10 @@ fn computeSegmentsMetadata(
     var upper_bound_slope_ceil: f64 = math.floatMax(f64);
     var lower_bound_slope_ceil: f64 = -math.floatMax(f64);
 
-    // Check if the first point is NaN or infinite. If so, return an error.
-    if (!math.isFinite(uncompressed_values[0])) return Error.UnsupportedInput;
+    // Check if the first point is NaN, infinite or a reduced precision f64.
+    // If so, return an error.
+    if (!math.isFinite(uncompressed_values[0]) or @abs(uncompressed_values[0]) > 1e15)
+        return Error.UnsupportedInput;
 
     // Initialize the `start_point` with the first uncompressed value.
     var start_point: DiscretePoint = .{ .time = 0, .value = uncompressed_values[0] };
@@ -402,8 +400,11 @@ fn computeSegmentsMetadata(
     // The first point is already part of `current_segment`, the next point is at index one.
     for (1..uncompressed_values.len) |current_timestamp| {
 
-        // Check if the current point is NaN or infinite. If so, return an error.
-        if (!math.isFinite(uncompressed_values[current_timestamp])) return Error.UnsupportedInput;
+        // Check if the current point is NaN, infinite or a reduced precision f64.
+        // If so, return an error.
+        if (!math.isFinite(uncompressed_values[current_timestamp]) or
+            @abs(uncompressed_values[current_timestamp]) > 1e15)
+            return Error.UnsupportedInput;
 
         const end_point: DiscretePoint = .{
             .time = current_timestamp,
@@ -472,7 +473,7 @@ fn computeSegmentsMetadata(
         // If both quantizations have failed, choose the one that went further.
         if (!floor_valid and !ceil_valid) {
             if (last_valid_floor >= last_valid_ceil) {
-                // Use floor quantization
+                // Use floor quantization.
                 try segments_metadata.append(.{
                     .start_time = start_point.time,
                     .intercept = quantized_intercept_floor,
@@ -513,7 +514,7 @@ fn computeSegmentsMetadata(
     if (segment_size > 0) {
         // Choose the quantization that remained valid longer.
         if (floor_valid and !ceil_valid) {
-            // Floor is still valid
+            // Floor is still valid.
             if (segment_size == 1) {
                 upper_bound_slope_floor = 0;
                 lower_bound_slope_floor = 0;
@@ -540,7 +541,7 @@ fn computeSegmentsMetadata(
             // Both are valid or both invalid - choose the one that is closer to the original value.
             const original_value = uncompressed_values[start_point.time];
             if (@round(original_value / error_bound) == @ceil(original_value / error_bound)) {
-                // Ceil quantization
+                // Ceil quantization.
                 if (segment_size == 1) {
                     upper_bound_slope_ceil = 0;
                     lower_bound_slope_ceil = 0;
@@ -552,7 +553,7 @@ fn computeSegmentsMetadata(
                     .lower_bound_slope = lower_bound_slope_ceil,
                 });
             } else {
-                // Floor quantization
+                // Floor quantization.
                 if (segment_size == 1) {
                     upper_bound_slope_floor = 0;
                     lower_bound_slope_floor = 0;
@@ -569,16 +570,16 @@ fn computeSegmentsMetadata(
 }
 
 /// Mix-Piece Phase 2. Merge the elements in `segments_metadata` using Algorithm 4 from the paper.
-/// The results are stored in three output arrays:
-/// `same_intercept_groups`: Groups formed from segments sharing the same quantized intercept value
-/// `cross_intercept_groups`: Groups formed from segments with different intercept values
-/// `ungrouped_segments`: Segments that couldn't be grouped with any other segment
+/// The results are stored in three output arrays.
+/// `same_intercept_groups`: Groups formed from segments sharing the same quantized intercept value.
+/// `cross_intercept_groups`: Groups formed from segments with different intercept values.
+/// `ungrouped_segments`: Segments that couldn't be grouped with any other segment.
 /// The `allocator` is used to allocate memory for the intermediate representations needed.
 fn mergeSegmentsMetadata(
     segments_metadata: ArrayList(shared.SegmentMetadata),
-    same_intercept_groups: *ArrayList(shared.SegmentMetadata), // 'groups_b' in paper
-    cross_intercept_groups: *ArrayList(shared.SegmentMetadata), // 'groups' in paper
-    ungrouped_segments: *ArrayList(shared.SegmentMetadata), // 'rest' in paper
+    same_intercept_groups: *ArrayList(shared.SegmentMetadata), // 'groups_b' in paper.
+    cross_intercept_groups: *ArrayList(shared.SegmentMetadata), // 'groups' in paper.
+    ungrouped_segments: *ArrayList(shared.SegmentMetadata), // 'rest' in paper.
     allocator: mem.Allocator,
 ) !void {
     // Temporary storage for timestamps being merged in Part 1.
@@ -590,7 +591,7 @@ fn mergeSegmentsMetadata(
     defer single_segment_groups.deinit();
 
     // Group segments by their quantized intercept value.
-    var segments_by_intercept = sp.HashMapf64(ArrayList(shared.SegmentMetadata)).init(allocator);
+    var segments_by_intercept = shared.HashMapf64(ArrayList(shared.SegmentMetadata)).init(allocator);
     defer {
         // Clean up all ArrayLists within the HashMap.
         var iterator = segments_by_intercept.iterator();
@@ -609,7 +610,7 @@ fn mergeSegmentsMetadata(
         );
     }
 
-    // 1. Group segments with the same starting point.
+    // Part 1: Group segments with the same starting point.
     var iterator = segments_by_intercept.iterator();
     while (iterator.next()) |entry| {
         const segments_same_intercept_val = entry.value_ptr.*;
@@ -703,7 +704,7 @@ fn mergeSegmentsMetadata(
         timestamps_array.clearRetainingCapacity();
     }
 
-    // 2. Group remaining ungrouped segments across different intercept values.
+    // Part 2: Group remaining ungrouped segments across different intercept values.
     // Sort ungrouped segments by lower bound slope.
     mem.sort(
         shared.SegmentMetadata,
@@ -712,8 +713,7 @@ fn mergeSegmentsMetadata(
         sp.compareMetadataBySlope,
     );
 
-    // For cross-intercept grouping,
-    // we need to track both intercept and timestamp values for each segment.
+    // For cross-intercept grouping, track both intercept and timestamp values for each segment.
     var cross_intercept_segment_info =
         ArrayList(struct { intercept: f64, start_time: usize }).init(allocator);
     defer cross_intercept_segment_info.deinit();
@@ -836,11 +836,11 @@ fn mergeSegmentsMetadata(
 
 /// Mix-Piece Phase 3.1. Populate the `SegmentMetadata` HashMap from intercept points in
 /// `same_intercept_groups` to a HashMap from the approximation slope to an array list of
-/// timestamps and store it in `same_intercept_groups_map`.
-/// The `allocator` is used to allocate memory of intermediates.
+/// timestamps and store it in `same_intercept_groups_map`. The `allocator` is used to
+/// allocate memory of intermediates.
 fn populateSameInterceptGroupsHashMap(
     same_intercept_groups: ArrayList(shared.SegmentMetadata),
-    same_intercept_groups_map: *sp.HashMapf64(sp.HashMapf64(ArrayList(usize))),
+    same_intercept_groups_map: *shared.HashMapf64(shared.HashMapf64(ArrayList(usize))),
     allocator: mem.Allocator,
 ) !void {
     for (same_intercept_groups.items) |segment_metadata| {
@@ -855,7 +855,7 @@ fn populateSameInterceptGroupsHashMap(
             hash_to_hash_result.value_ptr.* = HashMap(
                 f64,
                 ArrayList(usize),
-                sp.HashF64Context,
+                shared.HashF64Context,
                 std.hash_map.default_max_load_percentage,
             ).init(allocator);
         }
@@ -869,12 +869,12 @@ fn populateSameInterceptGroupsHashMap(
     }
 }
 
-/// Mix-Piece Phase 3.2. Populate HashMap of cross_intercept_groups by grouping theit
-///  segments by their slope and stores intercept-timestamp pairs.
-/// Output format: slope -> ArrayList(InterceptTimestampPair)
-/// Which corresponds to: a_j; k_j; b_j,1; t_j,1; b_j,k_j; t_j,k_j, where a_j is the slope,
-/// k_j is the number of intercept-timestamp pairs, b_j,i; t_j,i are the intercept and timestamp pairs
-/// The `allocator` is used to allocate memory of intermediates.
+/// Mix-Piece Phase 3.2. Populate HashMap of `cross_intercept_groups` by grouping the segments by
+/// their slope and stores intercept-timestamp pairs and stores it in `cross_intercept_groups_map`.
+/// The output format is a HashMap from slope to an ArrayList of corresponding to:
+/// a_j; k_j; b_j,1; t_j,1; b_j,k_j; t_j,k_j, where a_j is the slope, k_j is the number of
+/// intercept-timestamp pairs, b_j,i; t_j,i are the intercept and timestamp pairs.
+/// The `allocator` is used to allocate memory for intermediates.
 fn populateCrossInterceptGroupsAsHashMap(
     cross_intercept_groups: ArrayList(shared.SegmentMetadata),
     cross_intercept_groups_map: *CrossInterceptGroupsMap,
@@ -901,10 +901,9 @@ fn populateCrossInterceptGroupsAsHashMap(
     }
 }
 
-/// Mix-Piece Phase 3.3. Save ungrouped values in an array
-/// Takes ungrouped segments and converts them to UngroupedSegment structs
-/// for final output representation
-/// Output format a1, b1, t1..., where a is the slope, b is the intercept, t is the timestamp.
+/// Mix-Piece Phase 3.3. Populate `ungrouped_segments` of SegmentMetadata in `ungrouped_segments_array`
+/// ArrayList of UngroupedSegment structs. The final representation is a byte array containing the
+/// slopes a_i, intercepts b_j, and timestamps t_k per segment.
 fn populateUngroupedSegmentsArray(
     ungrouped_segments: ArrayList(shared.SegmentMetadata),
     ungrouped_segments_array: *ArrayList(UngroupedSegment),
@@ -926,8 +925,8 @@ fn populateUngroupedSegmentsArray(
     }
 }
 
-/// Mix-Piece Phase 4.1. Create compressed representation from the 'merged_segments_metadata_map'
-/// that can be decoded during decompression and store it in `compressed_values`. The compressed
+/// Mix-Piece Phase 4.1. Create a compressed representation from the 'merged_segments_metadata_map'
+/// that can be decoded during decompression and stored in `compressed_values`. The compressed
 /// representation is a byte array containing the intercepts, slopes and timestamps per segment.
 /// Specifically, the compressed representation has the following structure:
 /// [b_1, N_1, a_11, M_11, t_1, t_2, ..., a_12, M_12, t_1, ...., b_2, N_2, a_21, M_21, t1, t2, ...,
@@ -935,7 +934,7 @@ fn populateUngroupedSegmentsArray(
 /// associated to intercept b_i, a_ij are the slopes associated to intercept b_i, M_ij are
 /// the number of timestamps associated to the slope a_ij, and t_k are the timestamps.
 fn createCompressedRepresentationMergedSegments(
-    merged_segments_metadata_map: sp.HashMapf64(sp.HashMapf64(ArrayList(usize))),
+    merged_segments_metadata_map: shared.HashMapf64(shared.HashMapf64(ArrayList(usize))),
     compressed_values: *ArrayList(u8),
 ) !void {
     // Iterate over the outer HashMap to append the intercepts b_i.
@@ -968,8 +967,10 @@ fn createCompressedRepresentationMergedSegments(
 }
 
 /// Mix-Piece Phase 4.2. Create compressed representation from the 'cross_intercept_groups_map'
-/// Output format: For each slope a_j, store the count k_j of intercept-timestamp pairs,
-/// followed by the pairs themselves: [a_j, k_j, b_j,1, t_j,1, b_j,2, t_j,2, ..., b_j,k_j, t_j,k_j]
+/// that can decoded during decompression and store it in `compressed_values`. The compressed
+/// representation is a byte array containing the slopes a_j, intercept-timestamps pairs and
+/// necessary metadata for proper decoding. Specifically, the compressed representation has
+/// the following structure: [a_j, k_j, b_j,1, t_j,1, b_j,2, t_j,2, ..., b_j,k_j, t_j,k_j]
 /// where a_j is the  slope, k_j is the  number of intercept-timestamp pairs for this slope
 /// b_j,i is the i-th intercept for slope a_j, t_j,i is the i-th timestamp for slope a_j.
 fn createCompressedRepresentationCrossInterceptGroups(
@@ -1003,8 +1004,12 @@ fn createCompressedRepresentationCrossInterceptGroups(
 }
 
 /// Mix-Piece Phase 4.3. Create compressed representation from the 'ungrouped_segments_array'
-/// Output format: For each ungrouped segment, store [a_i, b_i, t_i],
-/// where a_i is the slope of segment i, b_i is the intercept of segment i, t_i is the  timestamp of segment i.
+/// that can be decoded during decompression and store it in `compressed_values`. The compressed
+/// representation is a byte array containing the slopes a_j, intercept-timestamps pairs and
+/// necessary metadata for proper decoding. Specifically, the compressed representation has
+/// the following structure: [a_j, k_j, b_j,1, t_j,1, b_j,2, t_j,2, ..., b_j,k_j, t_j,k_j]
+/// where a_j is the  slope, k_j is the  number of intercept-timestamp pairs for this slope
+/// b_j,i is the i-th intercept for slope a_j, t_j,i is the i-th timestamp for slope a_j.
 fn createCompressedRepresentationUngroupedSegments(
     ungrouped_segments_array: ArrayList(UngroupedSegment),
     compressed_values: *ArrayList(u8),
@@ -1039,10 +1044,10 @@ const InterceptTimestampPair = struct {
 };
 
 /// HashMap for cross_intercept_groups.
-const CrossInterceptGroupsMap = sp.HashMap(
+const CrossInterceptGroupsMap = std.HashMap(
     f64,
     ArrayList(InterceptTimestampPair),
-    sp.HashF64Context,
+    shared.HashF64Context,
     std.hash_map.default_max_load_percentage,
 );
 
@@ -1069,8 +1074,8 @@ fn quantizeCeil(value: f64, error_bound: f32) f64 {
 test "mix-piece can compress, decompress and merge many segments with non-zero error bound" {
     const error_bound = tester.generateBoundedRandomValue(
         f32,
-        0,
-        1,
+        0.01, //avoid zero error bound to ensure segments are merged.
+        3,
         undefined,
     );
     const allocator = testing.allocator;
@@ -1099,8 +1104,8 @@ test "mix-piece can compress, decompress and merge many segments with non-zero e
 test "mix-piece even size compress and decompress" {
     const error_bound = tester.generateBoundedRandomValue(
         f32,
-        0,
-        3,
+        0.01,
+        1e3,
         undefined,
     );
     const allocator = testing.allocator;
@@ -1108,10 +1113,11 @@ test "mix-piece even size compress and decompress" {
     defer uncompressed_values.deinit();
     try tester.generateBoundedRandomValues(
         &uncompressed_values,
-        0.0,
-        1.0,
+        -1e5,
+        1e5,
         undefined,
     );
+
     try tester.testCompressAndDecompress(
         uncompressed_values.items,
         allocator,
@@ -1124,8 +1130,8 @@ test "mix-piece even size compress and decompress" {
 test "mix-piece odd size compress and decompress" {
     const error_bound = tester.generateBoundedRandomValue(
         f32,
-        0,
-        1,
+        0.01,
+        1e6,
         undefined,
     );
     const allocator = testing.allocator;
@@ -1133,15 +1139,15 @@ test "mix-piece odd size compress and decompress" {
     defer uncompressed_values.deinit();
     try tester.generateBoundedRandomValues(
         &uncompressed_values,
-        0.0,
-        1.0,
+        -1e14,
+        1e14,
         undefined,
     );
     // Add another element to make the uncompressed values of odd size.
     try uncompressed_values.append(tester.generateBoundedRandomValue(
         f64,
-        0,
-        1,
+        -1e14,
+        1e14,
         undefined,
     ));
     try tester.testCompressAndDecompress(
@@ -1156,8 +1162,8 @@ test "mix-piece odd size compress and decompress" {
 test "mix-piece random lines and error bound compress and decompress" {
     const error_bound = tester.generateBoundedRandomValue(
         f32,
-        0,
-        1,
+        0.01,
+        5,
         undefined,
     );
     const allocator = testing.allocator;
@@ -1178,11 +1184,11 @@ test "mix-piece random lines and error bound compress and decompress" {
     );
 }
 
-// Additional Mix-Piece specific tests to cover its unique features.
 test "mix-piece handles time series with trend" {
+    // Additional Mix-Piece specific tests to cover its unique features.
     const error_bound = tester.generateBoundedRandomValue(
         f32,
-        0,
+        0.01,
         1,
         undefined,
     );
@@ -1248,7 +1254,7 @@ test "mix-piece handles cross-intercept grouping" {
 test "mix-piece handles single point segments" {
     const error_bound = tester.generateBoundedRandomValue(
         f32,
-        0,
+        0.01,
         1,
         undefined,
     );
@@ -1281,7 +1287,7 @@ test "mix-piece floor vs ceil quantization selection" {
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
 
-    // Create data that will test floor vs ceil quantization decisions.
+    // Create data to test floor vs. ceil quantization decisions.
     // Start with values that are close to quantization boundaries.
     try uncompressed_values.append(1.49);
     try uncompressed_values.append(1.51);
