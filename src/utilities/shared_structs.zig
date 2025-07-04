@@ -35,7 +35,7 @@ pub const Segment = struct {
     end_point: DiscretePoint,
 };
 
-/// Linear function of the form y = slope*x+intercept. 
+/// Linear function of the form y = slope*x+intercept.
 pub const LinearFunction = struct {
     slope: f64,
     intercept: f64,
@@ -61,7 +61,7 @@ pub const SegmentMetadata = struct {
 /// This context is essential when using `f64` as keys in a `HashMap`. It defines how the keys are
 /// hashed and compared for equality.
 pub const HashF64Context = struct {
-    /// Hashes a `f64` value by bitcasting it to `u64`.
+    /// Hashes an `f64` `value` by bitcasting it to `u64`.
     pub fn hash(_: HashF64Context, value: f64) u64 {
         return @as(u64, @bitCast(value));
     }
