@@ -27,7 +27,6 @@ const nea_compression = @import("functional/nea_compression.zig");
 const vw = @import("line_simplification/visvalingam_whyatt.zig");
 const sliding_window = @import("line_simplification/sliding_window.zig");
 const bottom_up = @import("line_simplification/bottom_up.zig");
-const abc_compression = @import("functional/abc_linear_compression.zig");
 
 /// The errors that can occur in TerseTS.
 pub const Error = error{
@@ -51,10 +50,10 @@ pub const Method = enum {
     PiecewiseConstantHistogram,
     PiecewiseLinearHistogram,
     ABCLinearApproximation,
-    NeaCompression,
     VisvalingamWhyatt,
     SlidingWindow,
     BottomUp,
+    NeaCompression,
 };
 
 /// Compress `uncompressed_values` within `error_bound` using `method` and returns the results
@@ -141,14 +140,6 @@ pub fn compress(
                 error_bound,
             );
         },
-        .NeaCompression => {
-            try nea_compression.compress(
-                uncompressed_values,
-                &compressed_values,
-                allocator,
-                error_bound,
-            );
-        },
         .VisvalingamWhyatt => {
             try vw.compress(
                 uncompressed_values,
@@ -166,6 +157,14 @@ pub fn compress(
         },
         .BottomUp => {
             try bottom_up.compress(
+                uncompressed_values,
+                &compressed_values,
+                allocator,
+                error_bound,
+            );
+        },
+        .NeaCompression => {
+            try nea_compression.compress(
                 uncompressed_values,
                 &compressed_values,
                 allocator,
@@ -216,9 +215,6 @@ pub fn decompress(
         .ABCLinearApproximation => {
             try abc_linear_compression.decompress(compressed_values_slice, &decompressed_values);
         },
-        .NeaCompression => {
-            try nea_compression.decompress(compressed_values_slice, &decompressed_values);
-        },
         .VisvalingamWhyatt => {
             try vw.decompress(compressed_values_slice, &decompressed_values);
         },
@@ -227,6 +223,9 @@ pub fn decompress(
         },
         .BottomUp => {
             try bottom_up.decompress(compressed_values_slice, &decompressed_values);
+        },
+        .NeaCompression => {
+            try nea_compression.decompress(compressed_values_slice, &decompressed_values);
         },
     }
 
