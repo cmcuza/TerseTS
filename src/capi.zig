@@ -120,8 +120,10 @@ test "method enum must match method constants" {
     try testing.expectEqual(@intFromEnum(tersets.Method.PiecewiseConstantHistogram), 6);
     try testing.expectEqual(@intFromEnum(tersets.Method.PiecewiseLinearHistogram), 7);
     try testing.expectEqual(@intFromEnum(tersets.Method.ABCLinearApproximation), 8);
-    try testing.expectEqual(@intFromEnum(tersets.Method.NeaCompression), 9);
-    try testing.expectEqual(@intFromEnum(tersets.Method.VisvalingamWhyatt), 10);
+    try testing.expectEqual(@intFromEnum(tersets.Method.VisvalingamWhyatt), 9);
+    try testing.expectEqual(@intFromEnum(tersets.Method.SlidingWindow), 10);
+    try testing.expectEqual(@intFromEnum(tersets.Method.BottomUp), 11);
+    try testing.expectEqual(@intFromEnum(tersets.Method.NeaCompression), 12);
 }
 
 test "error for unknown compression method" {
