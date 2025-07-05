@@ -23,6 +23,7 @@ const swing_slide_filter = @import("functional/swing_slide_filter.zig");
 const sim_piece = @import("functional/sim_piece.zig");
 const piecewise_histogram = @import("functional/histogram_compression.zig");
 const abc_linear_compression = @import("functional/abc_linear_compression.zig");
+const nea_compression = @import("functional/nea_compression.zig");
 const vw = @import("line_simplification/visvalingam_whyatt.zig");
 
 /// The errors that can occur in TerseTS.
@@ -47,6 +48,7 @@ pub const Method = enum {
     PiecewiseConstantHistogram,
     PiecewiseLinearHistogram,
     ABCLinearApproximation,
+    NeaCompression,
     VisvalingamWhyatt,
 };
 
@@ -134,6 +136,14 @@ pub fn compress(
                 error_bound,
             );
         },
+        .NeaCompression => {
+            try nea_compression.compress(
+                uncompressed_values,
+                &compressed_values,
+                allocator,
+                error_bound,
+            );
+        },
         .VisvalingamWhyatt => {
             try vw.compress(
                 uncompressed_values,
@@ -185,6 +195,9 @@ pub fn decompress(
         },
         .ABCLinearApproximation => {
             try abc_linear_compression.decompress(compressed_values_slice, &decompressed_values);
+        },
+        .NeaCompression => {
+            try nea_compression.decompress(compressed_values_slice, &decompressed_values);
         },
         .VisvalingamWhyatt => {
             try vw.decompress(compressed_values_slice, &decompressed_values);
