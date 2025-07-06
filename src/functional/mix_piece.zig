@@ -29,7 +29,6 @@ const time = std.time;
 const testing = std.testing;
 const rand = std.Random;
 const Method = tersets.Method;
-const HashMap = std.HashMap;
 
 const tersets = @import("../tersets.zig");
 const shared = @import("../utilities/shared_structs.zig");
@@ -852,11 +851,8 @@ fn populateSameInterceptGroupsHashMap(
         // slopes and timestamps associated to it.
         const hash_to_hash_result = try same_intercept_groups_map.getOrPut(intercept);
         if (!hash_to_hash_result.found_existing) {
-            hash_to_hash_result.value_ptr.* = HashMap(
-                f64,
+            hash_to_hash_result.value_ptr.* = shared.HashMapf64(
                 ArrayList(usize),
-                shared.HashF64Context,
-                std.hash_map.default_max_load_percentage,
             ).init(allocator);
         }
         // Get or put the ArrayList of timestamps mapped to the given `slope` which is at the same
@@ -1044,11 +1040,8 @@ const InterceptTimestampPair = struct {
 };
 
 /// HashMap for cross_intercept_groups.
-const CrossInterceptGroupsMap = std.HashMap(
-    f64,
+const CrossInterceptGroupsMap = shared.HashMapf64(
     ArrayList(InterceptTimestampPair),
-    shared.HashF64Context,
-    std.hash_map.default_max_load_percentage,
 );
 
 /// Quantizes the given `value` by the specified `error_bound`. This process ensures that

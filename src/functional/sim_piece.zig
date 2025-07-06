@@ -27,7 +27,6 @@ const rand = std.Random;
 const time = std.time;
 const testing = std.testing;
 const ArrayList = std.ArrayList;
-const HashMap = std.HashMap;
 
 const tersets = @import("../tersets.zig");
 const Method = tersets.Method;
@@ -384,11 +383,8 @@ fn populateSegmentsMetadataHashMap(
         // slopes and timestamps associated to it.
         const hash_to_hash_result = try merged_segments_metadata_map.getOrPut(intercept);
         if (!hash_to_hash_result.found_existing) {
-            hash_to_hash_result.value_ptr.* = HashMap(
-                f64,
+            hash_to_hash_result.value_ptr.* = shared.HashMapf64(
                 ArrayList(usize),
-                shared.HashF64Context,
-                std.hash_map.default_max_load_percentage,
             ).init(allocator);
         }
         // Get or put the ArrayList of timestamps mapped to the given `slope` which is at the same
@@ -455,11 +451,8 @@ fn quantize(value: f64, error_bound: f32) f64 {
 /// Appends the `metadata` to the HashMap `metadata_map`. The `allocator` is used for allocating
 /// the memory for a new ArrayList if the `metadata.intercept` does not exist.
 pub fn appendSegmentMetadata(
-    metadata_map: *HashMap(
-        f64,
+    metadata_map: *shared.HashMapf64(
         ArrayList(shared.SegmentMetadata),
-        shared.HashF64Context,
-        std.hash_map.default_max_load_percentage,
     ),
     metadata: shared.SegmentMetadata,
     allocator: mem.Allocator,
@@ -522,11 +515,8 @@ pub fn decompressSegment(
 
 test "f64 context can hash" {
     const allocator = testing.allocator;
-    var f64_hash_map = HashMap(
+    var f64_hash_map = shared.HashMapf64(
         f64,
-        f64,
-        shared.HashF64Context,
-        std.hash_map.default_max_load_percentage,
     ).init(allocator);
     defer f64_hash_map.deinit();
     var rnd = std.Random.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
