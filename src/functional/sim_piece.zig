@@ -173,6 +173,10 @@ fn computeSegmentsMetadata(
     var upper_bound_slope: f64 = math.floatMax(f64);
     var lower_bound_slope: f64 = -math.floatMax(f64);
 
+    // Check if the first point is NaN, infinite or a reduced precision f64.
+    // If so, return an error.
+    if (!math.isFinite(uncompressed_values[0]) or @abs(uncompressed_values[0]) > 1e15)
+        return Error.UnsupportedInput;
     // Check if the first point is NaN, infinite or a reduced precision floating point.
     // If so, return an error.
     if (!math.isFinite(uncompressed_values[0]) or
