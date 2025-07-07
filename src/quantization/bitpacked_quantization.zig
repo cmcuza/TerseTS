@@ -31,10 +31,10 @@ const Method = tersets.Method;
 const Error = tersets.Error;
 const tester = @import("../tester.zig");
 
-/// Compress uncompressed_values within error_bound using "Bucket Quantization" and a
-/// "Fixed-length Bit-Packing". The function writes the result to compressed_values. The
-/// compressed_values includes the bit width, original length and smallest value so that it
-/// can be decompressed. The allocator is used for memory management of intermediates containers.
+/// Compress `uncompressed_values` within error_bound using "Bucket Quantization" and a
+/// "Fixed-length Bit-Packing". The function writes the result to `compressed_values`. The
+/// `compressed_values` includes the bit width, original length and smallest value so that it
+/// can be decompressed. The `allocator` is used for memory management of intermediates containers.
 /// If an error occurs it is returned.
 pub fn compress(
     allocator: mem.Allocator,
@@ -106,8 +106,8 @@ pub fn compress(
     try bit_writer.flushBits();
 }
 
-/// Decompress compressed_values produced by "Bucket Quantization" and "Bit-Packing". The function
-/// writes the result to decompressed_values. If an error occurs it is returned.
+/// Decompress `compressed_values` produced by "Bucket Quantization" and "Bit-Packing". The function
+/// writes the result to `decompressed_values`. If an error occurs it is returned.
 pub fn decompress(
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
