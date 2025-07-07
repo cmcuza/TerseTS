@@ -1064,116 +1064,115 @@ fn quantizeCeil(value: f64, error_bound: f32) f64 {
     return value;
 }
 
+test "mix-piece can compress and decompress bounded values with any error bound" {
+    const allocator = testing.allocator;
+    const data_distributions = &[_]tester.DataDistribution{
+        .LinearFunctions,
+        .BoundedRandomValues,
+        .SinusoidalFunction,
+    };
+    try tester.testErrorBoundedCompressionMethod(
+        allocator,
+        Method.MixPiece,
+        data_distributions,
+    );
+}
+
 test "mix-piece can compress, decompress and merge many segments with non-zero error bound" {
-    const error_bound = tester.generateBoundedRandomValue(
-        f32,
-        0.01, //avoid zero error bound to ensure segments are merged.
-        3,
-        undefined,
-    );
     const allocator = testing.allocator;
+
+    const error_bound = tester.generateBoundedRandomValue(f32, 0.5, 3, undefined);
+
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
 
     for (0..20) |_| {
-        // Generate floating points numbers between 0 and 10. This will generate many merged.
+        // Generate floating points numbers between 0 and 10. This will generate many merged
         // segments when applying Mix-Piece.
-        try tester.generateBoundedRandomValues(
-            &uncompressed_values,
-            0,
-            10,
-            undefined,
-        );
+        try tester.generateBoundedRandomValues(&uncompressed_values, 0, 10, undefined);
     }
+
     try tester.testCompressAndDecompress(
-        uncompressed_values.items,
         allocator,
+        uncompressed_values.items,
         Method.MixPiece,
         error_bound,
         tersets.isWithinErrorBound,
     );
 }
 
-test "mix-piece even size compress and decompress" {
-    const error_bound = tester.generateBoundedRandomValue(
-        f32,
-        0.01,
-        1e3,
-        undefined,
-    );
+test "mix-piece cannot compress nan values" {
     const allocator = testing.allocator;
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    try tester.generateBoundedRandomValues(
-        &uncompressed_values,
-        -1e5,
-        1e5,
-        undefined,
-    );
 
-    try tester.testCompressAndDecompress(
-        uncompressed_values.items,
+    const uncompressed_values = &[4]f64{ 19.0, 48.0, math.nan(f64), 3.0 };
+
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+
+    compress(
+        uncompressed_values,
+        &compressed_values,
         allocator,
-        Method.MixPiece,
-        error_bound,
-        tersets.isWithinErrorBound,
+        0.1,
+    ) catch |err| {
+        try testing.expectEqual(Error.UnsupportedInput, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The Mix-Piece algorithm cannot compress nan values",
+        .{},
     );
 }
 
-test "mix-piece odd size compress and decompress" {
-    const error_bound = tester.generateBoundedRandomValue(
-        f32,
-        0.01,
-        1e6,
-        undefined,
-    );
+test "mix-piece cannot compress inf values" {
     const allocator = testing.allocator;
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    try tester.generateBoundedRandomValues(
-        &uncompressed_values,
-        -1e14,
-        1e14,
-        undefined,
-    );
-    // Add another element to make the uncompressed values of odd size.
-    try uncompressed_values.append(tester.generateBoundedRandomValue(
-        f64,
-        -1e14,
-        1e14,
-        undefined,
-    ));
-    try tester.testCompressAndDecompress(
-        uncompressed_values.items,
+
+    const uncompressed_values = &[4]f64{ 19.0, 48.0, math.inf(f64), 3.0 };
+
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+
+    compress(
+        uncompressed_values,
+        &compressed_values,
         allocator,
-        Method.MixPiece,
-        error_bound,
-        tersets.isWithinErrorBound,
+        0.1,
+    ) catch |err| {
+        try testing.expectEqual(Error.UnsupportedInput, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The Mix-Piece algorithm cannot compress inf values",
+        .{},
     );
 }
 
-test "mix-piece random lines and error bound compress and decompress" {
-    const error_bound = tester.generateBoundedRandomValue(
-        f32,
-        0.01,
-        5,
-        undefined,
-    );
+test "mix-piece cannot compress f64 with reduced precision" {
     const allocator = testing.allocator;
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    for (0..20) |_| {
-        try tester.generateRandomLinearFunction(
-            &uncompressed_values,
-            undefined,
-        );
-    }
-    try tester.testCompressAndDecompress(
-        uncompressed_values.items,
+
+    const uncompressed_values = &[4]f64{ 19.0, 48.0, 1e17, 3.0 };
+
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+
+    compress(
+        uncompressed_values,
+        &compressed_values,
         allocator,
-        Method.MixPiece,
-        error_bound,
-        tersets.isWithinErrorBound,
+        0.1,
+    ) catch |err| {
+        try testing.expectEqual(Error.UnsupportedInput, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The Mix-Piece algorithm cannot compress reduced precision floating point values",
+        .{},
     );
 }
 
@@ -1203,8 +1202,8 @@ test "mix-piece handles time series with trend" {
     }
 
     try tester.testCompressAndDecompress(
-        uncompressed_values.items,
         allocator,
+        uncompressed_values.items,
         Method.MixPiece,
         error_bound,
         tersets.isWithinErrorBound,
@@ -1236,8 +1235,8 @@ test "mix-piece handles cross-intercept grouping" {
     }
 
     try tester.testCompressAndDecompress(
-        uncompressed_values.items,
         allocator,
+        uncompressed_values.items,
         Method.MixPiece,
         error_bound,
         tersets.isWithinErrorBound,
@@ -1266,8 +1265,8 @@ test "mix-piece handles single point segments" {
         ));
     }
     try tester.testCompressAndDecompress(
-        uncompressed_values.items,
         allocator,
+        uncompressed_values.items,
         Method.MixPiece,
         error_bound,
         tersets.isWithinErrorBound,
@@ -1290,8 +1289,8 @@ test "mix-piece floor vs ceil quantization selection" {
     try uncompressed_values.append(2.51);
 
     try tester.testCompressAndDecompress(
-        uncompressed_values.items,
         allocator,
+        uncompressed_values.items,
         Method.MixPiece,
         error_bound,
         tersets.isWithinErrorBound,
