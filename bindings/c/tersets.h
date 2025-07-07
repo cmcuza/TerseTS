@@ -14,6 +14,7 @@ enum Method {
   VisvalingamWhyatt = 9,
   SlidingWindow = 10,
   BottomUp = 11,
+  MixPiece = 12,
 };
 
 // A pointer to uncompressed values and the number of values.
