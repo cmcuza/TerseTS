@@ -28,7 +28,7 @@ const vw = @import("line_simplification/visvalingam_whyatt.zig");
 const sliding_window = @import("line_simplification/sliding_window.zig");
 const bottom_up = @import("line_simplification/bottom_up.zig");
 const abc_compression = @import("functional/abc_linear_compression.zig");
-const bucket_quantization = @import("quantization/bucket_quantization.zig");
+const bitpacked_quantization = @import("quantization/bitpacked_quantization.zig");
 
 /// The errors that can occur in TerseTS.
 pub const Error = error{
@@ -39,6 +39,7 @@ pub const Error = error{
     OutOfMemory,
     EmptyConvexHull,
     EmptyQueue,
+    ByteStreamError,
 };
 
 /// The compression methods in TerseTS.
@@ -56,7 +57,7 @@ pub const Method = enum {
     SlidingWindow,
     BottomUp,
     MixPiece,
-    BucketQuantization,
+    BitPackedQuantization,
 };
 
 /// Compress `uncompressed_values` within `error_bound` using `method` and returns the results
@@ -174,8 +175,9 @@ pub fn compress(
                 error_bound,
             );
         },
-        .BucketQuantization => {
-            try bucket_quantization.compress(
+        .BitPackedQuantization => {
+            try bitpacked_quantization.compress(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
                 error_bound,
@@ -237,8 +239,8 @@ pub fn decompress(
         .BottomUp => {
             try bottom_up.decompress(compressed_values_slice, &decompressed_values);
         },
-        .BucketQuantization => {
-            try bucket_quantization.decompress(compressed_values_slice, &decompressed_values);
+        .BitPackedQuantization => {
+            try bitpacked_quantization.decompress(compressed_values_slice, &decompressed_values);
         },
     }
 
