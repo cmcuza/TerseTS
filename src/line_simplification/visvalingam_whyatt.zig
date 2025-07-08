@@ -52,8 +52,8 @@ pub fn compress(
     // If we have 2 or fewer points, store them without compression.
     if (uncompressed_values.len <= 2) {
         try appendValue(f64, uncompressed_values[0], compressed_values);
-        try appendValue(usize, 1, compressed_values);
         try appendValue(f64, uncompressed_values[1], compressed_values);
+        try appendValue(usize, 1, compressed_values);
         return;
     }
 
@@ -157,8 +157,8 @@ pub fn compress(
     try appendValue(f64, uncompressed_values[0], compressed_values);
     for (1..heap.len) |index| {
         const point_index = heap.items[index].index;
-        try appendValue(usize, point_index, compressed_values);
         try appendValue(f64, uncompressed_values[point_index], compressed_values);
+        try appendValue(usize, point_index, compressed_values);
     }
 
     return;
@@ -169,7 +169,7 @@ pub fn compress(
 pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList(f64)) Error!void {
     // The compressed representation is composed of two values after getting the first since all
     // segments are connected. Therefore, the condition checks that after the first value, the rest
-    // of the values are in pairs (index, value) and that they are all of type 64-bit float.
+    // of the values are in pairs (value, index) and that they are all of type 64-bit float.
     if ((compressed_values.len - 8) % 16 != 0) return Error.UnsupportedInput;
 
     const compressed_lines_and_index = mem.bytesAsSlice(f64, compressed_values);
@@ -186,8 +186,8 @@ pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList
     while (index < compressed_lines_and_index.len - 1) : (index += 2) {
         // index + 1 is the end value and index + 2 is the end time.
         const end_point: DiscretePoint = .{
-            .time = @as(usize, @bitCast(compressed_lines_and_index[index + 1])),
-            .value = compressed_lines_and_index[index + 2],
+            .time = @as(usize, @bitCast(compressed_lines_and_index[index + 2])),
+            .value = compressed_lines_and_index[index + 1],
         };
 
         if (start_point.time + 1 < end_point.time) {
@@ -419,7 +419,7 @@ test "vw compress and compress with random data" {
     var index: usize = 0;
     var previous_point_index: usize = 0;
     while (index < compressed_representation.len - 1) : (index += 2) {
-        const current_point_index = @as(usize, @bitCast(compressed_representation[index + 1]));
+        const current_point_index = @as(usize, @bitCast(compressed_representation[index + 2]));
 
         // Check if the point is within the error bound.
         try testAreaWithinErrorBound(uncompressed_values.items[previous_point_index .. current_point_index + 1], error_bound);
