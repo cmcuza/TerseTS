@@ -287,14 +287,33 @@ fn appendValue(comptime T: type, value: T, compressed: *ArrayList(u8)) !void {
     try compressed.appendSlice(&bytes);
 }
 
-test "abc compressor can always compress and decompress" {
+test "abc compressor can always compress and decompress with zero error bound" {
     const allocator = testing.allocator;
     try tester.testGenerateCompressAndDecompress(
-        tester.generateFiniteRandomValues,
         allocator,
+        tester.generateFiniteRandomValues,
         Method.ABCLinearApproximation,
         0,
         tersets.isWithinErrorBound,
+    );
+}
+
+test "abc can always compress and decompress any f64 values with any error bound" {
+    const allocator = testing.allocator;
+    const data_distributions = &[_]tester.DataDistribution{
+        .FiniteRandomValues,
+        .LinearFunctions,
+        .BoundedRandomValues,
+        .SinusoidalFunction,
+        .LinearFunctionsWithNansAndInfinities,
+        .RandomValuesWithNansAndInfinities,
+        .SinusoidalFunctionWithNansAndInfinities,
+        .BoundedRandomValuesWithNansAndInfinities,
+    };
+    try tester.testErrorBoundedCompressionMethod(
+        allocator,
+        Method.ABCLinearApproximation,
+        data_distributions,
     );
 }
 
@@ -349,53 +368,6 @@ test "abc compressor identifies correct ABC points in the convex hull of a bigge
     try std.testing.expectEqual(compressed_values.items.len / 8, 3);
 }
 
-test "abc compressor can compress and decompress random lines and error bound" {
-    const allocator = testing.allocator;
-
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
-
-    const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0, 1, undefined);
-
-    const max_lines: usize = @intFromFloat(@round(tester.generateBoundedRandomValue(f64, 4, 25, undefined)));
-    for (0..max_lines) |_| {
-        // Generate a random linear function and add it to the uncompressed values.
-        try tester.generateRandomLinearFunction(&uncompressed_values, undefined);
-    }
-
-    try tester.testCompressAndDecompress(
-        uncompressed_values.items,
-        allocator,
-        Method.ABCLinearApproximation,
-        error_bound,
-        tersets.isWithinErrorBound,
-    );
-}
-
-test "abc compressor can compress and decompress odd size" {
-    const allocator = std.testing.allocator;
-    const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0, 1, undefined);
-
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, undefined);
-
-    // Add another element to make the uncompressed values of odd size.
-    try uncompressed_values.append(tester.generateBoundedRandomValue(f64, 0, 1, undefined));
-
-    try tester.testCompressAndDecompress(
-        uncompressed_values.items,
-        allocator,
-        Method.ABCLinearApproximation,
-        error_bound,
-        tersets.isWithinErrorBound,
-    );
-}
-
 test "abc compressor compresses and decompresses constant signal" {
     const allocator = std.testing.allocator;
     const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0, 1, undefined);
@@ -412,8 +384,8 @@ test "abc compressor compresses and decompresses constant signal" {
     }
 
     try tester.testCompressAndDecompress(
-        uncompressed_values.items,
         allocator,
+        uncompressed_values.items,
         Method.ABCLinearApproximation,
         error_bound,
         tersets.isWithinErrorBound,
