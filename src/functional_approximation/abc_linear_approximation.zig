@@ -91,7 +91,6 @@ pub fn compress(
 
         // Store segment information (end_index, slope, intercept).
         if (last_valid_line) |valid_line| {
-            try appendValue(usize, last_valid_end, compressed_values);
             // If there are only two points in the segment, store then directly to avoid numerical issues.
             if (current_segment_start + 1 == last_valid_end) {
                 try appendValue(f64, uncompressed_values[current_segment_start], compressed_values);
@@ -100,11 +99,12 @@ pub fn compress(
                 try appendValue(f64, @floatCast(valid_line.slope), compressed_values);
                 try appendValue(f64, @floatCast(valid_line.intercept), compressed_values);
             }
+            try appendValue(usize, last_valid_end, compressed_values);
         } else {
             // If the the last valid line is not valid, then store the uncompressed values directly.
-            try appendValue(usize, last_valid_end, compressed_values);
             try appendValue(f64, uncompressed_values[current_segment_start], compressed_values);
             try appendValue(f64, uncompressed_values[last_valid_end], compressed_values);
+            try appendValue(usize, last_valid_end, compressed_values);
         }
 
         // Start next segment after last_valid_end.
@@ -119,9 +119,9 @@ pub fn compress(
         const slope: f64 = 0.0;
         const intercept = value;
 
-        try appendValue(usize, current_segment_start, compressed_values);
         try appendValue(f64, slope, compressed_values);
         try appendValue(f64, intercept, compressed_values);
+        try appendValue(usize, current_segment_start, compressed_values);
     }
 }
 
@@ -131,7 +131,7 @@ pub fn decompress(
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
 ) Error!void {
-    // The compressed representation is composed of three values: (end_index, slope, intercept).
+    // The compressed representation is composed of three values: (slope, intercept, end_index).
     // all of type 64-bit float.
     if (compressed_values.len % 24 != 0) return Error.UnsupportedInput;
 
@@ -140,9 +140,9 @@ pub fn decompress(
     var segment_start: usize = 0;
 
     while (field_index + 2 < fields.len) : (field_index += 3) {
-        const segment_end = @as(usize, @bitCast(fields[field_index]));
-        const slope = fields[field_index + 1];
-        const intercept = fields[field_index + 2];
+        const slope = fields[field_index];
+        const intercept = fields[field_index + 1];
+        const segment_end = @as(usize, @bitCast(fields[field_index + 2]));
         if (segment_start + 1 != segment_end) {
             for (segment_start..segment_end + 1) |t| {
                 const x = @as(f64, @floatFromInt(t));
@@ -358,8 +358,8 @@ test "abc compressor identifies correct ABC points in the convex hull of a bigge
 
     // Interpret the compressed bytes as values
     const fields = std.mem.bytesAsSlice(f64, compressed_values.items);
-    const slope = fields[1];
-    const intercept = fields[2];
+    const slope = fields[0];
+    const intercept = fields[1];
 
     try testing.expect(@abs(slope - 0.036) <= 0.1);
     try testing.expect(@abs(intercept - 3.43) <= 0.1);
