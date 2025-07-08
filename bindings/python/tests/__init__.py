@@ -68,27 +68,12 @@ class MethodEnumMatchTest(unittest.TestCase):
     c_file = repo_root / 'bindings' / 'c' / 'tersets.h'
     zig_file = repo_root / 'src' / 'tersets.zig'
     zig_enum_pattern = r"pub const Method = enum\s*{([^}]*)}"
+    c_enum_pattern = r"enum\s+Method\s*{([^}]*)}"
 
-    def test_c_and_python_method_enum_matches_zig(self):
-        zig_methods = self._extract_enum_from_tersets()
-        python_methods = [member.name for member in Method]
-
-        self.assertEqual(zig_methods, python_methods)
-        for i, member in enumerate(Method):
-            self.assertEqual(i, member.value)
-
-    def test_c_method_enum_matches_zig(self):
-        c_methods = self._extract_enum_from_tersets()
-        c_values = self._extract_enum_values_from_c()
-        zig_methods = self._extract_enum_from_tersets()
-
-        self.assertEqual(zig_methods, c_methods)
-        self.assertEqual(list(range(len(c_methods))), c_values)
-    
-    def _extract_enum_from_tersets(self) -> list[str]:
-        content = self.zig_file.read_text()
-        match = re.search(self.zig_enum_pattern, content, re.MULTILINE)
-        self.assertIsNotNone(match, f'Could not find Method enum')
+    def _extract_enum_from_file(self, file_path: pathlib.Path, pattern: str) -> list[str]:
+        content = file_path.read_text()
+        match = re.search(pattern, content, re.MULTILINE)
+        self.assertIsNotNone(match, f'Could not find Method enum in {file_path.name}')
         body = match.group(1)
         enum_members = []
         for line in body.splitlines():
@@ -100,10 +85,10 @@ class MethodEnumMatchTest(unittest.TestCase):
                 else:
                     enum_members.append(line)
         return enum_members
-    
-    def _extract_enum_values_from_c(self) -> list[int]:
-        content = self.c_file.read_text()
-        match = re.search(r"enum\s+Method\s*{([^}]*)}", content, re.MULTILINE)
+
+    def _extract_enum_values_from_c(self, file_path: pathlib.Path) -> list[int]:
+        content = file_path.read_text()
+        match = re.search(self.c_enum_pattern, content, re.MULTILINE)
         self.assertIsNotNone(match, 'Could not find enum Method in C header')
         body = match.group(1)
         values = []
@@ -118,3 +103,16 @@ class MethodEnumMatchTest(unittest.TestCase):
             values.append(next_value)
             next_value += 1
         return values
+
+    def test_c_and_python_enum_matches_zig(self):
+        """Test that the C Method enum matches the Zig Method enum"""
+        c_methods = self._extract_enum_from_file(self.c_file, self.c_enum_pattern)
+        c_values = self._extract_enum_values_from_c(self.c_file)
+        zig_methods = self._extract_enum_from_file(self.zig_file, self.zig_enum_pattern)
+        python_methods = [member.name for member in Method]
+
+        self.assertEqual(zig_methods, c_methods)
+        self.assertEqual(list(range(len(c_methods))), c_values)
+        self.assertEqual(zig_methods, python_methods)
+        for i, member in enumerate(Method):
+            self.assertEqual(i, member.value)
