@@ -68,10 +68,18 @@ pub fn compress(
     var quantized_values = ArrayList(usize).init(allocator);
     defer quantized_values.deinit();
 
+    const raw_bits_min_value: usize = floatBitsOrdered(min_val);
     // Quantize and shift values (ensure all quantized values are >= 0).
+    var quantized_value: usize = 0;
     for (uncompressed_values) |value| {
         // Bucket quantization: round to nearest multiple.
-        const quantized_value: usize = @intFromFloat(@floor((value - min_val) / bucket_size + 0.5));
+        if (error_bound == 0.0) {
+            // If error bound is zero.
+            const raw_bits_value: usize = floatBitsOrdered(value);
+            quantized_value = raw_bits_value - raw_bits_min_value;
+        } else {
+            quantized_value = @intFromFloat(@floor((value - min_val) / bucket_size + 0.5));
+        }
         try quantized_values.append(quantized_value);
     }
 
@@ -122,6 +130,10 @@ pub fn decompress(
     // Create a bit reader from remaining bytes.
     var stream = std.io.fixedBufferStream(compressed_values[12..]);
     var bit_reader = std.io.bitReader(.little, stream.reader());
+    var decompressed_value: f64 = 0.0;
+
+    // Convert the offset to an ordered bit value.
+    const bits_ordered_offset = floatBitsOrdered(offset);
 
     // Read each quantized value based on fixed-length header.
     while (true) {
@@ -156,9 +168,15 @@ pub fn decompress(
             }
         }
 
-        // Reconstruct value from quantized_value and append to decompressed_value.
-        const val = offset + @as(f64, @floatFromInt(quantized_value)) * bucket_size;
-        try decompressed_values.append(val);
+        if (bucket_size == 0.0) {
+            // If bucket size is zero, we assume the values were not quantized and are stored as raw bits.
+            const raw_bits = quantized_value + bits_ordered_offset;
+            decompressed_value = orderedBitsToFloat(raw_bits);
+        } else {
+            // Reconstruct value from quantized_value and append to decompressed_value.
+            decompressed_value = offset + @as(f64, @floatFromInt(quantized_value)) * bucket_size;
+        }
+        try decompressed_values.append(decompressed_value);
     }
 }
 
@@ -176,6 +194,29 @@ fn appendValue(comptime T: type, value: T, compressed_values: *ArrayList(u8)) !v
         },
         else => @compileError("Unsupported type for append value function"),
     }
+}
+
+/// Convert a floating-point `value` to its bit representation, ensuring the sign bit is preserved
+/// in the most significant bit. This is useful for comparing floating-point values in a way that
+/// respects their ordering, including negative values. The function returns the bit representation
+/// as a `u64`, where the sign bit is preserved in the most significant bit.
+fn floatBitsOrdered(value: f64) u64 {
+    const value_bits: u64 = @bitCast(value);
+    // If negative: flip all bits (mirror to top range).
+    return if ((value_bits >> 63) == 1)
+        ~value_bits
+    else
+        value_bits | (@as(u64, 1) << 63);
+}
+
+/// Convert a bit representation of a floating-point `value_bits` back to its original `f64` value,
+/// ensuring the sign bit is restored correctly. This is useful for decompressing values that were
+/// quantized and bit-packed, preserving the original ordering of the floating-point values.
+fn orderedBitsToFloat(value_bits: u64) f64 {
+    return if ((value_bits >> 63) == 1)
+        @bitCast(value_bits & ~(@as(u64, 1) << 63))
+    else
+        @bitCast(~value_bits);
 }
 
 test "bitpacked quantization can compress and decompress bounded values" {
@@ -211,6 +252,29 @@ test "bitpacked quantization can compress and decompress bounded values at diffe
     try tester.generateBoundedRandomValues(&uncompressed_values, -1e4, 1e4, undefined);
     try tester.generateBoundedRandomValues(&uncompressed_values, -1e6, 1e6, undefined);
     try tester.generateBoundedRandomValues(&uncompressed_values, -1e8, 1e8, undefined);
+
+    try tester.testCompressAndDecompress(
+        uncompressed_values.items,
+        allocator,
+        Method.BitPackedQuantization,
+        error_bound,
+        tersets.isWithinErrorBound,
+    );
+}
+
+test "bitpacked quantization can compress and decompress with zero error bound at different scales" {
+    const allocator = testing.allocator;
+    const error_bound = 0;
+
+    var uncompressed_values = ArrayList(f64).init(allocator);
+    defer uncompressed_values.deinit();
+
+    try tester.generateBoundedRandomValues(&uncompressed_values, -1, 1, undefined);
+    try tester.generateBoundedRandomValues(&uncompressed_values, -1e2, 1e2, undefined);
+    try tester.generateBoundedRandomValues(&uncompressed_values, -1e4, 1e4, undefined);
+    try tester.generateBoundedRandomValues(&uncompressed_values, -1e6, 1e6, undefined);
+    try tester.generateBoundedRandomValues(&uncompressed_values, -1e8, 1e8, undefined);
+    try tester.generateBoundedRandomValues(&uncompressed_values, -1e14, 1e14, undefined);
 
     try tester.testCompressAndDecompress(
         uncompressed_values.items,
