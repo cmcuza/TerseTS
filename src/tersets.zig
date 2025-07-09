@@ -27,6 +27,7 @@ const abc_linear_approximation = @import("functional_approximation/abc_linear_ap
 const vw = @import("line_simplification/visvalingam_whyatt.zig");
 const sliding_window = @import("line_simplification/sliding_window.zig");
 const bottom_up = @import("line_simplification/bottom_up.zig");
+const rle_enconding = @import("lossless_encoding/run_length_encoding.zig");
 
 /// The errors that can occur in TerseTS.
 pub const Error = error{
@@ -54,6 +55,7 @@ pub const Method = enum {
     SlidingWindow,
     BottomUp,
     MixPiece,
+    RunLengthEncoding,
 };
 
 /// Compress `uncompressed_values` within `error_bound` using `method` and returns the results
@@ -171,6 +173,9 @@ pub fn compress(
                 error_bound,
             );
         },
+        .RunLengthEncoding => {
+            try rle_enconding.compress(uncompressed_values, &compressed_values);
+        },
     }
     try compressed_values.append(@intFromEnum(method));
     return compressed_values;
@@ -226,6 +231,9 @@ pub fn decompress(
         },
         .BottomUp => {
             try bottom_up.decompress(compressed_values_slice, &decompressed_values);
+        },
+        .RunLengthEncoding => {
+            try rle_enconding.decompress(compressed_values_slice, &decompressed_values);
         },
     }
 
