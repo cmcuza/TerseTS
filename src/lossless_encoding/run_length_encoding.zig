@@ -106,21 +106,11 @@ test "run length encoding compresses repeated values" {
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
 
-    const distinct_elements: usize = @intFromFloat(@round(tester.generateBoundedRandomValue(
-        f64,
-        10,
-        50,
-        undefined,
-    )));
+    const distinct_elements: usize = tester.generateBoundRandomInteger(usize, 10, 50, undefined);
 
     for (0..distinct_elements) |_| {
         const random_value = tester.generateBoundedRandomValue(f64, -1e-16, 1e16, undefined);
-        const repeat: usize = @intFromFloat(@round(tester.generateBoundedRandomValue(
-            f64,
-            10,
-            20,
-            undefined,
-        )));
+        const repeat: usize = tester.generateBoundRandomInteger(usize, 10, 20, undefined);
         for (0..repeat) |_| {
             try uncompressed_values.append(random_value);
         }

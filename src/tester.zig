@@ -245,14 +245,25 @@ pub fn generateRandomLinearFunction(uncompressed_values: *ArrayList(f64), random
     }
 }
 
-/// Return a random `f64` value between `lower_bound` and `upper_bound` for
-/// use in testing using `random`.
-pub fn generateBoundedRandomValue(comptime T: type, lower_bound: T, upper_bound: T, random_opt: ?Random) T {
+/// Returns an evenly distributed random float of type `T` for use in testing using `random`.
+/// The returned float is `at_least` <= f <= `at_most`.
+pub fn generateBoundedRandomValue(comptime T: type, at_least: T, at_most: T, random_opt: ?Random) T {
     const seed: u64 = @bitCast(time.milliTimestamp());
     var prng = std.Random.DefaultPrng.init(seed);
     var random = random_opt orelse prng.random();
 
     const rand_value: T = random.float(T);
-    const bounded_value = lower_bound + (upper_bound - lower_bound) * rand_value;
+    const bounded_value = at_least + (at_most - at_least) * rand_value;
     return bounded_value;
+}
+
+/// Returns an evenly distributed random integer of type `T` for use in testing using `random`.
+/// The returned integer is `at_least` <= i <= `at_most`.
+pub fn generateBoundRandomInteger(comptime T: type, at_least: T, at_most: T, random_opt: ?Random) T {
+    const seed: u64 = @bitCast(time.milliTimestamp());
+    var prng = std.Random.DefaultPrng.init(seed);
+    var random = random_opt orelse prng.random();
+
+    const rand_value: T = random.intRangeAtMost(T, at_least, at_most);
+    return rand_value;
 }
