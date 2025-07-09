@@ -12,7 +12,7 @@ We recommend consulting the relevant README and source file for language-specifi
 | C        | [src/capi.zig](../src/capi.zig) and [c header](../bindings/c/tersets.h) comments |
 | Python   | [bindings/python/README.md](../bindings/python/README.md) |
 
-## 3. Development Tools and Checks
+## 2. Development Tools and Checks
 - Run [`tools/pre-commit`](../tools/pre-commit) before every commit. It:
   - Builds the library (`Debug` and `ReleaseFast`)
   - Runs Zig and Python tests
@@ -41,7 +41,7 @@ We recommend consulting the relevant README and source file for language-specifi
 <details>
 <summary><strong>Zig Contributing Steps</strong></summary>
 
-### 🧩 Add a New Compression Method
+#### 🧩 Add a New Compression Method
 
 In the `src/` directory, compression methods are organized by category. These categories are inspired by the following papers:
 
@@ -76,7 +76,7 @@ Current categories:
 
 📌 **Note:** Add the new method to `tersets.Method` and expose the `compress` and `decompress` function in `src/tersets.zig`. 
 
-### 🧱 File Structure Guidelines
+#### 🧱 File Structure Guidelines
 
 Every source file containing a new compression method must follow this convention:
   - `enum` and `struct` without methods are first.
@@ -96,7 +96,7 @@ Example:
 // 6. test cases at the end 
 ```
 
-### 📏 Function Signature Guidelines
+#### 📏 Function Signature Guidelines
 For consistency across TerseTS, follow this recommended signature:
 ```c
 /// Compress `uncompressed_values` within `error_bound` using "[METHOD]". The function writes the 
@@ -121,7 +121,26 @@ pub fn decompress(
 
 📌 If the allocator or error bound are not needed, they can be removed from the signature. 
 
-### 🛠️ Adding Utility Functions
+
+<a id="zig-error-codes"></a>
+#### ⚠️ Zig Error Codes 
+
+Errors in the Zig core are mapped to C-friendly integer codes in `capi.zig`:
+
+| Code | Zig Error                 | Meaning                              |
+|------|----------------------------|---------------------------------------|
+| 0    | —                          | Success                               |
+| 1    | `Error.UnknownMethod`      | Unsupported compression method        |
+| 2    | `Error.UnsupportedInput`  | No/unexpected input data              |
+| 3    | `Error.UnsupportedErrorBound` | Negative error bound              |
+| 4    | `Error.OutOfMemory`       | Allocation failure                    |
+| 5    | `Error.ItemNotFound`      | Missing data or lookup failure        |
+| 6    | `Error.EmptyConvexHull`   | Convex hull utility received no data  |
+| 7    | `Error.EmptyQueue`        | Priority queue utility empty          |
+
+📌 If a new `Error` code is needed, mention it in the PR description.
+
+#### 🛠️ Adding Utility Functions
 
 Shared logic that’s not specific to a single compression method should go in the `src/utilities/` folder. Current files include:
 
@@ -138,7 +157,7 @@ Shared logic that’s not specific to a single compression method should go in t
 - `src/utilities/shared_functions.zig`  
   Contains common helper functions like appending values to a list and bit casting.
 
-### ✅ Best Practices for Utilities
+#### ✅ Best Practices for Utilities
 
 - **One responsibility per file:** Keep modules cohesive and focused.
 - **Prefer reuse:** Import utilities rather than duplicating code.
@@ -146,23 +165,6 @@ Shared logic that’s not specific to a single compression method should go in t
 - **Testing:** Add tests to illustrate and validate the behaviour when necessary.
 
 📌 If you add a new utility that becomes broadly useful, mention it in the PR description.
-
-### ⚠️ Zig Error Codes 
-
-Errors in the Zig core are mapped to C-friendly integer codes in `capi.zig`:
-
-| Code | Zig Error                 | Meaning                              |
-|------|----------------------------|---------------------------------------|
-| 0    | —                          | Success                               |
-| 1    | `Error.UnknownMethod`      | Unsupported compression method        |
-| 2    | `Error.UnsupportedInput`  | No/unexpected input data              |
-| 3    | `Error.UnsupportedErrorBound` | Negative error bound              |
-| 4    | `Error.OutOfMemory`       | Allocation failure                    |
-| 5    | `Error.ItemNotFound`      | Missing data or lookup failure        |
-| 6    | `Error.EmptyConvexHull`   | Convex hull utility received no data  |
-| 7    | `Error.EmptyQueue`        | Priority queue utility empty          |
-
-
 </details>
 
 <a id="c-specific"></a>
@@ -178,7 +180,7 @@ The C API in `bindings/c/tersets.h` mirrors Zig’s compression methods via:
 
 #### 🛠 Binding a New Method
 1. If you add a new method in Zig, ensure the C `enum Method` gains the new entry (matching name & value).
-2. If the method fits entirely in Zig without C exposure, you don’t need to touch C.
+2. You do not need to modify anything else in C.
 
 #### ✅ API Conventions
 
@@ -189,21 +191,123 @@ int32_t compress(
     struct Configuration config
 );
 ```
+Error return codes are defined in the Zig layer and passed through the C API.
+
+➡️ See [Zig Error Codes](#zig-error-codes) for a full list of meanings.
 
 </details>
 
 <a id="python-specific"></a>
 <details>
 <summary><strong>Python Contributing Steps</strong></summary>
-sdsd
+
+#### 🐍 Python API Overview
+Public functions:
+
+```python
+compress(values: List[float], method: Method, error_bound: float) -> bytes
+decompress(data: bytes) -> List[float]
+```
+
+These wrap the `C API` via `ctypes`, loading the shared library built by Zig.
+
+#### 🔍 Adding a Method in Python
+After adding the new method in Zig:
+* Add it to the Python’s `Method` enum.
+* Add tests to confirm it works via compress/decompress.
+
 </details>
 
-## 4. Tests
-- Zig tests live in `src/tester.zig` and can be run with `zig build test src/capi.zig`.
-- Python tests live in `bindings/python/tests` and run via `python3 -m unittest . `.
-- Include tests for new features or bug fixes.
+## 5. Other Binding Contributions
 
-## 5. Git Commit Conventions
+We welcome improvements and new features in the C and Python bindings—including better error messages, usability improvements, or helper functions.
+
+However, please note:
+
+* 🧩 **Keep bindings thin:** Bindings should reflect the Zig core behavior as closely as possible.
+
+* 📦 **No external dependencies:** Do not introduce new runtime or build-time dependencies (e.g., Python packages, C libraries) unless there is a very strong justification and it is essential to the functionality.
+
+* 🧾 **Justify structural changes:** If you propose changes to how bindings are organized, loaded, or called, please clearly explain the motivation and benefit in the pull request description.
+
+## 6. Tests
+All compression methods must be validated using the unified testing framework in `src/tester.zig`.
+
+This file contains:
+- Utility functions for generating test data (e.g., linear, sinusoidal, bounded random)
+- High-level test runners like `testErrorBoundedCompressionMethod` and `testGenerateCompressAndDecompress`
+- A set of error-bounded compression checks
+- `NaN/infinity` injection for stress testing
+- Tools for narrowing down minimal failing subsequences
+
+#### 🧪 How to Add Tests
+
+When implementing a new method (e.g., `Method.MyNewMethod`), you should:
+1. Add `test` blocks in your compression method file (e.g., `my_new_method.zig`):
+2. Use `testErrorBoundedCompressionMethod` with multiple data distributions. Example:
+    ```c
+    test "mynewmethod supports bounded error compression across distributions" {
+       const allocator = testing.allocator;
+       const data_distributions = &[_]tester.DataDistribution{
+           .FiniteRandomValues,
+           .LinearFunctions,
+           .BoundedRandomValues,
+           .SinusoidalFunction,
+           .LinearFunctionsWithNansAndInfinities,
+           .RandomValuesWithNansAndInfinities,
+       };
+       try tester.testErrorBoundedCompressionMethod(
+           allocator,
+           Method.MyNewMethod,
+           data_distributions,
+       );
+    }
+3. Use `testGenerateCompressAndDecompress` with `error_bound = 0`. Example:
+    ```c
+    test "mynewmethod can compress and decompress with zero error" {
+       const allocator = testing.allocator;
+       try tester.testGenerateCompressAndDecompress(
+           allocator,
+           tester.generateRandomValues,
+           Method.MyNewMethod,
+           0,
+           tersets.isWithinErrorBound,
+       );
+    }
+    ```
+
+#### ⚠️ Methods with Input Constraints
+
+Some methods may not support all data types (e.g., `NaN`, `inf`, high-magnitude floats). This is acceptable as long as:
+
+* The test suite excludes unsupported distributions.
+* You add explicit negative tests that check failure modes and confirm appropriate errors are raised.
+
+Example:
+```c
+test "my-method cannot compress nan values" {
+    const data = &[4]f64{ 1.0, math.nan(f64), 3.0, 4.0 };
+    var buffer = ArrayList(u8).init(testing.allocator);
+    defer buffer.deinit();
+
+    compress(data, &buffer, testing.allocator, 0.1) catch |err| {
+        try testing.expectEqual(Error.UnsupportedInput, err);
+        return;
+    };
+
+    try testing.expectFmt("", "Expected error not triggered", .{});
+}
+```
+
+#### 🔍 Specialized Behavior
+Some methods may require additional tests beyond correctness:
+* Compression efficiency (e.g. merging, segment length control).
+* Internal structure properties (e.g. monotonicity, convexity).
+* Stress tests with large or adversarial inputs.
+
+You are encouraged to add dedicated test blocks for these in the same `.zig` file.
+
+## 7. Git Commit Conventions
 
 - Use short, imperative summaries (e.g., “Add swing filter compression”).
 - Explain *why* the change is needed, not just *what* changed.
@@ -212,6 +316,25 @@ sdsd
 See [cbea.ms/git-commit](https://cbea.ms/git-commit/) for a quick guide.
 
 
-## 6. Pull Requests
-- Ensure `tools/pre-commit` passes locally before creating a PR.
-- PRs trigger GitHub Actions to build, lint, and test on multiple platforms.
+## 8. Pull Requests
+We welcome PRs of all sizes, but please follow these guidelines:
+
+- **Describe what the PR does**: include a summary of the feature or fix.
+- **Explain why it’s needed**: especially if it introduces a new method, category, or utility.
+- **Reference related issues** using `Fixes #123` or `Closes #123`.
+- **Run `tools/pre-commit` locally** to catch issues early.
+- **Link to papers** if you’re implementing an algorithm from a publication.
+- **Avoid adding dependencies** unless justified (see note under “Bindings”).
+
+📌 Need help structuring your PR? See [Pull Request Template](PULL_REQUEST_TEMPLATE.md).
+
+
+## 9. Filing Issues
+
+When opening an issue, please:
+
+- Describe the problem clearly (what you expected vs. what happened).
+- Include example data or steps to reproduce, if possible.
+- Mention your system, Zig version, and how you built the project.
+
+Use labels (bug, enhancement, question, etc.) to help triage faster.
