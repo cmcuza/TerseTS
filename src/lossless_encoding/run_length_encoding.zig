@@ -106,6 +106,8 @@ test "run length encoding compresses repeated values" {
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
 
+    // Generate a random number of `distinct_elements` that will be repeated a random number of time
+    // to test that RLE can compress repeated values.
     const distinct_elements: usize = tester.generateBoundRandomInteger(usize, 10, 50, undefined);
 
     for (0..distinct_elements) |_| {
