@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Implementation of the "Fixed-width Uniform Quantization Method" based on the description at
-//! https://en.wikipedia.org/wiki/Quantization_(signal_processing). Directly after quantization,
-//! the values are bit-packed using a "Fixed-Length Bit-Packing Scheme" based on the decription
-//! at https://kinematicsoup.com/news/2016/9/6/data-compression-bit-packing-101. The combination
-//! of quantization of bit-packing has been shown to be effective in compressing time series data.
-//! More information in the paper: "Serf: Streaming Error-Bounded Floating-Point Compression".
-//! by Li, Ruiyuan, et al. SIGMOD 2025, 1-27, https://doi.org/10.1145/3725353.
+//! Implementation of a basic fixed-width uniform quantization scheme followed by fixed-length
+//! bit-packing to compress floating-point values. Quantization follows the standard scalar
+//! quantization approach described in:
+//! Gray & Neuhoff, "Quantization", IEEE Trans. Info. Theory, 1998.
+//! https://doi.org/10.1109/18.720541.
+//! Bit-packing follows common techniques for efficient integer encoding, as seen in:
+//! Lemire et al., "SIMD Compression and the Intersection of Sorted Integers", 2016.
+//! https://doi.org/10.1002/spe.2326.
 
 const std = @import("std");
 const ArrayList = std.ArrayList;
@@ -68,16 +69,22 @@ pub fn compress(
     var quantized_values = ArrayList(usize).init(allocator);
     defer quantized_values.deinit();
 
-    const raw_bits_min_value: usize = floatBitsOrdered(min_val);
-    // Quantize and shift values (ensure all quantized values are >= 0).
+    const usize_min_value: usize = floatBitsOrdered(min_val);
+
+    // Quantize each value by mapping it to a discrete bucket index.
+    // If the error_bound is zero, we compute the difference between the
+    // raw bit patterns of the value and the minimum value, ensuring all
+    // resulting integers are >= 0. This allows storing them efficiently.
+    // For non-zero error_bound, we apply fixed-width bucket quantization
+    // using the defined bucket size (2 × error_bound).
     var quantized_value: usize = 0;
     for (uncompressed_values) |value| {
-        // Bucket quantization: round to nearest multiple.
         if (error_bound == 0.0) {
-            // If error bound is zero.
-            const raw_bits_value: usize = floatBitsOrdered(value);
-            quantized_value = raw_bits_value - raw_bits_min_value;
+            // Bit-diff quantization for lossless case.
+            const usize_value: usize = floatBitsOrdered(value);
+            quantized_value = usize_value - usize_min_value;
         } else {
+            // Fixed-width bucket quantization with rounding.
             quantized_value = @intFromFloat(@floor((value - min_val) / bucket_size + 0.5));
         }
         try quantized_values.append(quantized_value);
@@ -124,7 +131,7 @@ pub fn decompress(
     if (compressed_values.len < 12) return Error.UnsupportedInput;
 
     // Read min_val and bucket_size from the header.
-    const offset: f64 = @bitCast(compressed_values[0..8].*);
+    const min_val: f64 = @bitCast(compressed_values[0..8].*);
     const bucket_size: f32 = @bitCast(compressed_values[8..12].*);
 
     // Create a bit reader from remaining bytes.
@@ -132,19 +139,21 @@ pub fn decompress(
     var bit_reader = std.io.bitReader(.little, stream.reader());
     var decompressed_value: f64 = 0.0;
 
-    // Convert the offset to an ordered bit value.
-    const bits_ordered_offset = floatBitsOrdered(offset);
+    // Convert min_val to its ordered bit representation.
+    // “Ordered bit representation” means a transformation that makes float bits sortable as integers.
+    // This ensures correct decoding when using raw bit differences.
+    const bits_ordered_min_val = floatBitsOrdered(min_val);
 
     // Read each quantized value based on fixed-length header.
     while (true) {
-        // Read the first two bits to determine the length of the quantized value.
-        // If the stream ends before reading the bits, we break the loop.
-        const header_1: u8 = bit_reader.readBitsNoEof(u8, 1) catch break;
-        const header_2: u8 = bit_reader.readBitsNoEof(u8, 1) catch break;
+        // Read two control bits that encode the length of the upcoming value.
+        // If the stream ends before reading them, we break the loop.
+        const length_prefix_1: u8 = bit_reader.readBitsNoEof(u8, 1) catch break;
+        const length_prefix_2: u8 = bit_reader.readBitsNoEof(u8, 1) catch break;
         var quantized_value: usize = 0;
 
-        if (header_1 == 0) {
-            if (header_2 == 0) {
+        if (length_prefix_1 == 0) {
+            if (length_prefix_2 == 0) {
                 // 1-byte value.
                 quantized_value = bit_reader.readBitsNoEof(u8, 8) catch |err| {
                     // The loop termination condition is too optimistic since some padding higher
@@ -159,7 +168,7 @@ pub fn decompress(
                 quantized_value = bit_reader.readBitsNoEof(u16, 16) catch return Error.ByteStreamError;
             }
         } else {
-            if (header_2 == 0) {
+            if (length_prefix_2 == 0) {
                 // 4-byte value.
                 quantized_value = bit_reader.readBitsNoEof(u32, 32) catch return Error.ByteStreamError;
             } else {
@@ -169,12 +178,12 @@ pub fn decompress(
         }
 
         if (bucket_size == 0.0) {
-            // If bucket size is zero, we assume the values were not quantized and are stored as raw bits.
-            const raw_bits = quantized_value + bits_ordered_offset;
-            decompressed_value = orderedBitsToFloat(raw_bits);
+            // If bucket size is zero, we assume the values were not quantized and are stored as usize directy.
+            const raw_usize = quantized_value + bits_ordered_min_val;
+            decompressed_value = orderedBitsToFloat(raw_usize);
         } else {
             // Reconstruct value from quantized_value and append to decompressed_value.
-            decompressed_value = offset + @as(f64, @floatFromInt(quantized_value)) * bucket_size;
+            decompressed_value = min_val + @as(f64, @floatFromInt(quantized_value)) * bucket_size;
         }
         try decompressed_values.append(decompressed_value);
     }
@@ -196,10 +205,10 @@ fn appendValue(comptime T: type, value: T, compressed_values: *ArrayList(u8)) !v
     }
 }
 
-/// Convert a floating-point `value` to its bit representation, ensuring the sign bit is preserved
+/// Convert a floating f64 `value` to its u64 representation, ensuring the sign bit is preserved
 /// in the most significant bit. This is useful for comparing floating-point values in a way that
-/// respects their ordering, including negative values. The function returns the bit representation
-/// as a `u64`, where the sign bit is preserved in the most significant bit.
+/// respects their ordering, including negative values. The function returns the `u64`, where the
+/// sign bit is preserved in the most significant bit.
 fn floatBitsOrdered(value: f64) u64 {
     const value_bits: u64 = @bitCast(value);
     // If negative: flip all bits (mirror to top range).
@@ -209,14 +218,14 @@ fn floatBitsOrdered(value: f64) u64 {
         value_bits | (@as(u64, 1) << 63);
 }
 
-/// Convert a bit representation of a floating-point `value_bits` back to its original `f64` value,
-/// ensuring the sign bit is restored correctly. This is useful for decompressing values that were
-/// quantized and bit-packed, preserving the original ordering of the floating-point values.
-fn orderedBitsToFloat(value_bits: u64) f64 {
-    return if ((value_bits >> 63) == 1)
-        @bitCast(value_bits & ~(@as(u64, 1) << 63))
+/// Convert a u64 `value` back to its original `f64` representation, ensuring the sign bit is
+/// restored correctly. This is useful for decompressing values that were quantized and
+/// bit-packed, preserving the original ordering of the floating-point values.
+fn orderedBitsToFloat(value: u64) f64 {
+    return if ((value >> 63) == 1)
+        @bitCast(value & ~(@as(u64, 1) << 63))
     else
-        @bitCast(~value_bits);
+        @bitCast(~value);
 }
 
 test "bitpacked quantization can compress and decompress bounded values" {
