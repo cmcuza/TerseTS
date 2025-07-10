@@ -234,7 +234,7 @@ test "bitpacked quantization can compress and decompress bounded values" {
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
 
-    // Generate 500 random values within the range of -1e7 to 1e7.
+    // Generate 500 random values within the range of -1e13 to 1e13.
     for (0..5) |_| {
         try tester.generateBoundedRandomValues(&uncompressed_values, -1e13, 1e13, undefined);
     }
