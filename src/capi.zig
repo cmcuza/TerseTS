@@ -107,6 +107,7 @@ fn errorToInt(err: Error) i32 {
         Error.ItemNotFound => return 5,
         Error.EmptyConvexHull => return 6,
         Error.EmptyQueue => return 7,
+        Error.ByteStreamError => return 8,
     }
 }
 
