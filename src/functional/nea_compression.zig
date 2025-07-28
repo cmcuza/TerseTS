@@ -32,354 +32,57 @@ const Method = tersets.Method;
 const shared_structs = @import("../utilities/shared_structs.zig");
 const DiscretePoint = shared_structs.DiscretePoint;
 
-/// Point structure for polygon vertices (can handle negative coordinates)
-const PolygonPoint = struct {
-    x: f64,
-    y: f64,
-};
-
-/// Parameter structure for segment creation
-const Parameters = struct {
-    param1: f64,
-    param2: f64,
-};
-
-/// Edge information for shortest path reconstruction
-const EdgeInfo = struct {
-    prev_node: usize,
-    segment: Segment,
-};
-
-/// Function types supported by NeaTS
-const FunctionType = enum(u8) {
-    Linear = 0,
-    Quadratic = 1,
-    Exponential = 2,
-    Power = 3,
-    Sqrt = 4,
-};
-
-/// Active segment tracking (corresponds to Jf,ε in Algorithm 1)
-const ActiveSegment = struct {
-    start_idx: usize,
-    end_idx: usize,
-    function_type: FunctionType,
-    epsilon: f64,
-    polygon: ConvexPolygon,
-    best_params: ?Parameters,
-    allocator: mem.Allocator,
-
-    fn init(start_idx: usize, function_type: FunctionType, epsilon: f64, allocator: mem.Allocator) ActiveSegment {
-        return ActiveSegment{
-            .start_idx = start_idx,
-            .end_idx = start_idx + 1, // Initially covers just the first point
-            .function_type = function_type,
-            .epsilon = epsilon,
-            .polygon = ConvexPolygon.init(allocator),
-            .best_params = null,
-            .allocator = allocator,
-        };
-    }
-
-    fn deinit(self: *ActiveSegment) void {
-        self.polygon.deinit();
-    }
-
-    fn extendTo(self: *ActiveSegment, data: []const f64, new_end: usize) !bool {
-        // Try to extend segment to new_end using O'Rourke's algorithm
-        const k = new_end - 1; // Current data point index
-        const x_k = @as(f64, @floatFromInt(k - self.start_idx)); // 0-based relative coordinate
-        const y_k = data[k];
-
-        std.debug.print("  Trying to extend segment [{}, {}) to include point {} (x={:.1}, y={:.1})\n", .{ self.start_idx, self.end_idx, k, x_k, y_k });
-
-        // Transform constraints based on function type (Table I from paper)
-        const transformed_constraint: ?TransformedConstraint = switch (self.function_type) {
-            .Linear => TransformedConstraint{
-                .m_coeff = -x_k,
-                .lower = y_k - self.epsilon,
-                .upper = y_k + self.epsilon,
-            },
-            .Quadratic => blk: {
-                if (x_k <= 0.0) break :blk null; // skip x=0 for quadratic
-                // For quadratic f(x) = θ₁x² + θ₂ from the paper
-                // Constraint: y_k - ε ≤ θ₁x_k² + θ₂ ≤ y_k + ε
-                // Rearrange to: (y_k - ε) ≤ (-x_k²)θ₁ + θ₂ ≤ (y_k + ε)
-                const m_coeff = -(x_k * x_k); // coefficient of θ₁
-                const lower = y_k - self.epsilon;
-                const upper = y_k + self.epsilon;
-                break :blk TransformedConstraint{ .m_coeff = m_coeff, .lower = lower, .upper = upper };
-            },
-            .Exponential => if (y_k - self.epsilon > 0 and y_k + self.epsilon > 0) TransformedConstraint{
-                .m_coeff = -x_k,
-                .lower = @log(y_k - self.epsilon),
-                .upper = @log(y_k + self.epsilon),
-            } else null,
-            .Power => if (x_k > 0 and y_k - self.epsilon > 0 and y_k + self.epsilon > 0) TransformedConstraint{
-                .m_coeff = -@log(x_k),
-                .lower = @log(y_k - self.epsilon),
-                .upper = @log(y_k + self.epsilon),
-            } else null,
-            .Sqrt => TransformedConstraint{
-                .m_coeff = -@sqrt(@max(0, x_k)),
-                .lower = y_k - self.epsilon,
-                .upper = y_k + self.epsilon,
-            },
-        };
-
-        if (transformed_constraint) |tc| {
-            std.debug.print("    Constraint: {:.3} <= {:.3}*m + b <= {:.3}\n", .{ tc.lower, tc.m_coeff, tc.upper });
-            // Add half-plane constraints to polygon
-            try self.polygon.addConstraint(tc.m_coeff, tc.lower, true); // Lower bound
-            try self.polygon.addConstraint(tc.m_coeff, tc.upper, false); // Upper bound
-
-            if (!self.polygon.isEmpty()) {
-                std.debug.print("    Extension SUCCESS to {}\n", .{new_end});
-                self.end_idx = new_end;
-                if (self.polygon.getFeasiblePoint()) |point| {
-                    self.best_params = transformParameters(point, self.function_type);
-                }
-                return true;
-            } else {
-                std.debug.print("    Extension FAILED - polygon empty\n", .{});
-            }
-        }
-        return false;
-    }
-
-    fn isValidAt(self: *const ActiveSegment, pos: usize) bool {
-        return pos >= self.start_idx and pos < self.end_idx and self.best_params != null;
-    }
-
-    fn getCostForRange(self: *const ActiveSegment, start: usize, end: usize, data: []const f64) usize {
-        if (self.best_params == null) return std.math.maxInt(usize);
-
-        const params = self.best_params.?;
-
-        // Calculate actual residuals for this function fit
-        var max_residual: f64 = 0;
-        for (start..end) |i| {
-            const x = @as(f64, @floatFromInt(i - self.start_idx));
-            const predicted = switch (self.function_type) {
-                .Linear => params.param1 * x + params.param2,
-                .Quadratic => params.param1 * x * x + params.param2,
-                .Exponential => if (params.param2 > 0) params.param2 * @exp(params.param1 * x) else 0,
-                .Power => if (x > 0 and params.param2 > 0) params.param2 * std.math.pow(f64, x, params.param1) else 0,
-                .Sqrt => params.param1 * @sqrt(@max(0, x)) + params.param2,
-            };
-            const actual = data[i]; // You'll need to pass data as a parameter
-            const residual = @abs(predicted - actual);
-            max_residual = @max(max_residual, residual);
-        }
-
-        // Calculate bits needed for actual residuals
-        const correction_bits = if (max_residual <= 0.5)
-            0
-        else
-            @as(usize, @intFromFloat(@ceil(@log2(2.0 * max_residual + 1.0))));
-
-        const num_points = end - start;
-        const correction_cost = (num_points * correction_bits + 7) / 8;
-        return 17 + correction_cost;
-    }
-
-    fn getSegmentForRange(self: *const ActiveSegment, start: usize, end: usize) Segment {
-        const params = self.best_params orelse Parameters{ .param1 = 0, .param2 = 0 };
-        return Segment{
-            .start_idx = start,
-            .end_idx = end,
-            .function_type = self.function_type,
-            .param1 = params.param1,
-            .param2 = params.param2,
-        };
-    }
-};
-
-/// Update active segments for current position k (Algorithm 1 logic)
-fn updateActiveSegments(
-    active_segments: *ArrayList(ActiveSegment),
-    data: []const f64,
-    k: usize,
-    function_types: []const FunctionType,
-    error_bounds: []const f64,
-    allocator: mem.Allocator,
-) !void {
-    // Extend existing segments
-    var i: usize = 0;
-    while (i < active_segments.items.len) {
-        // print the length of active segments
-        std.debug.print("Active segments length: {}\n", .{active_segments.items.len});
-        std.debug.print("Processing active segment at index {}\n", .{i});
-        // Try to extend the segment at position i to k + 1
-        // // check if k + 1 is within bounds
-        // if (k + 1 >= data.len) {
-        //     std.debug.print("Skipping segment extension: k+1 out of bounds\n", .{});
-        //     i += 1;
-        //     continue;
-        // }
-        const can_extend = active_segments.items[i].extendTo(data, k + 1) catch false;
-        std.debug.print("Extending segment at index {}: can_extend={}\n", .{ i, can_extend });
-        if (!can_extend) {
-            // Segment can't be extended, remove it
-            std.debug.print("Removing segment at index {}\n", .{i});
-            active_segments.items[i].deinit();
-            _ = active_segments.swapRemove(i);
-        } else {
-            i += 1;
-        }
-    }
-
-    // Start new segments at position k
-    for (function_types) |func_type| {
-        for (error_bounds) |epsilon| {
-            if (k + 1 < data.len) { // Ensure we have at least one more point
-                std.debug.print("Creating new segment at position {} with function type {s} and epsilon {:.3}\n", .{ k, @tagName(func_type), epsilon });
-                var new_segment = ActiveSegment.init(k, func_type, epsilon, allocator);
-                // Try to extend to the next point to initialize
-                // check if k+1 is within bounds
-                if (k + 2 >= data.len) {
-                    std.debug.print("Skipping new segment creation: k+2 out of bounds\n", .{});
-                    new_segment.deinit();
-                    continue;
-                }
-                const can_init = new_segment.extendTo(data, k + 2) catch false;
-                if (can_init) {
-                    std.debug.print("New segment initialized successfully: [{}, {}) type={s}\n", .{ new_segment.start_idx, new_segment.end_idx, @tagName(new_segment.function_type) });
-                    try active_segments.append(new_segment);
-                } else {
-                    new_segment.deinit();
-                }
-            }
-        }
-    }
-}
-
-/// Transformed constraint structure (unified type for all function types)
-const TransformedConstraint = struct {
-    m_coeff: f64,
-    lower: f64,
-    upper: f64,
-};
-
-/// Main NeaTS compression function implementing Algorithm 1 from the paper
 pub fn compress(
     data: []const f64,
-    out: *ArrayList(u8),
+    compressed_values: *ArrayList(u8),
     allocator: mem.Allocator,
     error_bound: f32,
 ) Error!void {
     if (data.len < 2) return Error.UnsupportedInput;
-    const n = data.len;
 
-    // --- 1) Prepare function/error‐bound table ---
-    const FTs = [_]FunctionType{ .Linear, .Quadratic, .Exponential, .Power, .Sqrt };
-    const Eps = [_]f64{@as(f64, error_bound)};
-    const FE = comptime FTs.len * Eps.len;
+    // Check if preprocessing shift is needed
+    const shift_amount = calculateShiftAmount(data, error_bound);
 
-    // A J–entry holds the last [i,j) we found for (f,ε)
-    const JEntry = struct {
-        start_idx: usize,
-        end_idx: usize,
-        segment: Segment,
+    // Only create mutable copy if shift is needed
+    const working_data = if (shift_amount == 0.0)
+        data
+    else blk: {
+        const mutable_data = try allocator.alloc(f64, data.len);
+        @memcpy(mutable_data, data);
+        applyShift(mutable_data, shift_amount);
+        break :blk mutable_data;
     };
-    var jtable = try allocator.alloc(JEntry, FE);
-    defer allocator.free(jtable);
-    // initialize all entries so j<=0 => we'll recompute at k=0
-    for (jtable) |*e| e.* = JEntry{ .start_idx = 0, .end_idx = 0, .segment = Segment{ .start_idx = 0, .end_idx = 0, .function_type = .Linear, .param1 = 0, .param2 = 0 } };
+    defer if (shift_amount != 0.0) allocator.free(working_data);
 
-    // --- 2) DP arrays ---
-    var dist = try allocator.alloc(usize, n + 1);
-    var prev = try allocator.alloc(?EdgeInfo, n + 1);
-    defer allocator.free(dist);
-    defer allocator.free(prev);
+    // Store preprocessing info - always store shift amount, 0.0 means no shift applied
+    try appendF32(shift_amount, compressed_values);
 
-    for (dist) |*d| d.* = std.math.maxInt(usize);
-    for (prev) |*p| p.* = null;
-    dist[0] = 0;
+    // Function types and epsilon values
+    const function_types = [_]FunctionType{ .Linear, .Quadratic, .Exponential, .Power, .Sqrt };
+    const epsilon_values = [_]f32{error_bound};
 
-    // --- 3) Main loop (Algorithm 1, ll. 7–26) ---
-    for (0..n) |k| {
-        //  3a) For each (f,ε), if j≤k, recompute via MAKEAPPROXIMATION
-        var idx: usize = 0;
-        for (FTs) |function_type| {
-            for (Eps) |eps| {
-                var je = &jtable[idx];
-                if (je.end_idx <= k) {
-                    // MAKEAPPROXIMATION: findLongestSegment returns [?Segment]
-                    if (try findLongestSegment(data, k, function_type, eps, allocator)) |seg| {
-                        je.start_idx = seg.start_idx; // should be k
-                        je.end_idx = seg.end_idx;
-                        je.segment = seg;
-                    } else {
-                        // no segment → mark as empty
-                        je.start_idx = k + 1;
-                        je.end_idx = k + 1;
-                    }
-                }
-                idx += 1;
-            }
-        }
+    // Partition using DP
+    var optimal_segments = try partitionTimeSeries(working_data, &function_types, &epsilon_values, allocator);
+    defer optimal_segments.deinit();
 
-        //  3b) Relax edges (prefix + suffix) for every live segment at k
-        idx = 0;
-        for (FTs) |function_type| {
-            _ = function_type; // silence unused variable warning
-            for (Eps) |eps| {
-                _ = eps; // silence unused variable warning
-                const je = &jtable[idx];
-                // only if k lies in [i,j)
-                if (je.start_idx <= k and k < je.end_idx) {
-                    // prefix (i→k)
-                    const c1 = je.segment.getCost();
-                    if (dist[je.start_idx] != std.math.maxInt(usize)) {
-                        const nc = dist[je.start_idx] + c1;
-                        if (nc < dist[k]) {
-                            dist[k] = nc;
-                            prev[k] = EdgeInfo{ .prev_node = je.start_idx, .segment = je.segment };
-                        }
-                    }
-                    // suffix (k→j)
-                    const c2 = je.segment.getCostForRange(k, je.end_idx, data);
-                    if (dist[k] != std.math.maxInt(usize)) {
-                        const nc = dist[k] + c2;
-                        if (nc < dist[je.end_idx]) {
-                            dist[je.end_idx] = nc;
-                            prev[je.end_idx] = EdgeInfo{ .prev_node = k, .segment = je.segment };
-                        }
-                    }
-                }
-                idx += 1;
-            }
-        }
-    }
-
-    // --- 4) Backtrack & serialize (same as before) ---
-    if (dist[n] == std.math.maxInt(usize)) return Error.UnsupportedInput;
-    var segs = ArrayList(Segment).init(allocator);
-    defer segs.deinit();
-
-    var cur = n;
-    while (cur > 0) {
-        if (prev[cur]) |ei| {
-            try segs.append(ei.segment);
-            cur = ei.prev_node;
+    // Serialize segments - only store end_idx, start_idx can be inferred
+    try appendU32(@intCast(optimal_segments.items.len), compressed_values);
+    for (optimal_segments.items) |segment| {
+        try compressed_values.append(@intFromEnum(segment.function_type));
+        try appendF64(segment.parameters.param1, compressed_values);
+        try appendF64(segment.parameters.param2, compressed_values);
+        if (segment.parameters.shift_value) |shift| {
+            try compressed_values.append(1);
+            try appendF64(shift, compressed_values);
         } else {
-            return Error.UnsupportedInput;
+            try compressed_values.append(0);
         }
-    }
-    std.mem.reverse(Segment, segs.items);
-
-    try out.append(@intCast(segs.items.len));
-    for (segs.items) |s| {
-        try out.append(@intFromEnum(s.function_type));
-        try appendF64(s.param1, out);
-        try appendF64(s.param2, out);
-        try appendU32(@intCast(s.start_idx), out);
-        try appendU32(@intCast(s.end_idx), out);
+        // Only store end_idx - start_idx will be inferred during decompression
+        try appendU32(@intCast(segment.end_idx), compressed_values);
     }
 }
 
-/// Decompress function (lossy)
+/// Decompression function with improved parameter display
 pub fn decompress(
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
@@ -388,16 +91,24 @@ pub fn decompress(
 
     var offset: usize = 0;
 
-    // Read number of segments
-    if (offset >= compressed_values.len) return Error.UnsupportedInput;
-    const num_segments = compressed_values[offset];
-    offset += 1;
+    // Read preprocessing info - always read shift amount, 0.0 means no shift was applied
+    if (offset + 4 > compressed_values.len) return Error.UnsupportedInput;
+    const shift_amount = readF32(compressed_values[offset..]);
+    offset += 4;
 
-    std.debug.print("Decompress: {} segments\n", .{num_segments});
+    // Read segments
+    if (offset + 4 > compressed_values.len) return Error.UnsupportedInput;
+    const num_segments = readU32(compressed_values[offset..]);
+    offset += 4;
 
-    // Read each segment
-    for (0..num_segments) |_| {
-        if (offset + 25 > compressed_values.len) return Error.UnsupportedInput;
+    var segments = ArrayList(Segment).init(std.heap.page_allocator);
+    defer segments.deinit();
+
+    var current_start_idx: u32 = 0; // Track start index for sequential segments
+
+    for (1..num_segments + 1) |_| { // 1-based loop for display
+        // Length check, only end_idx stored
+        if (offset + 21 > compressed_values.len) return Error.UnsupportedInput;
 
         const function_type: FunctionType = @enumFromInt(compressed_values[offset]);
         offset += 1;
@@ -406,177 +117,105 @@ pub fn decompress(
         offset += 8;
         const param2 = readF64(compressed_values[offset..]);
         offset += 8;
-        const start_idx = readU32(compressed_values[offset..]);
-        offset += 4;
+
+        var shift_value: ?f64 = null;
+        if (compressed_values[offset] == 1) {
+            offset += 1;
+            shift_value = readF64(compressed_values[offset..]);
+            offset += 8;
+        } else {
+            offset += 1;
+        }
+
+        // Only read end_idx - start_idx is inferred from previous segment
         const end_idx = readU32(compressed_values[offset..]);
         offset += 4;
 
         const segment = Segment{
-            .start_idx = start_idx,
+            .start_idx = current_start_idx, // Use inferred start index
             .end_idx = end_idx,
             .function_type = function_type,
-            .param1 = param1,
-            .param2 = param2,
+            .parameters = FunctionParameters{
+                .param1 = param1,
+                .param2 = param2,
+                .shift_value = shift_value,
+            },
         };
 
-        std.debug.print("  Segment: {s} [{}, {}) params=({:.3}, {:.3})\n", .{ @tagName(function_type), start_idx, end_idx, param1, param2 });
+        try segments.append(segment);
 
-        // Generate values for this segment
-        for (start_idx..end_idx) |i| {
-            // print current i
-            std.debug.print("    Generating value for index {}\n", .{i});
-            const x = @as(f64, @floatFromInt(i - segment.start_idx));
-            const value = segment.evaluate(x);
+        // Update start index for next segment
+        current_start_idx = end_idx;
+    }
+
+    // Validate and sort segments
+    std.sort.heap(Segment, segments.items, {}, segmentLessThan);
+
+    // Validate proper partitioning
+    if (segments.items.len == 0 or segments.items[0].start_idx != 0) {
+        return Error.UnsupportedInput;
+    }
+
+    for (0..segments.items.len - 1) |i| {
+        if (segments.items[i].end_idx != segments.items[i + 1].start_idx) {
+            return Error.UnsupportedInput;
+        }
+    }
+
+    const first_type = segments.items[0].function_type;
+
+    // Generate values - use 1-based indexing
+    for (segments.items) |segment| {
+        for (segment.start_idx..segment.end_idx) |i| {
+            const value = segment.evaluate(@as(f64, @floatFromInt(i + 1))); // Use 1-based indexing for evaluation
             try decompressed_values.append(value);
-            std.debug.print("    x={:.1} -> {:.3}\n", .{ x, value });
         }
     }
+
+    // Postprocess
+    postprocessData(decompressed_values.items, shift_amount, first_type);
 }
 
-/// Find the longest segment starting at `start_idx` that can be ε-approximated by the given function type
-/// Following O'Rourke's algorithm as described in the paper
-fn findLongestSegment(
-    data: []const f64,
-    start_idx: usize,
-    function_type: FunctionType,
-    epsilon: f64,
-    allocator: mem.Allocator,
-) !?Segment {
-    if (start_idx >= data.len) return null;
-    if (start_idx + 1 >= data.len) return null; // Need at least 2 points
+/// Function types from Table I of the paper
+const FunctionType = enum(u8) {
+    Linear = 1, // θ1x + θ2
+    Quadratic = 2, // θ1x² + θ2
+    Exponential = 3, // θ2e^(θ1x)
+    Sqrt = 4, // θ1√x + θ2
+    Power = 5, // θ2x^θ1
 
-    std.debug.print("    findLongestSegment: {s} from {}\n", .{ @tagName(function_type), start_idx });
-
-    var polygon = ConvexPolygon.init(allocator);
-    defer polygon.deinit();
-
-    var longest_valid_end: ?usize = null;
-    var best_params: ?Parameters = null;
-
-    // Start with the first point to establish the initial polygon
-    const first_y = data[start_idx];
-    const first_constraint: ?TransformedConstraint = switch (function_type) {
-        .Linear => TransformedConstraint{
-            .m_coeff = 0.0, // x_k = 0, so constraint is just on b
-            .lower = first_y - epsilon,
-            .upper = first_y + epsilon,
-        },
-        .Quadratic => null, // Skip first point for quadratic (x=0 not useful for x² term)
-        .Exponential => if (first_y - epsilon > 0 and first_y + epsilon > 0) TransformedConstraint{
-            .m_coeff = 0.0, // x_k = 0
-            .lower = @log(first_y - epsilon),
-            .upper = @log(first_y + epsilon),
-        } else null,
-        .Power => null, // Skip first point for power (need x > 0)
-        .Sqrt => TransformedConstraint{
-            .m_coeff = 0.0, // sqrt(0) = 0
-            .lower = first_y - epsilon,
-            .upper = first_y + epsilon,
-        },
-    };
-
-    // Add the first constraint if valid
-    if (first_constraint) |fc| {
-        try polygon.addConstraint(fc.m_coeff, fc.lower, true);
-        try polygon.addConstraint(fc.m_coeff, fc.upper, false);
-    }
-
-    // Try to extend the segment as far as possible (O'Rourke's algorithm)
-    for (start_idx + 1..data.len + 1) |end_idx| {
-        const k = end_idx - 1;
-        const x_k = @as(f64, @floatFromInt(k - start_idx)); // Relative x coordinate (0-based)
-        const y_k = data[k];
-
-        std.debug.print("      Point {}: x_k={:.1}, y_k={:.1}\n", .{ k, x_k, y_k });
-
-        // Transform constraints based on function type (Table I from paper)
-        const transformed_constraint: ?TransformedConstraint = switch (function_type) {
-            .Linear => TransformedConstraint{
-                .m_coeff = -x_k, // t_k = x_k
-                .lower = y_k - epsilon,
-                .upper = y_k + epsilon,
-            },
-            .Quadratic => blk: {
-                if (x_k <= 0.0) break :blk null;
-                // For quadratic f(x) = θ₁x² + θ₂ from the paper
-                // Constraint: y_k - ε ≤ θ₁x_k² + θ₂ ≤ y_k + ε
-                // Rearrange to: (y_k - ε) ≤ (-x_k²)θ₁ + θ₂ ≤ (y_k + ε)
-                const m_coeff = -(x_k * x_k); // coefficient of θ₁
-                const lower = y_k - epsilon;
-                const upper = y_k + epsilon;
-                break :blk TransformedConstraint{ .m_coeff = m_coeff, .lower = lower, .upper = upper };
-            },
-            .Exponential => if (y_k - epsilon > 0 and y_k + epsilon > 0) TransformedConstraint{
-                .m_coeff = -x_k,
-                .lower = @log(y_k - epsilon),
-                .upper = @log(y_k + epsilon),
-            } else null,
-            .Power => if (x_k > 0 and y_k - epsilon > 0 and y_k + epsilon > 0) TransformedConstraint{
-                .m_coeff = -@log(x_k),
-                .lower = @log(y_k - epsilon),
-                .upper = @log(y_k + epsilon),
-            } else null,
-            .Sqrt => TransformedConstraint{
-                .m_coeff = -@sqrt(@max(0, x_k)),
-                .lower = y_k - epsilon,
-                .upper = y_k + epsilon,
-            },
+    pub fn toString(self: FunctionType) []const u8 {
+        return switch (self) {
+            .Linear => "Linear",
+            .Quadratic => "Quadratic",
+            .Exponential => "Exponential",
+            .Sqrt => "Sqrt",
+            .Power => "Power",
         };
-
-        if (transformed_constraint) |tc| {
-            std.debug.print("      Constraint: m_coeff={:.3}, lower={:.3}, upper={:.3}\n", .{ tc.m_coeff, tc.lower, tc.upper });
-
-            // Clip the polygon by the new half-planes
-            try polygon.addConstraint(tc.m_coeff, tc.lower, true); // lower bound
-            try polygon.addConstraint(tc.m_coeff, tc.upper, false); // upper bound
-
-            if (!polygon.isEmpty()) {
-                longest_valid_end = end_idx;
-                if (polygon.getFeasiblePoint()) |pt| {
-                    best_params = transformParameters(pt, function_type);
-                    std.debug.print("      Feasible point: m={:.3}, b={:.3}\n", .{ pt.x, pt.y });
-                }
-            } else {
-                std.debug.print("      Polygon became empty\n", .{});
-                break;
-            }
-        } else {
-            std.debug.print("      Invalid constraints\n", .{});
-            if (function_type == .Quadratic or function_type == .Power) {
-                // For quadratic and power, continue to next point
-                continue;
-            } else {
-                break;
-            }
-        }
     }
+};
 
-    // If we found a valid furthest end, build the segment
-    if (longest_valid_end) |end_idx| {
-        if (best_params) |params| {
-            std.debug.print("    Final segment: [{}, {}) params=({:.3}, {:.3})\n", .{ start_idx, end_idx, params.param1, params.param2 });
-            return Segment{
-                .start_idx = start_idx,
-                .end_idx = end_idx,
-                .function_type = function_type,
-                .param1 = params.param1,
-                .param2 = params.param2,
-            };
-        }
-    }
+/// Point in parameter space (m, b coordinates)
+const ParameterPoint = struct {
+    m: f64, // corresponds to θ1 after transformation
+    b: f64, // corresponds to θ2 after transformation
+};
 
-    std.debug.print("    No valid segment found\n", .{});
-    return null;
-}
+/// Half-plane constraint: b >= slope * m + intercept or b <= slope * m + intercept
+const HalfPlane = struct {
+    slope: f64,
+    intercept: f64,
+    is_lower: bool, // true for >=, false for <=
+};
 
-/// A convex polygon representing feasible parameter region (following O'Rourke's algorithm)
+/// Improved convex polygon with enhanced parameter finding
 const ConvexPolygon = struct {
-    vertices: ArrayList(PolygonPoint),
+    vertices: ArrayList(ParameterPoint),
     allocator: mem.Allocator,
 
     fn init(allocator: mem.Allocator) ConvexPolygon {
         return ConvexPolygon{
-            .vertices = ArrayList(PolygonPoint).init(allocator),
+            .vertices = ArrayList(ParameterPoint).init(allocator),
             .allocator = allocator,
         };
     }
@@ -589,18 +228,22 @@ const ConvexPolygon = struct {
         return self.vertices.items.len == 0;
     }
 
-    /// Add half-plane constraint: b >= slope * m + intercept (following O'Rourke's notation)
-    fn addConstraint(self: *ConvexPolygon, slope: f64, intercept: f64, is_lower: bool) !void {
+    /// Initialize with large feasible region
+    fn initializeLargeFeasibleRegion(self: *ConvexPolygon) !void {
+        const bound = 1000.0;
+        try self.vertices.append(ParameterPoint{ .m = -bound, .b = -bound });
+        try self.vertices.append(ParameterPoint{ .m = bound, .b = -bound });
+        try self.vertices.append(ParameterPoint{ .m = bound, .b = bound });
+        try self.vertices.append(ParameterPoint{ .m = -bound, .b = bound });
+    }
+
+    /// Add constraint
+    fn addConstraint(self: *ConvexPolygon, constraint: HalfPlane) !void {
         if (self.vertices.items.len == 0) {
-            // Initialize with a large feasible region (following the paper)
-            try self.vertices.append(PolygonPoint{ .x = -1000.0, .y = -1000.0 });
-            try self.vertices.append(PolygonPoint{ .x = 1000.0, .y = -1000.0 });
-            try self.vertices.append(PolygonPoint{ .x = 1000.0, .y = 1000.0 });
-            try self.vertices.append(PolygonPoint{ .x = -1000.0, .y = 1000.0 });
+            try self.initializeLargeFeasibleRegion();
         }
 
-        // Sutherland-Hodgman clipping algorithm for half-planes
-        var new_vertices = ArrayList(PolygonPoint).init(self.allocator);
+        var new_vertices = ArrayList(ParameterPoint).init(self.allocator);
         defer {
             self.vertices.deinit();
             self.vertices = new_vertices;
@@ -608,178 +251,399 @@ const ConvexPolygon = struct {
 
         if (self.vertices.items.len == 0) return;
 
-        // Process each edge of the polygon
+        // Sutherland-Hodgman clipping algorithm
         for (0..self.vertices.items.len) |i| {
             const curr = self.vertices.items[i];
-            const prev = self.vertices.items[if (i == 0) self.vertices.items.len - 1 else i - 1];
+            const prev_idx = if (i == 0) self.vertices.items.len - 1 else i - 1;
+            const prev = self.vertices.items[prev_idx];
 
-            const curr_inside = if (is_lower)
-                curr.y >= slope * curr.x + intercept
-            else
-                curr.y <= slope * curr.x + intercept;
-
-            const prev_inside = if (is_lower)
-                prev.y >= slope * prev.x + intercept
-            else
-                prev.y <= slope * prev.x + intercept;
+            const curr_inside = self.isPointInside(curr, constraint);
+            const prev_inside = self.isPointInside(prev, constraint);
 
             if (curr_inside) {
                 if (!prev_inside) {
-                    // Entering the region - add intersection
-                    if (intersectLine(prev, curr, slope, intercept)) |intersection| {
+                    // Entering - add intersection
+                    if (self.intersectLine(prev, curr, constraint)) |intersection| {
                         try new_vertices.append(intersection);
                     }
                 }
                 try new_vertices.append(curr);
             } else if (prev_inside) {
-                // Leaving the region - add intersection
-                if (intersectLine(prev, curr, slope, intercept)) |intersection| {
+                // Leaving - add intersection
+                if (self.intersectLine(prev, curr, constraint)) |intersection| {
                     try new_vertices.append(intersection);
                 }
             }
         }
     }
 
-    /// Get a feasible point from the polygon (if any exists)
-    fn getFeasiblePoint(self: *const ConvexPolygon) ?PolygonPoint {
-        if (self.vertices.items.len == 0) return null;
-
-        // Return centroid as a reasonable feasible point
-        var sum_x: f64 = 0;
-        var sum_y: f64 = 0;
-        for (self.vertices.items) |vertex| {
-            sum_x += vertex.x;
-            sum_y += vertex.y;
-        }
-
-        return PolygonPoint{
-            .x = sum_x / @as(f64, @floatFromInt(self.vertices.items.len)),
-            .y = sum_y / @as(f64, @floatFromInt(self.vertices.items.len)),
-        };
+    fn isPointInside(self: *const ConvexPolygon, point: ParameterPoint, constraint: HalfPlane) bool {
+        _ = self;
+        const value = point.b - constraint.slope * point.m - constraint.intercept;
+        return if (constraint.is_lower) value >= -1e-10 else value <= 1e-10;
     }
-};
 
-/// Find intersection of line segment with half-plane boundary
-fn intersectLine(p1: PolygonPoint, p2: PolygonPoint, slope: f64, intercept: f64) ?PolygonPoint {
-    const dx = p2.x - p1.x;
-    const dy = p2.y - p1.y;
+    fn intersectLine(self: *const ConvexPolygon, p1: ParameterPoint, p2: ParameterPoint, constraint: HalfPlane) ?ParameterPoint {
+        _ = self;
+        const dx = p2.m - p1.m;
+        const dy = p2.b - p1.b;
 
-    if (@abs(dx) < 1e-10) {
-        // Vertical line case
-        const x = p1.x;
-        const y = slope * x + intercept;
-        if (y >= @min(p1.y, p2.y) and y <= @max(p1.y, p2.y)) {
-            return PolygonPoint{ .x = x, .y = y };
+        if (@abs(dx) < 1e-10) {
+            // Vertical line
+            const m = p1.m;
+            const b = constraint.slope * m + constraint.intercept;
+            if (b >= @min(p1.b, p2.b) and b <= @max(p1.b, p2.b)) {
+                return ParameterPoint{ .m = m, .b = b };
+            }
+            return null;
         }
+
+        const line_slope = dy / dx;
+        const line_intercept = p1.b - line_slope * p1.m;
+
+        if (@abs(line_slope - constraint.slope) < 1e-10) return null; // Parallel
+
+        const m = (constraint.intercept - line_intercept) / (line_slope - constraint.slope);
+        const b = constraint.slope * m + constraint.intercept;
+
+        // Check if intersection is within line segment
+        const t = (m - p1.m) / dx;
+        if (t >= 0.0 and t <= 1.0) {
+            return ParameterPoint{ .m = m, .b = b };
+        }
+
         return null;
     }
 
-    const line_slope = dy / dx;
-    const line_intercept = p1.y - line_slope * p1.x;
+    fn getFeasiblePoint(self: *const ConvexPolygon) ?ParameterPoint {
+        if (self.vertices.items.len == 0) return null;
 
-    if (@abs(line_slope - slope) < 1e-10) return null; // Parallel lines
+        var sum_m: f64 = 0;
+        var sum_b: f64 = 0;
+        for (self.vertices.items) |vertex| {
+            sum_m += vertex.m;
+            sum_b += vertex.b;
+        }
 
-    const x = (intercept - line_intercept) / (line_slope - slope);
-    const y = slope * x + intercept;
+        const centroid_m = sum_m / @as(f64, @floatFromInt(self.vertices.items.len));
+        const centroid_b = sum_b / @as(f64, @floatFromInt(self.vertices.items.len));
 
-    // Check if intersection is within the line segment
-    const t = (x - p1.x) / dx;
-    if (t >= 0.0 and t <= 1.0) {
-        return PolygonPoint{ .x = x, .y = y };
+        return ParameterPoint{ .m = centroid_m, .b = centroid_b };
+    }
+};
+
+/// Function parameters after transformation back from parameter space
+const FunctionParameters = struct {
+    param1: f64, // θ1
+    param2: f64, // θ2
+    shift_value: ?f64 = null, // for functions that need domain shifting
+};
+
+/// Transform parameters from (m,b) space back to function parameters
+fn transformParameters(point: ParameterPoint, function_type: FunctionType, shift_value: ?f64) FunctionParameters {
+    return switch (function_type) {
+        .Linear => FunctionParameters{ .param1 = point.m, .param2 = point.b },
+        .Quadratic => FunctionParameters{ .param1 = point.m, .param2 = point.b },
+        .Exponential => FunctionParameters{ .param1 = point.m, .param2 = @exp(point.b) },
+        .Power => FunctionParameters{ .param1 = point.m, .param2 = @exp(point.b) },
+        .Sqrt => FunctionParameters{ .param1 = point.m, .param2 = point.b, .shift_value = shift_value },
+    };
+}
+
+/// Transform constraints to parameter space according to Table I
+fn getConstraints(x: f64, y: f64, epsilon: f32, function_type: FunctionType) ?struct { lower: HalfPlane, upper: HalfPlane } {
+    const eps = @as(f64, epsilon); // Convert f32 to f64 for calculations
+
+    return switch (function_type) {
+        .Linear => .{
+            .lower = HalfPlane{ .slope = -x, .intercept = y - eps, .is_lower = true },
+            .upper = HalfPlane{ .slope = -x, .intercept = y + eps, .is_lower = false },
+        },
+        .Quadratic => blk: {
+            if (x <= 0.0) break :blk null; // Never happens (x ≥ 1)
+            break :blk .{
+                .lower = HalfPlane{ .slope = -(x * x), .intercept = y - eps, .is_lower = true },
+                .upper = HalfPlane{ .slope = -(x * x), .intercept = y + eps, .is_lower = false },
+            };
+        },
+        .Exponential => blk: {
+            if (y - eps <= 0 or y + eps <= 0) break :blk null; // Never happens (preprocessing)
+            break :blk .{
+                .lower = HalfPlane{ .slope = -x, .intercept = @log(y - eps), .is_lower = true },
+                .upper = HalfPlane{ .slope = -x, .intercept = @log(y + eps), .is_lower = false },
+            };
+        },
+        .Power => blk: {
+            if (x <= 0 or y - eps <= 0 or y + eps <= 0) break :blk null; // Never happens
+            break :blk .{
+                .lower = HalfPlane{ .slope = -@log(x), .intercept = @log(y - eps), .is_lower = true },
+                .upper = HalfPlane{ .slope = -@log(x), .intercept = @log(y + eps), .is_lower = false },
+            };
+        },
+        .Sqrt => blk: {
+            if (x < 0) break :blk null; // x must be non-negative for sqrt
+            break :blk .{
+                .lower = HalfPlane{ .slope = -@sqrt(x), .intercept = y - eps, .is_lower = true },
+                .upper = HalfPlane{ .slope = -@sqrt(x), .intercept = y + eps, .is_lower = false },
+            };
+        },
+    };
+}
+
+/// Segment with function parameters and bounds
+const Segment = struct {
+    start_idx: usize,
+    end_idx: usize, // exclusive
+    function_type: FunctionType,
+    parameters: FunctionParameters,
+
+    fn evaluate(self: *const Segment, x: f64) f64 {
+        // Use absolute position instead of relative position to match C++ impl
+        return switch (self.function_type) {
+            .Linear => self.parameters.param1 * x + self.parameters.param2,
+            .Quadratic => self.parameters.param1 * x * x + self.parameters.param2,
+            .Exponential => self.parameters.param2 * @exp(self.parameters.param1 * x),
+            .Power => blk: {
+                if (x <= 0) break :blk self.parameters.param2;
+                break :blk self.parameters.param2 * std.math.pow(f64, x, self.parameters.param1);
+            },
+            .Sqrt => blk: {
+                if (x < 0) break :blk self.parameters.param2;
+                break :blk self.parameters.param1 * @sqrt(x) + self.parameters.param2;
+            },
+        };
+    }
+
+    fn getCost(self: *const Segment, data: []const f64, epsilon: f32) usize {
+        // Verify segment meets error bound (validation)
+        var max_error: f64 = 0;
+        for (self.start_idx..self.end_idx) |i| {
+            const predicted = self.evaluate(@as(f64, @floatFromInt(i + 1))); // 1-based indexing
+            const abs_error = @abs(predicted - data[i]);
+            max_error = @max(max_error, abs_error);
+        }
+
+        const eps = @as(f64, epsilon);
+
+        // If segment doesn't meet error bound, return very high cost
+        if (max_error > eps) {
+            return std.math.maxInt(usize);
+        }
+
+        // Cost: two f64 parameters + function type bits + end_idx (32 bits)
+        const model_cost = 64 + 64 + 3 + 32; // = 163 bits
+
+        return model_cost;
+    }
+};
+
+/// NEW: Validate that segment satisfies error bounds
+fn validateSegment(segment: *const Segment, data: []const f64, epsilon: f32) bool {
+    var max_error: f64 = 0;
+    for (segment.start_idx..segment.end_idx) |i| {
+        const predicted = segment.evaluate(@as(f64, @floatFromInt(i + 1)));
+        const actual = data[i];
+        const abs_error = @abs(predicted - actual);
+        max_error = @max(max_error, abs_error);
+    }
+    const eps = @as(f64, epsilon);
+    const is_valid = max_error <= eps;
+
+    return is_valid;
+}
+
+/// Find longest segment using O'Rourke's algorithm
+fn findLongestSegment(
+    data: []const f64,
+    start_idx: usize,
+    function_type: FunctionType,
+    epsilon: f32,
+    shift_value: ?f64,
+    allocator: mem.Allocator,
+) !?Segment {
+    if (start_idx >= data.len or start_idx + 1 >= data.len) {
+        return null;
+    }
+
+    var polygon = ConvexPolygon.init(allocator);
+    defer polygon.deinit();
+
+    var longest_valid_end: ?usize = null;
+    var best_params: ?FunctionParameters = null;
+    var points_processed: usize = 0;
+
+    // O'Rourke's algorithm: process data points left-to-right
+    for (start_idx..data.len) |end_idx| {
+        const k = end_idx;
+        const x_k = @as(f64, @floatFromInt(k + 1)); // 1-based indexing
+        const y_k = data[k];
+        points_processed += 1;
+
+        // Get constraints for this data point
+        const constraints = getConstraints(x_k, y_k, epsilon, function_type) orelse {
+            break;
+        };
+
+        // Add constraints to polygon
+        try polygon.addConstraint(constraints.lower);
+        try polygon.addConstraint(constraints.upper);
+
+        if (!polygon.isEmpty()) {
+            longest_valid_end = end_idx + 1; // +1 because end_idx is exclusive
+            if (polygon.getFeasiblePoint()) |point| {
+                best_params = transformParameters(point, function_type, shift_value);
+            }
+        } else {
+            break; // Polygon became empty
+        }
+    }
+
+    if (longest_valid_end) |end_idx| {
+        if (best_params) |params| {
+            const segment = Segment{
+                .start_idx = start_idx,
+                .end_idx = end_idx,
+                .function_type = function_type,
+                .parameters = params,
+            };
+
+            // Validate the segment meets error bounds
+            if (!validateSegment(&segment, data, epsilon)) {
+                return null;
+            }
+            return segment;
+        }
     }
 
     return null;
 }
 
-/// A fitted segment with function parameters
-const Segment = struct {
-    start_idx: usize,
-    end_idx: usize, // exclusive
-    function_type: FunctionType,
-    param1: f64,
-    param2: f64,
-
-    fn getCost(self: *const Segment) usize {
-        // Cost is just the number of parameters (2 parameters = 16 bytes)
-        _ = self; // suppress unused parameter warning
-        return 17; // 16 bytes for parameters + 1 byte for function type
+/// Preprocessing functions for exponential/power functions
+/// Calculate shift amount needed without modifying data
+fn calculateShiftAmount(data: []const f64, epsilon: f32) f32 {
+    var min_val = std.math.inf(f64);
+    for (data) |val| {
+        min_val = @min(min_val, val);
     }
 
-    fn getCostForRange(self: *const Segment, start: usize, end: usize, data: []const f64) usize {
-        // Calculate actual residuals for this function fit
-        var max_residual: f64 = 0;
-        for (start..end) |i| {
-            const x = @as(f64, @floatFromInt(i - self.start_idx));
-            const predicted = self.evaluateAt(x, data);
-            const actual = data[i];
-            const residual = @abs(predicted - actual);
-            max_residual = @max(max_residual, residual);
+    const eps = @as(f64, epsilon);
+    if (min_val - eps <= 0) {
+        return @as(f32, @floatCast(eps + 1.0 - min_val));
+    }
+
+    return 0.0;
+}
+
+/// Apply shift to mutable data
+fn applyShift(data: []f64, shift_amount: f32) void {
+    const shift_f64 = @as(f64, shift_amount);
+    for (data) |*val| {
+        val.* += shift_f64;
+    }
+}
+
+fn postprocessData(data: []f64, shift_amount: f32, first_segment_type: FunctionType) void {
+    if (shift_amount == 0.0) return;
+
+    const shift_f64 = @as(f64, shift_amount);
+    for (data, 1..) |*val, idx| { // Start from 1 for consistency
+        if (idx == 1 and first_segment_type == .Power) continue;
+        val.* -= shift_f64;
+    }
+}
+
+/// Dynamic programming partitioning algorithm - now uses f32 error bounds
+fn partitionTimeSeries(
+    data: []const f64,
+    function_types: []const FunctionType,
+    epsilon_values: []const f32,
+    allocator: mem.Allocator,
+) !ArrayList(Segment) {
+    const n = data.len;
+
+    // DP arrays
+    var dist = try allocator.alloc(usize, n + 1);
+    var segments = try allocator.alloc(?Segment, n + 1);
+    defer allocator.free(dist);
+    defer allocator.free(segments);
+
+    // Initialize
+    for (dist) |*d| d.* = std.math.maxInt(usize);
+    for (segments) |*s| s.* = null;
+    dist[0] = 0;
+
+    // DP main loop
+    for (0..n) |start_pos| {
+        if (dist[start_pos] == std.math.maxInt(usize)) continue;
+
+        var found_any_segment = false;
+
+        // Try each function type and epsilon
+        for (function_types) |function_type| {
+            for (epsilon_values) |epsilon| {
+                if (try findLongestSegment(data, start_pos, function_type, epsilon, null, allocator)) |segment| {
+                    const end_pos = segment.end_idx;
+                    const segment_cost = segment.getCost(data, epsilon);
+                    const new_cost = dist[start_pos] + segment_cost;
+
+                    if (new_cost < dist[end_pos]) {
+                        dist[end_pos] = new_cost;
+                        segments[end_pos] = segment;
+                        found_any_segment = true;
+                    }
+                }
+            }
         }
+        // Fallback: if no valid segment was found, create a single-point segment
+        if (!found_any_segment and start_pos < n) {
+            const fallback_segment = Segment{
+                .start_idx = start_pos,
+                .end_idx = start_pos + 1,
+                .function_type = .Linear,
+                .parameters = FunctionParameters{
+                    .param1 = 0.0,
+                    .param2 = data[start_pos],
+                    .shift_value = null,
+                },
+            };
 
-        // Calculate bits needed for actual residuals
-        const correction_bits = if (max_residual <= 0.5)
-            0
-        else
-            @as(usize, @intFromFloat(@ceil(@log2(2.0 * max_residual + 1.0))));
+            const cost = fallback_segment.getCost(data, epsilon_values[0]);
+            const new_cost = dist[start_pos] + cost;
 
-        const num_points = end - start;
-        const correction_cost = (num_points * correction_bits + 7) / 8;
-        return 17 + correction_cost;
+            if (new_cost < dist[start_pos + 1]) {
+                dist[start_pos + 1] = new_cost;
+                segments[start_pos + 1] = fallback_segment;
+            }
+        }
     }
 
-    fn evaluate(self: *const Segment, x: f64) f64 {
-        return switch (self.function_type) {
-            .Linear => self.param1 * x + self.param2,
-            .Quadratic => {
-                // For quadratic, we need the first point's y-value as constant term
-                // This is a limitation - we should store it, but for now we'll approximate
-                const c = self.param2; // This isn't quite right, but will work for simple cases
-                return self.param1 * x * x + c;
-            },
-            .Exponential => if (self.param2 > 0) self.param2 * @exp(self.param1 * x) else 0,
-            .Power => if (x > 0 and self.param2 > 0) self.param2 * std.math.pow(f64, x, self.param1) else 0,
-            .Sqrt => self.param1 * @sqrt(@max(0, x)) + self.param2,
-        };
+    if (dist[n] == std.math.maxInt(usize)) {
+        return Error.UnsupportedInput;
     }
 
-    fn evaluateAt(self: *const Segment, x: f64, data: []const f64) f64 {
-        _ = data; // suppress unused parameter warning for most cases
-        return switch (self.function_type) {
-            .Linear => self.param1 * x + self.param2,
-            .Quadratic => self.param1 * x * x + self.param2, // f(x) = θ₁x² + θ₂
-            .Exponential => if (self.param2 > 0) self.param2 * @exp(self.param1 * x) else 0,
-            .Power => if (x > 0 and self.param2 > 0) self.param2 * std.math.pow(f64, x, self.param1) else 0,
-            .Sqrt => self.param1 * @sqrt(@max(0, x)) + self.param2,
-        };
+    // Backtrack to get optimal segmentation
+    var optimal_segments = ArrayList(Segment).init(allocator);
+    var current_pos = n;
+    while (current_pos > 0) {
+        if (segments[current_pos]) |segment| {
+            try optimal_segments.append(segment);
+            current_pos = segment.start_idx;
+        } else {
+            return Error.UnsupportedInput;
+        }
     }
-};
 
-/// Transform parameters back from constraint space (Table I from paper)
-fn transformParameters(point: PolygonPoint, function_type: FunctionType) Parameters {
-    return switch (function_type) {
-        .Linear => Parameters{ .param1 = point.x, .param2 = point.y }, // f(x) = θ₁x + θ₂
-        .Quadratic => Parameters{ .param1 = point.x, .param2 = point.y }, // f(x) = θ₁x² + θ₂
-        .Exponential => Parameters{ .param1 = point.x, .param2 = @exp(point.y) }, // f(x) = θ₂e^(θ₁x)
-        .Power => Parameters{ .param1 = point.x, .param2 = @exp(point.y) }, // f(x) = θ₂x^θ₁
-        .Sqrt => Parameters{ .param1 = point.x, .param2 = point.y }, // f(x) = θ₁√x + θ₂
-    };
+    // Reverse to get correct order
+    std.mem.reverse(Segment, optimal_segments.items);
+    return optimal_segments;
 }
 
-/// Updated segment evaluation with proper parameter handling
-fn evaluateSegment(segment: *const Segment, x: f64) f64 {
-    return switch (segment.function_type) {
-        .Linear => segment.param1 * x + segment.param2,
-        .Quadratic => {
-            // Use the form from paper: f(x) = θ₁x² + θ₂
-            return segment.param1 * x * x + segment.param2;
-        },
-        .Exponential => if (segment.param2 > 0) segment.param2 * @exp(segment.param1 * x) else 0,
-        .Power => if (x > 0 and segment.param2 > 0) segment.param2 * std.math.pow(f64, x, segment.param1) else 0,
-        .Sqrt => segment.param1 * @sqrt(@max(0, x)) + segment.param2,
-    };
+fn segmentLessThan(context: void, a: Segment, b: Segment) bool {
+    _ = context;
+    return a.start_idx < b.start_idx;
 }
 
-// Helper functions for serialization
+// Helper functions - updated for f32
 fn appendF64(value: f64, list: *ArrayList(u8)) !void {
     const bytes: [8]u8 = @bitCast(value);
     try list.appendSlice(&bytes);
@@ -787,6 +651,15 @@ fn appendF64(value: f64, list: *ArrayList(u8)) !void {
 
 fn readF64(bytes: []const u8) f64 {
     return @bitCast(bytes[0..8].*);
+}
+
+fn appendF32(value: f32, list: *ArrayList(u8)) !void {
+    const bytes: [4]u8 = @bitCast(value);
+    try list.appendSlice(&bytes);
+}
+
+fn readF32(bytes: []const u8) f32 {
+    return @bitCast(bytes[0..4].*);
 }
 
 fn appendU32(value: u32, list: *ArrayList(u8)) !void {
@@ -798,82 +671,388 @@ fn readU32(bytes: []const u8) u32 {
     return @bitCast(bytes[0..4].*);
 }
 
+// Tests with f32 error bounds
 test "neats handles linear data" {
     const allocator = testing.allocator;
-    const error_bound: f32 = 1.0;
+    const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0, 1, undefined);
 
-    std.debug.print("\n=== Testing linear data ===\n", .{});
-
-    // Linear data: y = 2x + 3 for x = 0,1,2,3,4,5,6,7,8,9
-    const uncompressed_values = [_]f64{ 3, 5, 7, 9, 11, 13, 15, 17, 19, 21 };
-
-    std.debug.print("Original data: ", .{});
-    for (uncompressed_values) |val| {
-        std.debug.print("{:.1} ", .{val});
-    }
-    std.debug.print("\n", .{});
+    // Linear data: y = 2x + 3 for x = 1,2,3,4,5,6,7,8,9,10 (1-based)
+    const uncompressed_values = [_]f64{ 5, 7, 9, 11, 13, 15, 17, 19, 21, 23 }; // y = 2x + 3
 
     var compressed_values = ArrayList(u8).init(allocator);
     defer compressed_values.deinit();
 
     try compress(&uncompressed_values, &compressed_values, allocator, error_bound);
 
+    // Inspect compressed stream
+    var offset: usize = 0;
+    offset += 4;
+
+    // Read number of segments
+    const num_segments = readU32(compressed_values.items[offset..]);
+    offset += 4;
+
+    try testing.expect(num_segments == 1); // Expect exactly 1 segment
+
+    // Read segment's type
+    const function_type_val: u8 = compressed_values.items[offset];
+    offset += 1;
+
+    const function_type: FunctionType = @enumFromInt(function_type_val);
+
+    const p1 = readF64(compressed_values.items[offset..]);
+    offset += 8;
+    const p2 = readF64(compressed_values.items[offset..]);
+    offset += 8;
+
+    if (compressed_values.items[offset] == 1) {
+        offset += 1;
+        offset += 8; // shift value
+    } else {
+        offset += 1;
+    }
+    offset += 4; // end_idx
+
+    try testing.expect(function_type == .Linear);
+    try testing.expect(@abs(p1 - (2.0)) <= error_bound);
+    try testing.expect(@abs(p2 - 3.0) <= error_bound);
+
     var decompressed_values = ArrayList(f64).init(allocator);
     defer decompressed_values.deinit();
 
     try decompress(compressed_values.items, &decompressed_values);
 
-    std.debug.print("Decompressed: ", .{});
-    for (decompressed_values.items) |val| {
-        std.debug.print("{:.1} ", .{val});
-    }
-    std.debug.print("\n", .{});
-
     try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
 
     for (uncompressed_values, decompressed_values.items) |original, decompressed| {
         const abs_error = @abs(original - decompressed);
-        std.debug.print("Error: {:.1} - {:.1} = {:.3}\n", .{ original, decompressed, abs_error });
         try testing.expect(abs_error <= error_bound);
     }
 }
 
 test "neats handles quadratic data" {
     const allocator = testing.allocator;
-    const error_bound: f32 = 1.0;
+    const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0, 1, undefined);
 
-    std.debug.print("\n=== Testing quadratic data ===\n", .{});
-
-    // Quadratic data: y = x²+1 for x = 0,1,2,3,4,5,6,7,8,9,10
-    const uncompressed_values = [_]f64{ 1, 2, 5, 10, 17, 26, 37, 50, 65, 82 };
-
-    std.debug.print("Original data: ", .{});
-    for (uncompressed_values) |val| {
-        std.debug.print("{:.1} ", .{val});
-    }
-    std.debug.print("\n", .{});
+    // Quadratic data: y = x²+1 for x = 1,2,3,4,5,6,7,8,9,10 (1-based)
+    const uncompressed_values = [_]f64{ 2, 5, 10, 17, 26, 37, 50, 65, 82, 101 }; // y = x² + 1
 
     var compressed_values = ArrayList(u8).init(allocator);
     defer compressed_values.deinit();
 
     try compress(&uncompressed_values, &compressed_values, allocator, error_bound);
 
+    // Inspect compressed stream
+    var offset: usize = 0;
+    offset += 4;
+
+    // Read number of segments
+    const num_segments = readU32(compressed_values.items[offset..]);
+    offset += 4;
+
+    try testing.expect(num_segments == 1); // Expect exactly 1 segment
+
+    // Read segment's type
+    const function_type_val: u8 = compressed_values.items[offset];
+    offset += 1;
+
+    const function_type: FunctionType = @enumFromInt(function_type_val);
+
+    const p1 = readF64(compressed_values.items[offset..]);
+    offset += 8;
+    const p2 = readF64(compressed_values.items[offset..]);
+    offset += 8;
+
+    if (compressed_values.items[offset] == 1) {
+        offset += 1;
+        offset += 8; // shift value
+    } else {
+        offset += 1;
+    }
+    offset += 4; // end_idx
+
+    try testing.expect(function_type == .Quadratic);
+    try testing.expect(@abs(p1 - (1.0)) <= error_bound);
+    try testing.expect(@abs(p2 - 1.0) <= error_bound);
+
     var decompressed_values = ArrayList(f64).init(allocator);
     defer decompressed_values.deinit();
 
     try decompress(compressed_values.items, &decompressed_values);
 
-    std.debug.print("Decompressed: ", .{});
-    for (decompressed_values.items) |val| {
-        std.debug.print("{:.1} ", .{val});
+    try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
+
+    for (uncompressed_values, decompressed_values.items) |original, decompressed| {
+        const abs_error = @abs(original - decompressed);
+        try testing.expect(abs_error <= error_bound);
     }
-    std.debug.print("\n", .{});
+}
+
+test "neats handles exponential data" {
+    const allocator = testing.allocator;
+    const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0, 1, undefined);
+
+    // Exponential data: y = 2 * e^(0.5*x) for x = 1,2,3,4,5,6,7,8,9,10 (1-based)
+    const uncompressed_values = [_]f64{ 3.3, 5.4, 8.9, 14.8, 24.5, 40.7, 67.6, 112.2, 186.2, 309.6 };
+
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+
+    try compress(&uncompressed_values, &compressed_values, allocator, error_bound);
+
+    // Inspect compressed stream
+    var offset: usize = 0;
+    offset += 4;
+
+    // Read number of segments
+    const num_segments = readU32(compressed_values.items[offset..]);
+    offset += 4;
+
+    try testing.expect(num_segments == 1); // Expect exactly 1 segment
+
+    // Read segment's type
+    const function_type_val: u8 = compressed_values.items[offset];
+    offset += 1;
+
+    const function_type: FunctionType = @enumFromInt(function_type_val);
+
+    const p1 = readF64(compressed_values.items[offset..]);
+    offset += 8;
+    const p2 = readF64(compressed_values.items[offset..]);
+    offset += 8;
+
+    if (compressed_values.items[offset] == 1) {
+        offset += 1;
+        offset += 8; // shift value
+    } else {
+        offset += 1;
+    }
+    offset += 4; // end_idx
+
+    try testing.expect(function_type == .Exponential);
+    try testing.expect(@abs(p1 - (0.5)) <= error_bound);
+    try testing.expect(@abs(p2 - 2.0) <= error_bound);
+
+    var decompressed_values = ArrayList(f64).init(allocator);
+    defer decompressed_values.deinit();
+
+    try decompress(compressed_values.items, &decompressed_values);
 
     try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
 
     for (uncompressed_values, decompressed_values.items) |original, decompressed| {
         const abs_error = @abs(original - decompressed);
-        std.debug.print("Error: {:.1} - {:.1} = {:.3}\n", .{ original, decompressed, abs_error });
         try testing.expect(abs_error <= error_bound);
     }
+}
+
+test "neats handles power data" {
+    const allocator = testing.allocator;
+    const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0, 1, undefined);
+
+    // Power data: y = 2 * x^1.5 for x = 1,2,3,4,5,6,7,8,9,10 (1-based)
+    const uncompressed_values = [_]f64{ 2.0, 5.66, 10.39, 16.0, 22.36, 29.39, 37.01, 45.25, 54.0, 63.25 };
+
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+
+    try compress(&uncompressed_values, &compressed_values, allocator, error_bound);
+
+    // Inspect compressed stream
+    var offset: usize = 0;
+    offset += 4;
+
+    // Read number of segments
+    const num_segments = readU32(compressed_values.items[offset..]);
+    offset += 4;
+
+    try testing.expect(num_segments == 1); // Expect exactly 1 segment
+
+    // Read segment's type
+    const function_type_val: u8 = compressed_values.items[offset];
+    offset += 1;
+
+    const function_type: FunctionType = @enumFromInt(function_type_val);
+
+    const p1 = readF64(compressed_values.items[offset..]);
+    offset += 8;
+    const p2 = readF64(compressed_values.items[offset..]);
+    offset += 8;
+
+    if (compressed_values.items[offset] == 1) {
+        offset += 1;
+        offset += 8; // shift value
+    } else {
+        offset += 1;
+    }
+    offset += 4; // end_idx
+
+    try testing.expect(function_type == .Power);
+    try testing.expect(@abs(p1 - (1.5)) <= error_bound);
+    try testing.expect(@abs(p2 - 2.0) <= error_bound);
+
+    var decompressed_values = ArrayList(f64).init(allocator);
+    defer decompressed_values.deinit();
+
+    try decompress(compressed_values.items, &decompressed_values);
+
+    try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
+
+    for (uncompressed_values, decompressed_values.items) |original, decompressed| { // Start from 1
+        const abs_error = @abs(original - decompressed);
+        try testing.expect(abs_error <= error_bound);
+    }
+}
+
+test "neats handles two-segment data" {
+    const allocator = testing.allocator;
+    const error_bound: f32 = 0.1;
+
+    // First half: y = 2x for x=1..5 -> 2,4,6,8,10
+    // Second half: y = 5 for x=6..10 -> 5,5,5,5,5 (should get exactly θ₁=0, θ₂=5)
+    const uncompressed_values = [_]f64{ 2, 4, 6, 8, 10, 5, 5, 5, 5, 5 };
+
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+
+    try compress(&uncompressed_values, &compressed_values, allocator, error_bound);
+
+    // Inspect compressed stream
+    var offset: usize = 0;
+    offset += 4;
+
+    // Read number of segments
+    const num_segments = readU32(compressed_values.items[offset..]);
+    offset += 4;
+
+    try testing.expect(num_segments == 2); // Expect exactly 2 segments
+
+    // Now read each segment's type
+    for (0..num_segments) |seg_idx| {
+        const function_type_val: u8 = compressed_values.items[offset];
+        offset += 1;
+
+        const function_type: FunctionType = @enumFromInt(function_type_val);
+
+        const p1 = readF64(compressed_values.items[offset..]);
+        offset += 8;
+        const p2 = readF64(compressed_values.items[offset..]);
+        offset += 8;
+
+        if (compressed_values.items[offset] == 1) {
+            offset += 1;
+            offset += 8; // shift value
+        } else {
+            offset += 1;
+        }
+        offset += 4; // end_idx
+
+        if (seg_idx == 0) {
+            try testing.expect(function_type == .Linear);
+            try testing.expect(@abs(p1 - 2.0) <= error_bound);
+            try testing.expect(@abs(p2 - 0.0) <= error_bound);
+        } else if (seg_idx == 1) {
+            try testing.expect(function_type == .Linear);
+            try testing.expect(@abs(p1 - (0.0)) <= error_bound);
+            try testing.expect(@abs(p2 - 5.0) <= error_bound);
+        }
+    }
+
+    var decompressed_values = ArrayList(f64).init(allocator);
+    defer decompressed_values.deinit();
+
+    try decompress(compressed_values.items, &decompressed_values);
+
+    try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
+
+    for (uncompressed_values, decompressed_values.items) |original, decompressed| {
+        const abs_error = @abs(original - decompressed);
+        try testing.expect(abs_error <= error_bound);
+    }
+}
+
+test "neats handles quadratic then linear segments" {
+    const allocator = testing.allocator;
+    const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0, 1, undefined);
+
+    // Quadratic: y = x*x for x=1..5 -> 1,4,9,16,25
+    // Linear: y = -x + 12 for x=6..10 -> 6,5,4,3,2
+    const uncompressed_values = [_]f64{ 1, 4, 9, 16, 25, 6, 5, 4, 3, 2 };
+
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+
+    try compress(&uncompressed_values, &compressed_values, allocator, error_bound);
+
+    // Inspect compressed stream
+    var offset: usize = 0;
+    offset += 4;
+
+    // Read number of segments
+    const num_segments = readU32(compressed_values.items[offset..]);
+    offset += 4;
+
+    try testing.expect(num_segments == 2); // Expect exactly 2 segments
+
+    // Now read each segment's type
+    for (0..num_segments) |seg_idx| {
+        const function_type_val: u8 = compressed_values.items[offset];
+        offset += 1;
+
+        const function_type: FunctionType = @enumFromInt(function_type_val);
+
+        const p1 = readF64(compressed_values.items[offset..]);
+        offset += 8;
+        const p2 = readF64(compressed_values.items[offset..]);
+        offset += 8;
+
+        if (compressed_values.items[offset] == 1) {
+            offset += 1;
+            offset += 8; // shift value
+        } else {
+            offset += 1;
+        }
+        offset += 4; // end_idx
+
+        if (seg_idx == 0) {
+            try testing.expect(function_type == .Quadratic);
+            try testing.expect(@abs(p1 - 1.0) <= error_bound);
+            try testing.expect(@abs(p2 - 0.0) <= error_bound);
+        } else if (seg_idx == 1) {
+            try testing.expect(function_type == .Linear);
+            try testing.expect(@abs(p1 - (-1.0)) <= error_bound);
+            try testing.expect(@abs(p2 - 12.0) <= error_bound);
+        }
+    }
+
+    var decompressed_values = ArrayList(f64).init(allocator);
+    defer decompressed_values.deinit();
+
+    try decompress(compressed_values.items, &decompressed_values);
+
+    try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
+
+    for (uncompressed_values, decompressed_values.items) |orig, decomp| {
+        const abs_error = @abs(orig - decomp);
+        try testing.expect(abs_error <= error_bound);
+    }
+}
+
+test "neats compressor can compress and decompress random data" {
+    const allocator = std.testing.allocator;
+    const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0, 1, undefined);
+
+    var uncompressed_values = ArrayList(f64).init(allocator);
+    defer uncompressed_values.deinit();
+    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, undefined);
+
+    try uncompressed_values.append(tester.generateBoundedRandomValue(f64, 0, 1, undefined));
+
+    try tester.testCompressAndDecompress(
+        uncompressed_values.items,
+        allocator,
+        Method.NeaCompression,
+        error_bound,
+        tersets.isWithinErrorBound,
+    );
 }
