@@ -24,6 +24,7 @@ const sim_piece = @import("functional_approximation/sim_piece.zig");
 const mix_piece = @import("functional_approximation/mix_piece.zig");
 const piecewise_histogram = @import("histogram_representation/constant_linear_representation.zig");
 const abc_linear_approximation = @import("functional_approximation/abc_linear_approximation.zig");
+const nea_compression = @import("functional_approximation/nea_compression.zig");
 const vw = @import("line_simplification/visvalingam_whyatt.zig");
 const sliding_window = @import("line_simplification/sliding_window.zig");
 const bottom_up = @import("line_simplification/bottom_up.zig");
@@ -53,6 +54,7 @@ pub const Method = enum {
     VisvalingamWhyatt,
     SlidingWindow,
     BottomUp,
+    NeaCompression,
     MixPiece,
 };
 
@@ -171,6 +173,14 @@ pub fn compress(
                 error_bound,
             );
         },
+        .NeaCompression => {
+            try nea_compression.compress(
+                uncompressed_values,
+                &compressed_values,
+                allocator,
+                error_bound,
+            );
+        },
     }
     try compressed_values.append(@intFromEnum(method));
     return compressed_values;
@@ -226,6 +236,9 @@ pub fn decompress(
         },
         .BottomUp => {
             try bottom_up.decompress(compressed_values_slice, &decompressed_values);
+        },
+        .NeaCompression => {
+            try nea_compression.decompress(compressed_values_slice, &decompressed_values);
         },
     }
 

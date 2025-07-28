@@ -123,6 +123,7 @@ test "method enum must match method constants" {
     try testing.expectEqual(@intFromEnum(tersets.Method.VisvalingamWhyatt), 9);
     try testing.expectEqual(@intFromEnum(tersets.Method.SlidingWindow), 10);
     try testing.expectEqual(@intFromEnum(tersets.Method.BottomUp), 11);
+    try testing.expectEqual(@intFromEnum(tersets.Method.NeaCompression), 12);
 }
 
 test "error for unknown compression method" {
