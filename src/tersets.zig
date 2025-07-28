@@ -18,11 +18,12 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
-const poor_mans_compression = @import("functional/poor_mans_compression.zig");
-const swing_slide_filter = @import("functional/swing_slide_filter.zig");
-const sim_piece = @import("functional/sim_piece.zig");
-const piecewise_histogram = @import("functional/histogram_compression.zig");
-const abc_linear_compression = @import("functional/abc_linear_compression.zig");
+const poor_mans_compression = @import("functional_approximation/poor_mans_compression.zig");
+const swing_slide_filter = @import("functional_approximation/swing_slide_filter.zig");
+const sim_piece = @import("functional_approximation/sim_piece.zig");
+const mix_piece = @import("functional_approximation/mix_piece.zig");
+const piecewise_histogram = @import("histogram_representation/constant_linear_representation.zig");
+const abc_linear_approximation = @import("functional_approximation/abc_linear_approximation.zig");
 const nea_compression = @import("functional/nea_compression.zig");
 const vw = @import("line_simplification/visvalingam_whyatt.zig");
 const sliding_window = @import("line_simplification/sliding_window.zig");
@@ -53,6 +54,7 @@ pub const Method = enum {
     VisvalingamWhyatt,
     SlidingWindow,
     BottomUp,
+    MixPiece,
     NeaCompression,
 };
 
@@ -109,7 +111,15 @@ pub fn compress(
             );
         },
         .SimPiece => {
-            try sim_piece.compressSimPiece(
+            try sim_piece.compress(
+                uncompressed_values,
+                &compressed_values,
+                allocator,
+                error_bound,
+            );
+        },
+        .MixPiece => {
+            try mix_piece.compress(
                 uncompressed_values,
                 &compressed_values,
                 allocator,
@@ -133,7 +143,7 @@ pub fn compress(
             );
         },
         .ABCLinearApproximation => {
-            try abc_linear_compression.compress(
+            try abc_linear_approximation.compress(
                 uncompressed_values,
                 &compressed_values,
                 allocator,
@@ -206,6 +216,9 @@ pub fn decompress(
         .SimPiece => {
             try sim_piece.decompress(compressed_values_slice, &decompressed_values, allocator);
         },
+        .MixPiece => {
+            try mix_piece.decompress(compressed_values_slice, &decompressed_values, allocator);
+        },
         .PiecewiseConstantHistogram => {
             try piecewise_histogram.decompressPWCH(compressed_values_slice, &decompressed_values);
         },
@@ -213,7 +226,7 @@ pub fn decompress(
             try piecewise_histogram.decompressPWLH(compressed_values_slice, &decompressed_values);
         },
         .ABCLinearApproximation => {
-            try abc_linear_compression.decompress(compressed_values_slice, &decompressed_values);
+            try abc_linear_approximation.decompress(compressed_values_slice, &decompressed_values);
         },
         .VisvalingamWhyatt => {
             try vw.decompress(compressed_values_slice, &decompressed_values);
