@@ -4,12 +4,12 @@ TerseTS is a high-performance compression library written in [Zig](https://zigla
 
 ## 1. Environment Setup
 
-We recommend consulting the relevant README and source file for language-specific contribution setup.
+Consult the relevant README and source file for language-specific contribution setup.
 
 | Language | Path |
 |----------|------|
 | Zig      | [README.md](../README.md) and [src/tersets.zig](../src/tersets.zig) |
-| C        | [src/capi.zig](../src/capi.zig) and [c header](../bindings/c/tersets.h) comments |
+| C        | [src/capi.zig](../src/capi.zig) and [C header](../bindings/c/tersets.h) comments |
 | Python   | [bindings/python/README.md](../bindings/python/README.md) |
 
 ## 2. Development Tools and Checks
@@ -19,7 +19,7 @@ We recommend consulting the relevant README and source file for language-specifi
   - Formats code (`zig fmt`)
   - Compiles the C header
 - To use it as a Git hook for automatic execution do:
-  - On Unix/macOS:
+  - On Unix-like:
     ```bash
     ln -s ../../tools/pre-commit .git/hooks/pre-commit
     ```
