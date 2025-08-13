@@ -175,6 +175,17 @@ pub fn replaceNormalValues(
     }
 }
 
+/// Generate a random `f64` value for use in testing.
+pub fn generateRandomValue(random_opt: ?Random) f64 {
+    const seed: u64 = @bitCast(time.milliTimestamp());
+    var prng = std.Random.DefaultPrng.init(seed);
+    var random = random_opt orelse prng.random();
+
+    // rand can only generate f64 values in the range [0, 1).
+    const random_value = @as(f64, @bitCast(random.int(u64)));
+    return random_value;
+}
+
 /// Generate `number_of_values` of random `f64` values for use in testing using `random` and add
 /// them to `uncompressed_values`.
 pub fn generateRandomValues(uncompressed_values: *ArrayList(f64), random: Random) !void {

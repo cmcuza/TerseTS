@@ -106,13 +106,22 @@ test "run length encoding compresses repeated values" {
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
 
-    // Generate a random number of `distinct_elements` that will be repeated a random number of time
+    // `at_least` and `at_most` define the minimum and maximum bounds for both the number of
+    // distinct elements and the number of repetitions for each element in the generated test
+    // data. These values are chosen to be 10 and 50, respectively, to ensure that the test
+    // covers a reasonable range of scenarios, from short to moderately long runs, without being
+    // so large as to make the test slow. Combined, the length of the uncompressed values would
+    // be at least 100, and at most 2401, which is reasonable.
+    const at_least: usize = 10;
+    const at_most: usize = 50;
+
+    // Generate a random number of `distinct_elements` that will be repeated a random number of times
     // to test that RLE can compress repeated values.
-    const distinct_elements: usize = tester.generateBoundRandomInteger(usize, 10, 50, undefined);
+    const distinct_elements: usize = tester.generateBoundRandomInteger(usize, at_least, at_most, undefined);
 
     for (0..distinct_elements) |_| {
-        const random_value = tester.generateBoundedRandomValue(f64, -1e-16, 1e16, undefined);
-        const repeat: usize = tester.generateBoundRandomInteger(usize, 10, 20, undefined);
+        const random_value = tester.generateRandomValue(undefined);
+        const repeat: usize = tester.generateBoundRandomInteger(usize, at_least, at_most, undefined);
         for (0..repeat) |_| {
             try uncompressed_values.append(random_value);
         }
