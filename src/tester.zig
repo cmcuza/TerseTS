@@ -175,7 +175,8 @@ pub fn replaceNormalValues(
     }
 }
 
-/// Generate a random `f64` value for use in testing.
+/// Generate a random `f64` value using `random`. If `random_opt` is not passed, a random number
+/// generator is created.
 pub fn generateRandomValue(random_opt: ?Random) f64 {
     const seed: u64 = @bitCast(time.milliTimestamp());
     var prng = std.Random.DefaultPrng.init(seed);
@@ -233,7 +234,7 @@ pub fn generateBoundedRandomValues(
 
 /// Generate `number_of_values` of random `f64` values following a linear function of random slope
 /// and intercept for use in testing using `random_opt`. Random noise is add to the elements and then
-/// add to `uncompressed_values`.If `random_opt` is not passed, a random number generator is created.
+/// add to `uncompressed_values`. If `random_opt` is not passed, a random number generator is created.
 pub fn generateRandomLinearFunction(uncompressed_values: *ArrayList(f64), random_opt: ?Random) !void {
     // If `random_opt` is not passed, a random number generator is created using the current time as seed.
     const seed: u64 = @bitCast(time.milliTimestamp());
