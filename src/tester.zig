@@ -175,7 +175,7 @@ pub fn replaceNormalValues(
     }
 }
 
-/// Generate a random `f64` value using `random`. If `random_opt` is not passed, a random number
+/// Generate a random `f64` value using `random_opt`. If `random_opt` is not passed, a random number
 /// generator is created.
 pub fn generateRandomValue(random_opt: ?Random) f64 {
     const seed: u64 = @bitCast(time.milliTimestamp());
