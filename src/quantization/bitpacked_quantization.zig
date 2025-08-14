@@ -65,7 +65,7 @@ pub fn compress(
     // Append the minimum value to the header of the compressed values.
     try appendValue(f32, bucket_size, compressed_values);
 
-    // Intermadiate quantized values.
+    //Intermediate quantized values.
     var quantized_values = ArrayList(usize).init(allocator);
     defer quantized_values.deinit();
 
@@ -73,14 +73,13 @@ pub fn compress(
 
     // Quantize each value by mapping it to a discrete bucket index.
     // If the error_bound is zero, we compute the difference between the
-    // raw bit patterns of the value and the minimum value, ensuring all
-    // resulting integers are >= 0. This allows storing them efficiently.
+    // value and the minimum value, ensuring all resulting integers are >= 0.
     // For non-zero error_bound, we apply fixed-width bucket quantization
     // using the defined bucket size (2 × error_bound).
     var quantized_value: usize = 0;
     for (uncompressed_values) |value| {
         if (error_bound == 0.0) {
-            // Bit-diff quantization for lossless case.
+            // Bit-diff quantization for the lossless case.
             const usize_value: usize = floatBitsOrdered(value);
             quantized_value = usize_value - usize_min_value;
         } else {
@@ -235,7 +234,7 @@ test "bitpacked quantization can compress and decompress bounded values" {
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
 
-    // Generate 500 random values within the range of -1e7 to 1e7.
+    // Generate 500 random values within the range of -1e13 to 1e13.
     for (0..5) |_| {
         try tester.generateBoundedRandomValues(&uncompressed_values, -1e13, 1e13, undefined);
     }
