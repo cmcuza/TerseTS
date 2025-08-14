@@ -862,7 +862,7 @@ test "swing filter can always compress and decompress with zero error bound" {
     );
 }
 
-test "swing filter can always compress and decompress with any error bound" {
+test "swing filter can always compress and decompress with positive error bound" {
     const allocator = testing.allocator;
     const data_distributions = &[_]tester.DataDistribution{
         .FiniteRandomValues,
@@ -874,6 +874,9 @@ test "swing filter can always compress and decompress with any error bound" {
         .SinusoidalFunctionWithNansAndInfinities,
         .BoundedRandomValuesWithNansAndInfinities,
     };
+    // This function evaluates SwingFilter using all data distribution stored in
+    // `data_distribution` with a positive error bound ranging from [1e-4, 1)*range
+    // of the generated uncompressed time series.
     try tester.testErrorBoundedCompressionMethod(
         allocator,
         Method.SwingFilter,
@@ -892,7 +895,7 @@ test "swing filter disconnected can always compress and decompress with zero err
     );
 }
 
-test "swing filter disconnected can always compress and decompress with any error bound" {
+test "swing filter disconnected can always compress and decompress with positive error bound" {
     const allocator = testing.allocator;
     const data_distributions = &[_]tester.DataDistribution{
         .FiniteRandomValues,
@@ -904,6 +907,10 @@ test "swing filter disconnected can always compress and decompress with any erro
         .SinusoidalFunctionWithNansAndInfinities,
         .BoundedRandomValuesWithNansAndInfinities,
     };
+
+    // This function evaluates SwingFilterDisconnected using all data distribution stored in
+    // `data_distribution` with a positive error bound ranging from [1e-4, 1)*range
+    // of the generated uncompressed time series.
     try tester.testErrorBoundedCompressionMethod(
         allocator,
         Method.SwingFilterDisconnected,
@@ -922,7 +929,7 @@ test "slide filter can always compress and decompress with zero error bound" {
     );
 }
 
-test "slide filter can always compress and decompress with any error bound" {
+test "slide filter can always compress and decompress with positive error bound" {
     const allocator = testing.allocator;
     const data_distributions = &[_]tester.DataDistribution{
         .FiniteRandomValues,
@@ -934,6 +941,10 @@ test "slide filter can always compress and decompress with any error bound" {
         .SinusoidalFunctionWithNansAndInfinities,
         .BoundedRandomValuesWithNansAndInfinities,
     };
+
+    // This function evaluates SlideFilter using all data distribution stored in
+    // `data_distribution` with a positive error bound ranging from [1e-4, 1)*range
+    // of the generated uncompressed time series.
     try tester.testErrorBoundedCompressionMethod(
         allocator,
         Method.SlideFilter,

@@ -71,7 +71,7 @@ pub fn compress(
     ).init(allocator, {});
     defer heap.deinit();
 
-    // First point cannot be removed. Thus, the area is set to infinity.
+    // First point cannot be removed. Thus, the area is set to inf.
     try heap.add(PointArea{
         .index = 0,
         .area = math.inf(f64),
@@ -93,7 +93,7 @@ pub fn compress(
         });
     }
 
-    // Last point cannot be removed. Thus the area is set to infinity.
+    // Last point cannot be removed. Thus the area is set to inf.
     try heap.add(PointArea{
         .index = uncompressed_values.len - 1,
         .area = math.inf(f64),

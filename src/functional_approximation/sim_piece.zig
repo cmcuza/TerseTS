@@ -175,12 +175,8 @@ fn computeSegmentsMetadata(
 
     // Check if the first point is NaN, infinite or a reduced precision f64.
     // If so, return an error.
-    if (!math.isFinite(uncompressed_values[0]) or @abs(uncompressed_values[0]) > 1e15)
+    if (!math.isFinite(uncompressed_values[0]) or @abs(uncompressed_values[0]) > tester.max_test_value)
         return Error.UnsupportedInput;
-    // Check if the first point is NaN, infinite or a reduced precision floating point.
-    // If so, return an error.
-    if (!math.isFinite(uncompressed_values[0]) or
-        uncompressed_values[0] > 1e15) return Error.UnsupportedInput;
 
     // Initialize the `start_point` with the first uncompressed value.
     var start_point: DiscretePoint = .{ .time = 0, .value = uncompressed_values[0] };
@@ -196,7 +192,8 @@ fn computeSegmentsMetadata(
         // Check if the current point is NaN, infinite or a reduced precision floating point.
         // If so, return an error.
         if (!math.isFinite(uncompressed_values[current_timestamp]) or
-            uncompressed_values[current_timestamp] > 1e15) return Error.UnsupportedInput;
+            uncompressed_values[current_timestamp] > tester.max_test_value)
+            return Error.UnsupportedInput;
 
         const end_point: DiscretePoint = .{
             .time = current_timestamp,
@@ -595,13 +592,17 @@ test "hashmap can map f64 to segment metadata array list" {
     }
 }
 
-test "sim-piece can compress and decompress bounded values with any error bound" {
+test "sim-piece can compress and decompress bounded values with positive error bound" {
     const allocator = testing.allocator;
     const data_distributions = &[_]tester.DataDistribution{
         .LinearFunctions,
         .BoundedRandomValues,
         .SinusoidalFunction,
     };
+
+    // This function evaluates SimPiece using all data distribution stored in
+    // `data_distribution` with a positive error bound ranging from [1e-4, 1)*range
+    // of the generated uncompressed time series.
     try tester.testErrorBoundedCompressionMethod(
         allocator,
         Method.SimPiece,
@@ -609,17 +610,19 @@ test "sim-piece can compress and decompress bounded values with any error bound"
     );
 }
 
-test "sim-piece can compress, decompress and merge many segments with non-zero error bound" {
+test "sim-piece can compress, decompress and merge many segments with positive error bound" {
+    // This test checks that Sim-Piece can compress and decompress a sequence with many segments,
+    // and that merging works as expected. The values are randomly generated in [0, 10] to ensure
+    // many possible segment boundaries, and a random error bound in [0.5, 3] is used to trigger
+    // merging behavior. This justifies the use of these ranges: small error bounds create more
+    // segments, and a wide value range increases the chance of segment boundaries.
     const allocator = testing.allocator;
-
     const error_bound = tester.generateBoundedRandomValue(f32, 0.5, 3, undefined);
 
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
 
     for (0..20) |_| {
-        // Generate floating points numbers between 0 and 10. This will generate many merged
-        // segments when applying Sim-Piece.
         try tester.generateBoundedRandomValues(&uncompressed_values, 0, 10, undefined);
     }
 
@@ -632,7 +635,7 @@ test "sim-piece can compress, decompress and merge many segments with non-zero e
     );
 }
 
-test "sim-piece cannot compress nan values" {
+test "sim-piece cannot compress NaN values" {
     const allocator = testing.allocator;
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, math.nan(f64), 3.0 };
@@ -652,7 +655,7 @@ test "sim-piece cannot compress nan values" {
 
     try testing.expectFmt(
         "",
-        "The Sim-Piece algorithm cannot compress nan values",
+        "The Sim-Piece algorithm cannot compress NaN values",
         .{},
     );
 }

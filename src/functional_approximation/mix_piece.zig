@@ -38,6 +38,24 @@ const sp = @import("sim_piece.zig");
 const Error = tersets.Error;
 const DiscretePoint = shared.DiscretePoint;
 
+/// Struct for keeping ungrouped segments.
+const UngroupedSegment = struct {
+    slope: f64,
+    intercept: f64,
+    timestamp: usize,
+};
+
+/// Struct for the grouping of cross intercept groups.
+const InterceptTimestampPair = struct {
+    intercept: f64,
+    timestamp: usize,
+};
+
+/// HashMap for cross_intercept_groups.
+const CrossInterceptGroupsMap = shared.HashMapf64(
+    ArrayList(InterceptTimestampPair),
+);
+
 /// Compresses `uncompressed_values` within `error_bound` using the "Mix-Piece" algorithm.
 /// The function writes the result to `compressed_values`. The `allocator` is used for memory
 /// allocation of intermediate data structures. If an error occurs, it is returned.
@@ -374,7 +392,7 @@ fn computeSegmentsMetadata(
 
     // Check if the first point is NaN, infinite or a reduced precision f64.
     // If so, return an error.
-    if (!math.isFinite(uncompressed_values[0]) or @abs(uncompressed_values[0]) > 1e15)
+    if (!math.isFinite(uncompressed_values[0]) or @abs(uncompressed_values[0]) > tester.max_test_value)
         return Error.UnsupportedInput;
 
     // Initialize the `start_point` with the first uncompressed value.
@@ -402,7 +420,7 @@ fn computeSegmentsMetadata(
         // Check if the current point is NaN, infinite or a reduced precision f64.
         // If so, return an error.
         if (!math.isFinite(uncompressed_values[current_timestamp]) or
-            @abs(uncompressed_values[current_timestamp]) > 1e15)
+            @abs(uncompressed_values[current_timestamp]) > tester.max_test_value)
             return Error.UnsupportedInput;
 
         const end_point: DiscretePoint = .{
@@ -1026,24 +1044,6 @@ fn createCompressedRepresentationUngroupedSegments(
     }
 }
 
-/// Struct for keeping ungrouped segments.
-const UngroupedSegment = struct {
-    slope: f64,
-    intercept: f64,
-    timestamp: usize,
-};
-
-/// Struct for the grouping of cross intercept groups.
-const InterceptTimestampPair = struct {
-    intercept: f64,
-    timestamp: usize,
-};
-
-/// HashMap for cross_intercept_groups.
-const CrossInterceptGroupsMap = shared.HashMapf64(
-    ArrayList(InterceptTimestampPair),
-);
-
 /// Quantizes the given `value` by the specified `error_bound`. This process ensures that
 /// the quantized value remains within the error bound of the original value. If the
 /// `error_bound` is equal to zero, the value is directly returned.
@@ -1064,13 +1064,16 @@ fn quantizeCeil(value: f64, error_bound: f32) f64 {
     return value;
 }
 
-test "mix-piece can compress and decompress bounded values with any error bound" {
+test "mix-piece can compress and decompress bounded values with positive error bound" {
     const allocator = testing.allocator;
     const data_distributions = &[_]tester.DataDistribution{
         .LinearFunctions,
         .BoundedRandomValues,
         .SinusoidalFunction,
     };
+    // This function evaluates Mix-Piece using all data distribution stored in
+    // `data_distribution` with a positive error bound ranging from [1e-4, 1)*range
+    // of the generated uncompressed time series.
     try tester.testErrorBoundedCompressionMethod(
         allocator,
         Method.MixPiece,
@@ -1101,7 +1104,7 @@ test "mix-piece can compress, decompress and merge many segments with non-zero e
     );
 }
 
-test "mix-piece cannot compress nan values" {
+test "mix-piece cannot compress NaN values" {
     const allocator = testing.allocator;
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, math.nan(f64), 3.0 };
@@ -1121,7 +1124,7 @@ test "mix-piece cannot compress nan values" {
 
     try testing.expectFmt(
         "",
-        "The Mix-Piece algorithm cannot compress nan values",
+        "The Mix-Piece algorithm cannot compress NaN values",
         .{},
     );
 }

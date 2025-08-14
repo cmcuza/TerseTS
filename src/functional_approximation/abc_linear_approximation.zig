@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //! Implementation of "ABCLinearApproximation" algorithm from the paper:
-//! "Approximations of One-Dimensional Digital Signals Under the L^\infinity Norm.
+//! "Approximations of One-Dimensional Digital Signals Under the L^\inf Norm.
 //! Dalai, Marco, and Riccardo Leonardi.
 //! IEEE Transactions on Signal Processing, 54, 8, 3111-3124.
 //! https://doi.org/10.1109/TSP.2006.875394.
@@ -40,7 +40,7 @@ const Segment = shared_structs.Segment;
 const ConvexHull = @import("../utilities/convex_hull.zig").ConvexHull;
 
 /// Compresses `uncompressed_values` using the "ABCLinearApproximation" algorithm under the
-/// L-infinity norm. The function writes the result to `compressed_values`. The `allocator`
+/// L-inf norm. The function writes the result to `compressed_values`. The `allocator`
 /// is used to allocate memory for the convex hull. If an error occurs it is returned.
 pub fn compress(
     uncompressed_values: []const f64,
@@ -298,7 +298,7 @@ test "abc compressor can always compress and decompress with zero error bound" {
     );
 }
 
-test "abc can always compress and decompress any f64 values with any error bound" {
+test "abc can always compress and decompress any f64 values with positive error bound" {
     const allocator = testing.allocator;
     const data_distributions = &[_]tester.DataDistribution{
         .FiniteRandomValues,
@@ -310,6 +310,9 @@ test "abc can always compress and decompress any f64 values with any error bound
         .SinusoidalFunctionWithNansAndInfinities,
         .BoundedRandomValuesWithNansAndInfinities,
     };
+    // This function evaluates the ABC method using all data distribution stored in
+    // `data_distribution` with a positive error bound ranging from [1e-4, 1)*range
+    // of the generated uncompressed time series.
     try tester.testErrorBoundedCompressionMethod(
         allocator,
         Method.ABCLinearApproximation,

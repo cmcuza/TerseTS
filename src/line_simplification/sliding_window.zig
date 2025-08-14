@@ -159,7 +159,7 @@ fn computeRMSE(uncompressed_values: []const f64, seg_start: usize, seg_end: usiz
     return math.sqrt(sse / seg_len);
 }
 
-/// Computes the maximum absolute (Chebyshev, L-infinity) error between the actual values and the
+/// Computes the maximum absolute (Chebyshev, L-inf) error between the actual values and the
 /// linear interpolation over a segment of the input array. This function fits a straight
 /// line between the values at `seg_start` and `seg_end` in `uncompressed_values`, then
 /// calculates the maximum absolute difference between the actual values and the predicted
@@ -206,6 +206,8 @@ pub fn testRMSEisWithinErrorBound(
     if (values.len < 2) return;
 
     const rmse = computeRMSE(values, 0, values.len - 1);
+    if (rmse > error_bound)
+        std.debug.print("\n\n{} {}\n\n", .{ rmse, error_bound });
     try testing.expect(rmse <= error_bound);
 }
 

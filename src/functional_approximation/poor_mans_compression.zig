@@ -144,7 +144,7 @@ test "midrange can always compress and decompress with zero error bound" {
     );
 }
 
-test "midrange can always compress and decompress with any error bound" {
+test "midrange can always compress and decompress with positive error bound" {
     const allocator = testing.allocator;
     const data_distributions = &[_]tester.DataDistribution{
         .FiniteRandomValues,
@@ -156,6 +156,10 @@ test "midrange can always compress and decompress with any error bound" {
         .SinusoidalFunctionWithNansAndInfinities,
         .BoundedRandomValuesWithNansAndInfinities,
     };
+
+    // This function evaluates PoorMansCompressionMidrange using all data distribution stored in
+    // `data_distribution` with a positive error bound ranging from [1e-4, 1)*range
+    // of the generated uncompressed time series.
     try tester.testErrorBoundedCompressionMethod(
         allocator,
         Method.PoorMansCompressionMidrange,
@@ -174,7 +178,7 @@ test "mean can always compress and decompress with zero error bound" {
     );
 }
 
-test "mean can always compress and decompress with any error bound" {
+test "mean can always compress and decompress with positive error bound" {
     const allocator = testing.allocator;
     const data_distributions = &[_]tester.DataDistribution{
         .FiniteRandomValues,
@@ -186,6 +190,10 @@ test "mean can always compress and decompress with any error bound" {
         .SinusoidalFunctionWithNansAndInfinities,
         .BoundedRandomValuesWithNansAndInfinities,
     };
+
+    // This function evaluates PoorMansCompressionMean using all data distribution stored in
+    // `data_distribution` with a positive error bound ranging from [1e-4, 1)*range
+    // of the generated uncompressed time series.
     try tester.testErrorBoundedCompressionMethod(
         allocator,
         Method.PoorMansCompressionMean,
