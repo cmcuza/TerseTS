@@ -228,7 +228,7 @@ However, please note:
 
 * 📦 **No external dependencies:** Do not introduce new runtime or build-time dependencies (e.g., Python packages, C libraries) unless there is a very strong justification and it is essential to the functionality.
 
-* 🧾 **Justify structural changes:** If you propose changes to how bindings are organized, loaded, or called, please clearly explain the motivation and benefit in the pull request description.
+* 🧾 **Justify structural changes:** If you propose changes to how bindings are organized, loaded, or called, please clearly explain the motivation and benefit in the PR description.
 
 ## 6. Tests
 All compression methods must be validated using the unified testing framework in `src/tester.zig`.
