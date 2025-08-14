@@ -249,6 +249,42 @@ test "bitpacked quantization can compress and decompress bounded values" {
     );
 }
 
+test "bitpacked quantization cannot compress and decompress nan values" {
+    const allocator = testing.allocator;
+    const uncompressed_values = [3]f64{ 343.0, math.nan(f64), 520.0 };
+    var compressed_values = std.ArrayList(u8).init(allocator);
+    compressed_values.deinit();
+
+    compress(allocator, uncompressed_values[0..], &compressed_values, 0.1) catch |err| {
+        try testing.expectEqual(Error.UnsupportedInput, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The BitPacked Quantization method cannot compress nan values",
+        .{},
+    );
+}
+
+test "bitpacked quantization cannot compress and decompress unbounded values" {
+    const allocator = testing.allocator;
+    const uncompressed_values = [3]f64{ 343.0, 1e20, 520.0 };
+    var compressed_values = std.ArrayList(u8).init(allocator);
+    compressed_values.deinit();
+
+    compress(allocator, uncompressed_values[0..], &compressed_values, 0.1) catch |err| {
+        try testing.expectEqual(Error.UnsupportedInput, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The BitPacked Quantization method cannot compress unbounded values",
+        .{},
+    );
+}
+
 test "bitpacked quantization can compress and decompress bounded values at different scales" {
     const allocator = testing.allocator;
     const error_bound = tester.generateBoundedRandomValue(f32, 0, 1e3, undefined);
