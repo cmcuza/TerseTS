@@ -53,8 +53,8 @@ pub const global_replace_probability: f32 = 0.05;
 pub const max_test_value: f64 = 1.0e15;
 
 /// Default seed and prng to generate random values.
-var default_prng: std.Random.DefaultPrng = undefined;
-var default_seed: u64 = 0;
+pub var default_prng: std.Random.DefaultPrng = undefined;
+pub var default_seed: u64 = 0;
 
 /// Different data distributions used for testing.
 pub const DataDistribution = enum {
@@ -172,14 +172,14 @@ pub fn testGeneratedCompression(
     ) * error_bound);
 
     const compressed = try tersets.compress(
-        uncompressed_values.items,
         allocator,
+        uncompressed_values.items,
         method,
         ranged_error_bound,
     );
     defer compressed.deinit();
 
-    const decompressed = try tersets.decompress(compressed.items, allocator);
+    const decompressed = try tersets.decompress(allocator, compressed.items);
     defer decompressed.deinit();
 
     if (uncompressed_values.items.len != decompressed.items.len) {
@@ -311,14 +311,14 @@ pub fn testCompressAndDecompress(
     ) bool,
 ) !void {
     const compressed_values = try tersets.compress(
-        uncompressed_values,
         allocator,
+        uncompressed_values,
         method,
         error_bound,
     );
     defer compressed_values.deinit();
 
-    const decompressed_values = try tersets.decompress(compressed_values.items, allocator);
+    const decompressed_values = try tersets.decompress(allocator, compressed_values.items);
     defer decompressed_values.deinit();
 
     try testing.expect(withinErrorBound(

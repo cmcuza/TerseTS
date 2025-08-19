@@ -196,9 +196,9 @@ pub fn compress(
 /// `decompressed_values`. The `allocator` is used for memory allocation of intermediate data
 /// structures. If an error occurs, it is returned.
 pub fn decompress(
+    allocator: mem.Allocator,
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
-    allocator: mem.Allocator,
 ) Error!void {
 
     // Initialize temp array to store all segments.

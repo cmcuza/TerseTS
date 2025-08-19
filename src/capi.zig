@@ -57,8 +57,8 @@ export fn compress(
     const method: Method = @enumFromInt(configuration.method);
 
     const compressed_values = tersets.compress(
-        uncompressed_values,
         allocator,
+        uncompressed_values,
         method,
         configuration.error_bound,
     ) catch |err| return errorToInt(err);
@@ -82,8 +82,8 @@ export fn decompress(
     const compressed_values = compressed_values_array.data[0..compressed_values_array.len];
 
     const decompressed_values = tersets.decompress(
-        compressed_values,
         allocator,
+        compressed_values,
     ) catch |err| return errorToInt(err);
 
     decompressed_values_array.data = decompressed_values.items.ptr;

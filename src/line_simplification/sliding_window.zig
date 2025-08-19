@@ -60,7 +60,7 @@ pub fn compress(
 
         // Expand the segment as long as the RMSE is within the error bound.
         while ((seg_end < uncompressed_values.len) and
-            (computeRMSE(uncompressed_values, seg_start, seg_end) < error_bound)) : (seg_end += 1)
+            (try computeRMSE(uncompressed_values, seg_start, seg_end) <= error_bound)) : (seg_end += 1)
         {}
 
         // Store the segment's start value, end index, and end value in the compressed output.
@@ -105,20 +105,20 @@ pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList
             .value = compressed_lines_and_index[index + 1],
         };
 
-        // Check if the segment has only two points. If so, we can directly append their values.
+        // Check if the segment has more than two points.
         if (start_point.time + 1 < end_point.time) {
             const duration: f64 = @floatFromInt(end_point.time - start_point.time);
 
             const slope = (end_point.value - start_point.value) / duration;
-            const intercept = start_point.value - slope *
-                @as(f64, @floatFromInt(start_point.time));
+            const intercept = start_point.value;
 
             try decompressed_values.append(start_point.value);
             var current_timestamp: usize = start_point.time + 1;
 
             // Interpolate the values between the start and end points of the current segment.
             while (current_timestamp < end_point.time) : (current_timestamp += 1) {
-                const y: f64 = slope * @as(f64, @floatFromInt(current_timestamp)) + intercept;
+                const scaled_time = @as(f64, @floatFromInt(current_timestamp - start_point.time));
+                const y: f64 = slope * scaled_time + intercept;
                 try decompressed_values.append(y);
             }
             try decompressed_values.append(end_point.value);
@@ -129,9 +129,14 @@ pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList
             try decompressed_values.append(start_point.value);
             // Check wheter the point is the same. If so, then we are at the end of the time series.
             // Thus, do not insert the end point. Otherwise, insert the end point.
-            if (start_point.time != end_point.time)
+            if (start_point.time != end_point.time) {
                 try decompressed_values.append(end_point.value);
-            first_timestamp += 2;
+                first_timestamp += 2;
+            } else {
+                // If the start and end points are the same, we are at the end of the time series.
+                // Thus, do not insert the end point.
+                first_timestamp += 1;
+            }
         }
     }
 }
@@ -139,23 +144,32 @@ pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList
 /// Computes the Root-Mean-Squared-Errors (RMSE) for a segment of the `uncompressed_values`.
 /// This function calculates the error between the actual values and the predicted values
 /// based on a linear regression model fitted to the segment defined by `seg_start` and `seg_end`.
-fn computeRMSE(uncompressed_values: []const f64, seg_start: usize, seg_end: usize) f64 {
+fn computeRMSE(uncompressed_values: []const f64, seg_start: usize, seg_end: usize) Error!f64 {
     const seg_len: f64 = @floatFromInt(seg_end - seg_start + 1);
     if (seg_len <= 1) return 0.0; // If the segment has one or no points, return zero error.
 
-    const slope: f64 = (uncompressed_values[seg_end] - uncompressed_values[seg_start]) / (seg_len - 1);
-    const intercept: f64 = uncompressed_values[seg_start] - slope * @as(f64, @floatFromInt(seg_start));
-
-    // Calculate the RMSE between actual and predicted values.
-    var sse: f64 = 0;
-    var i = seg_start;
-    while (i <= seg_end) : (i += 1) {
-        const pred = slope * @as(f64, @floatFromInt(i)) + intercept; // Predicted value.
-        const diff = uncompressed_values[i] - pred; // Difference between actual and predicted.
-        sse += diff * diff; // Accumulate squared differences.
+    // Check if the elements of the segment are within the valid range.
+    if (uncompressed_values[seg_start] > tester.max_test_value or
+        !math.isFinite(uncompressed_values[seg_start]) or
+        uncompressed_values[seg_end] > tester.max_test_value or
+        !math.isFinite(uncompressed_values[seg_end]))
+    {
+        return Error.UnsupportedInput;
     }
+    // Calculate the slope and intercept of the line connecting the start and end points.
+    const slope: f64 = (uncompressed_values[seg_end] - uncompressed_values[seg_start]) / (seg_len - 1);
+    const intercept = uncompressed_values[seg_start];
+    var sse: f64 = 0;
+    var i: usize = seg_start;
+    while (i <= seg_end) : (i += 1) {
+        if (uncompressed_values[i] > tester.max_test_value or
+            !math.isFinite(uncompressed_values[i])) return Error.UnsupportedInput;
 
-    // Return the RMSE.
+        const scaled_time = @as(f64, @floatFromInt(i - seg_start)); // small numbers: 0,1,2,...
+        const pred = intercept + slope * scaled_time;
+        const diff = uncompressed_values[i] - pred;
+        sse += diff * diff;
+    }
     return math.sqrt(sse / seg_len);
 }
 
@@ -205,38 +219,70 @@ pub fn testRMSEisWithinErrorBound(
     // At least two points are needed to form a line.
     if (values.len < 2) return;
 
-    const rmse = computeRMSE(values, 0, values.len - 1);
-    if (rmse > error_bound)
-        std.debug.print("\n\n{} {}\n\n", .{ rmse, error_bound });
+    const rmse = try computeRMSE(values, 0, values.len - 1);
     try testing.expect(rmse <= error_bound);
 }
 
-test "sliding-window can compress and decompress with zero error bound" {
+test "sliding-window can compress and decompress bounded values with zero error bound" {
     const allocator = testing.allocator;
+    const error_bound = 0;
 
-    // Output buffer.
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
-    const error_bound: f32 = 0.0;
 
-    const max_lines: usize = tester.generateBoundRandomInteger(usize, 4, 25, undefined);
-    // Sliding-Window cannot handle very large value due to numerical issues with `math.order()`.
-    for (0..max_lines) |_| {
-        try tester.generateBoundedRandomValues(&uncompressed_values, -1e16, 1e16, undefined);
-    }
-    // Call the compress and decompress functions.
-    try compress(uncompressed_values.items, &compressed_values, error_bound);
-    try decompress(compressed_values.items, &decompressed_values);
+    try tester.generateBoundedRandomValues(
+        &uncompressed_values,
+        -1e15,
+        1e15,
+        undefined,
+    );
 
-    // Check if the decompressed values have the same lenght as the compressed ones.
-    try testing.expectEqual(uncompressed_values.items.len, decompressed_values.items.len);
+    try tester.testCompressAndDecompress(
+        allocator,
+        uncompressed_values.items,
+        Method.SlidingWindow,
+        error_bound,
+        tersets.isWithinErrorBound,
+    );
 }
 
-test "sliding-window random lines and random error bound compress and decompress" {
+test "sliding-window cannot compress and decompress nan values" {
+    const allocator = testing.allocator;
+    const uncompressed_values = [3]f64{ 343.0, math.nan(f64), 520.0 };
+    var compressed_values = std.ArrayList(u8).init(allocator);
+    compressed_values.deinit();
+
+    compress(uncompressed_values[0..], &compressed_values, 0.1) catch |err| {
+        try testing.expectEqual(Error.UnsupportedInput, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The Sliding-Window method cannot compress nan values",
+        .{},
+    );
+}
+
+test "sliding-window cannot compress and decompress unbounded values" {
+    const allocator = testing.allocator;
+    const uncompressed_values = [3]f64{ 343.0, 1e20, 520.0 };
+    var compressed_values = std.ArrayList(u8).init(allocator);
+    compressed_values.deinit();
+
+    compress(uncompressed_values[0..], &compressed_values, 0.1) catch |err| {
+        try testing.expectEqual(Error.UnsupportedInput, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The Sliding-Window method cannot compress unbounded values",
+        .{},
+    );
+}
+
+test "sliding-window compress and decompress random lines and random error bound" {
     const allocator = testing.allocator;
 
     var uncompressed_values = ArrayList(f64).init(allocator);
