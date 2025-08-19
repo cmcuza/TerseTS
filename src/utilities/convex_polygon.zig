@@ -29,6 +29,7 @@ const LinearFunction = shared_structs.LinearFunction;
 const ContinousPoint = shared_structs.ContinousPoint;
 
 const shared_functions = @import("../utilities/shared_functions.zig");
+const tester = @import("../tester.zig");
 
 const XAxisDomain = struct { start: f64, end: f64 };
 
@@ -626,19 +627,16 @@ pub fn addPoint(poly: *ConvexPolygon, x_axis: usize, y_axis: f64, eps: f64) !boo
     return try poly.update(upper, lower);
 }
 
-test "ConvexPolygon: random linear sequences with slope break" {
-    const seed: u64 = @intCast(std.time.milliTimestamp());
-    var default_prng = std.Random.DefaultPrng.init(seed);
-    const random = default_prng.random();
+test "convex polygon can update random linear sequences with slope break" {
     const allocator = testing.allocator;
+    const random = tester.getDefaultRandomGenerator();
 
-    // Create polygon
+    // Create polygon.
     var poly = ConvexPolygon.init(allocator);
     defer poly.deinit();
 
     const epsilon = 0.8;
 
-    // First line: slope +1, intercept 0
     const m1: f64 = random.float(f64) * 10;
     const b1: f64 = random.float(f64);
 

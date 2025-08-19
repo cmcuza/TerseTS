@@ -569,3 +569,40 @@ fn postprocessData(data: []f64, shift_amount: f32, first_segment_type: FunctionT
         val.* -= shift_f64;
     }
 }
+
+test "find optimal approximation with random linear sequences with slope break" {
+    const allocator = testing.allocator;
+    const random = tester.getDefaultRandomGenerator();
+
+    const error_bound = 0.8;
+
+    const m1: f64 = tester.generateBoundedRandomValue(f64, 1, 10, undefined);
+    const b1: f64 = tester.generateBoundedRandomValue(f64, 1, 10, undefined);
+
+    const uncompressed_values: []f64 = try allocator.alloc(f64, 40);
+    defer allocator.free(uncompressed_values);
+
+    for (0..20) |i| {
+        const y = m1 * @as(f64, @floatFromInt(i)) + b1 + random.float(f64) * 0.1;
+        uncompressed_values[i] = y;
+    }
+
+    // Now second line: slope -1, intercept 10
+    const m2: f64 = tester.generateBoundedRandomValue(f64, 1, 10, undefined);
+    const b2: f64 = tester.generateBoundedRandomValue(f64, 1, 10, undefined);
+
+    for (20..40) |i| {
+        const y = m2 * @as(f64, @floatFromInt(i)) + b2 + random.float(f64) * 0.1;
+        uncompressed_values[i] = y;
+    }
+
+    const optimal = try findOptimalFunctionalApproximation(
+        allocator,
+        uncompressed_values,
+        error_bound,
+    );
+
+    for (optimal.items) |segment| {
+        std.debug.print("{}\n", .{segment});
+    }
+}
