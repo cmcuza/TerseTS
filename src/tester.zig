@@ -369,8 +369,9 @@ pub fn generateRandomValue(random_opt: ?Random) f64 {
 }
 
 /// Generate a random number of `f64` values using `random` and add them to `uncompressed_values`.
-/// The number of values is randomly chosen between 100 and 150. Each value is a random `f64`
-/// generated from a random `u64` bit pattern, which may include special values such as NaN or inf.
+/// Each value is a random `f64` generated from a random `u64` bit pattern, which may include
+/// special values such as NaN or inf. The final number of values is determined by a random
+/// generation function that returns an integer value between 100 and 150.
 pub fn generateRandomValues(uncompressed_values: *ArrayList(f64), random: Random) !void {
     for (0..generateNumberOfValues(random)) |_| {
         // Generate a random f64 by bit-casting a random u64.
