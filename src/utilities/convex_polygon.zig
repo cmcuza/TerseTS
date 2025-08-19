@@ -28,9 +28,7 @@ const shared_structs = @import("../utilities/shared_structs.zig");
 const LinearFunction = shared_structs.LinearFunction;
 const ContinousPoint = shared_structs.ContinousPoint;
 
-/// Absolute and relative tolerances for floating-point comparisons.
-pub const ABS_EPS: f64 = 1e-12;
-pub const REL_EPS: f64 = 1e-15;
+const shared_functions = @import("../utilities/shared_functions.zig");
 
 const XAxisDomain = struct { start: f64, end: f64 };
 
@@ -74,7 +72,10 @@ pub const BorderLine = struct {
         continous_point_one: ContinousPoint,
         continous_point_two: ContinousPoint,
     ) BorderLine {
-        if (isApproximatelyEqual(continous_point_one.time, continous_point_two.time)) {
+        if (shared_functions.isApproximatelyEqual(
+            continous_point_one.time,
+            continous_point_two.time,
+        )) {
             // Vertical in (m,b): represent as zero-slope b line over [m, m].
             return .{
                 .x_axis_domain = .{
@@ -141,9 +142,9 @@ pub const BorderLine = struct {
         const other_evaluate_end = other_border_line.evaluateAt(end);
 
         return (other_evaluate_start > self_evaluate_start) and
-            !isApproximatelyEqual(other_evaluate_start, self_evaluate_start) and
+            !shared_functions.isApproximatelyEqual(other_evaluate_start, self_evaluate_start) and
             (other_evaluate_end > self_evaluate_end) and
-            !isApproximatelyEqual(other_evaluate_end, self_evaluate_end);
+            !shared_functions.isApproximatelyEqual(other_evaluate_end, self_evaluate_end);
     }
 
     /// Computes the intersection between `self` and `other_border_line`. Depending on the value
@@ -166,8 +167,8 @@ pub const BorderLine = struct {
         const end_point = self.evaluateAtEnd();
 
         // Parallel lines: return a horizontal segment over our current interval.
-        if (isApproximatelyEqual(self_slope, other_slope)) {
-            std.debug.assert(isApproximatelyEqual(self_intercept, other_intercept));
+        if (shared_functions.isApproximatelyEqual(self_slope, other_slope)) {
+            std.debug.assert(shared_functions.isApproximatelyEqual(self_intercept, other_intercept));
             return BorderLine{ .definition = .{
                 .slope = 0,
                 .intercept = start_point.value,
@@ -182,7 +183,7 @@ pub const BorderLine = struct {
         const y_intercept = self.evaluateAt(x_intercept);
 
         if (is_upper) {
-            if (isApproximatelyEqual(x_intercept, start_point.time)) {
+            if (shared_functions.isApproximatelyEqual(x_intercept, start_point.time)) {
                 return BorderLine{ .definition = .{
                     .slope = 0,
                     .intercept = y_intercept,
@@ -204,7 +205,7 @@ pub const BorderLine = struct {
                 },
             };
         } else {
-            if (isApproximatelyEqual(x_intercept, end_point.time)) {
+            if (shared_functions.isApproximatelyEqual(x_intercept, end_point.time)) {
                 return BorderLine{
                     .definition = .{
                         .slope = 0,
@@ -569,15 +570,6 @@ pub const ConvexPolygon = struct {
         return lower_line.evaluateAtEnd();
     }
 };
-
-/// Returns true if two floating-point `value_a` and `value_b` numbers are approximately equal,
-/// using both absolute and relative tolerances to account for rounding errors.
-inline fn isApproximatelyEqual(value_a: f64, value_b: f64) bool {
-    if (value_a == value_b) return true;
-    const abs_diff = @abs(value_a - value_b);
-    const max_abs = @max(@abs(value_a), @abs(value_b));
-    return abs_diff <= ABS_EPS or abs_diff <= max_abs * REL_EPS;
-}
 
 /// Performs a binary search on a monotonic `border_line` segments to find the first segment
 /// that is not strictly below the given `target` segment, according to the segment ordering.

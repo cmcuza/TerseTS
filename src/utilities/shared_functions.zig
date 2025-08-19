@@ -22,6 +22,8 @@ const tester = @import("../tester.zig");
 const Error = tersets.Error;
 const testing = std.testing;
 
+const shared_structs = @import("shared_structs.zig");
+
 /// Computes the Root-Mean-Squared-Errors (RMSE) for a segment of the `uncompressed_values`.
 /// This function calculates the error between the actual values and the predicted values
 /// based on a linear regression model fitted to the segment defined by `seg_start` and `seg_end`.
@@ -118,4 +120,23 @@ pub fn computeMaxAbsoluteError(uncompressed_values: []const f64, seg_start: usiz
 
     // Return max abs.
     return linf;
+}
+
+/// Reads a value of compile-time known type `T` from the beginning of the `compressed_values` byte slice.
+/// Returns the value or an error if the slice is too short.
+pub fn readValue(comptime T: type, compressed_values: []const u8) Error!T {
+    const size = @sizeOf(T);
+    if (size > compressed_values.len) {
+        return Error.UnsupportedInput; // Not enough bytes to read the value.
+    }
+    return @bitCast(compressed_values[0..size].*);
+}
+
+/// Returns true if two floating-point `value_a` and `value_b` numbers are approximately equal,
+/// using both absolute and relative tolerances to account for rounding errors.
+inline fn isApproximatelyEqual(value_a: f64, value_b: f64) bool {
+    if (value_a == value_b) return true;
+    const abs_diff = @abs(value_a - value_b);
+    const max_abs = @max(@abs(value_a), @abs(value_b));
+    return abs_diff <= shared_structs.ABS_EPS or abs_diff <= max_abs * shared_structs.REL_EPS;
 }
