@@ -102,11 +102,11 @@ test "rle can always compress and decompress" {
         .BoundedRandomValuesWithNansAndInfinities,
     };
 
-    // This function evaluates PoorMansCompressionMidrange using all data distribution stored in
+    // This function evaluates RunLengthEncoding using all data distribution stored in
     // `data_distribution`. The error bound is ignored as RLE does not use it.
     try tester.testErrorBoundedCompressionMethod(
         allocator,
-        Method.PoorMansCompressionMidrange,
+        Method.RunLengthEncoding,
         data_distributions,
     );
 }

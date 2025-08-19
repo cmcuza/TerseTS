@@ -52,6 +52,10 @@ pub const global_replace_probability: f32 = 0.05;
 /// will be clamped within [-max_test_value, max_test_value] to ensure numerical stability.
 pub const max_test_value: f64 = 1.0e15;
 
+/// Default seed and prng to generate random values.
+var default_prng: std.Random.DefaultPrng = undefined;
+var default_seed: u64 = 0;
+
 /// Different data distributions used for testing.
 pub const DataDistribution = enum {
     LinearFunctions,
@@ -75,9 +79,7 @@ pub fn testErrorBoundedCompressionMethod(
     method: Method,
     data_distributions: []const DataDistribution,
 ) !void {
-    const seed: u64 = @bitCast(time.milliTimestamp());
-    var prng = Random.DefaultPrng.init(seed);
-    const random = prng.random();
+    const random = getDefaultRandomGenerator();
 
     for (data_distributions) |dist| {
         const error_bound: f32 = random.float(f32) + 1e-4; // Ensure a non-zero error bound.
@@ -156,9 +158,7 @@ pub fn testGeneratedCompression(
     error_bound: f32,
     data_distribution_name: []const u8,
 ) !void {
-    const seed: u64 = @bitCast(time.milliTimestamp());
-    var prng = Random.DefaultPrng.init(seed);
-    const random = prng.random();
+    const random = getDefaultRandomGenerator();
 
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
@@ -186,7 +186,7 @@ pub fn testGeneratedCompression(
         try testing.expectFmt(
             "",
             "Seed: {}, expected_len {}, found_len {}",
-            .{ seed, uncompressed_values.items.len, decompressed.items.len },
+            .{ default_seed, uncompressed_values.items.len, decompressed.items.len },
         );
         return;
     }
@@ -201,7 +201,7 @@ pub fn testGeneratedCompression(
                 "",
                 "Seed: {}, index {}, raw value {}, compressed value {}, error bound {},\n error bound exceeded by {}, with data distribution: {s} \n previous raw value {}, next raw value {}\n",
                 .{
-                    seed,
+                    default_seed,
                     i,
                     raw_value,
                     decompressed_value,
@@ -234,9 +234,7 @@ pub fn testGenerateCompressAndDecompress(
         error_bound: f32,
     ) bool,
 ) !void {
-    const seed: u64 = @bitCast(time.milliTimestamp());
-    var prng = Random.DefaultPrng.init(seed);
-    const random = prng.random();
+    const random = getDefaultRandomGenerator();
 
     var uncompressed_values = ArrayList(f64).init(allocator);
     try uncompressedValuesGenerator(&uncompressed_values, random);
@@ -292,7 +290,7 @@ pub fn testGenerateCompressAndDecompress(
         try testing.expectFmt(
             "",
             "Seed: {}, Values: {any}",
-            .{ seed, uncompressed_values.items[shortestStart..shortestEnd] },
+            .{ default_seed, uncompressed_values.items[shortestStart..shortestEnd] },
         );
     }
 }
@@ -363,9 +361,7 @@ pub fn replaceNormalValues(
 /// Generate a random `f64` value using `random_opt`. If `random_opt` is not passed, a random number
 /// generator is created.
 pub fn generateRandomValue(random_opt: ?Random) f64 {
-    const seed: u64 = @bitCast(time.milliTimestamp());
-    var prng = std.Random.DefaultPrng.init(seed);
-    var random = random_opt orelse prng.random();
+    var random = resolveRandom(random_opt);
 
     // rand can only generate f64 values in the range [0, 1).
     const random_value = @as(f64, @bitCast(random.int(u64)));
@@ -513,9 +509,7 @@ pub fn generateBoundedRandomValues(
     upper_bound: f64,
     random_opt: ?Random,
 ) !void {
-    const seed: u64 = @bitCast(time.milliTimestamp());
-    var prng = std.Random.DefaultPrng.init(seed);
-    var random = random_opt orelse prng.random();
+    var random = resolveRandom(random_opt);
 
     for (0..generateNumberOfValues(random)) |_| {
         // generate f64 values in the range [0, 1).
@@ -531,9 +525,7 @@ pub fn generateBoundedRandomValues(
 /// not passed, a random number generator is created.
 pub fn generateRandomLinearFunction(uncompressed_values: *ArrayList(f64), random_opt: ?Random) !void {
     // If `random_opt` is not passed, a random number generator is created using the current time as seed.
-    const seed: u64 = @bitCast(time.milliTimestamp());
-    var prng = std.Random.DefaultPrng.init(seed);
-    var random = random_opt orelse prng.random();
+    var random = resolveRandom(random_opt);
 
     // Choose log-uniform magnitude in [1e-2, 1e12].
     const log_magnitude = random.float(f64) * 14.0 - 2.0;
@@ -557,9 +549,7 @@ pub fn generateRandomLinearFunction(uncompressed_values: *ArrayList(f64), random
 /// `random_opt`. `T` must be a floating-point type (e.g., `f32`, `f64`). If random_opt is not
 /// passed, a random number generator is created using the current time as seed.
 pub fn generateBoundedRandomValue(comptime T: type, at_least: T, at_most: T, random_opt: ?Random) T {
-    const seed: u64 = @bitCast(time.milliTimestamp());
-    var prng = std.Random.DefaultPrng.init(seed);
-    var random = random_opt orelse prng.random();
+    var random = resolveRandom(random_opt);
 
     const rand_value: T = random.float(T);
     const bounded_value = at_least + (at_most - at_least) * rand_value;
@@ -570,9 +560,7 @@ pub fn generateBoundedRandomValue(comptime T: type, at_least: T, at_most: T, ran
 /// `random_opt`. `T` must be an integer-point type (e.g., `i32`, `usize`). If random_opt is not
 /// passed, a random number generator is created using the current time as seed.
 pub fn generateBoundRandomInteger(comptime T: type, at_least: T, at_most: T, random_opt: ?Random) T {
-    const seed: u64 = @bitCast(time.milliTimestamp());
-    var prng = std.Random.DefaultPrng.init(seed);
-    var random = random_opt orelse prng.random();
+    var random = resolveRandom(random_opt);
 
     const rand_value: T = random.intRangeAtMost(T, at_least, at_most);
     return rand_value;
@@ -584,4 +572,21 @@ pub fn generateBoundRandomInteger(comptime T: type, at_least: T, at_most: T, ran
 pub fn generateNumberOfValues(random: Random) usize {
     const number_of_values: usize = random.intRangeAtMost(usize, 100, 150);
     return number_of_values;
+}
+
+/// Returns the default `Random` instance, initializing it with the current millisecond timestamp
+/// as the seed if it has not been initialized yet. This ensures that repeated calls return the same
+/// pseudo-random number generator unless the seed is reset.
+pub fn getDefaultRandomGenerator() Random {
+    if (default_seed == 0) {
+        default_seed = @bitCast(time.milliTimestamp());
+        default_prng = std.Random.DefaultPrng.init(default_seed);
+    }
+    return default_prng.random();
+}
+
+/// Returns a `Random` object. If `random_opt` is provided, it is returned directly. Otherwise,
+/// this function returns the default `Random` instance.
+pub fn resolveRandom(random_opt: ?Random) Random {
+    return random_opt orelse getDefaultRandomGenerator();
 }

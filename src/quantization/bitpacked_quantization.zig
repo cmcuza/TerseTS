@@ -229,22 +229,18 @@ fn orderedBitsToFloat(value: u64) f64 {
 
 test "bitpacked quantization can compress and decompress bounded values" {
     const allocator = testing.allocator;
-    const error_bound = tester.generateBoundedRandomValue(f32, 0, 1e6, undefined);
+    const data_distributions = &[_]tester.DataDistribution{
+        .LinearFunctions,
+        .BoundedRandomValues,
+        .SinusoidalFunction,
+    };
 
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-
-    // Generate 500 random values within the range of -1e13 to 1e13.
-    for (0..5) |_| {
-        try tester.generateBoundedRandomValues(&uncompressed_values, -1e13, 1e13, undefined);
-    }
-
-    try tester.testCompressAndDecompress(
+    // This function evaluates BitPackedQuantization using all data distribution stored in
+    // `data_distribution`.
+    try tester.testErrorBoundedCompressionMethod(
         allocator,
-        uncompressed_values.items,
         Method.BitPackedQuantization,
-        error_bound,
-        tersets.isWithinErrorBound,
+        data_distributions,
     );
 }
 

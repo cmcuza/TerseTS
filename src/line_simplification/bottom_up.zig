@@ -398,12 +398,6 @@ pub fn testRMSEisWithinErrorBound(
 
     const rmse = computeRMSE(values, 0, values.len - 1);
 
-    if (rmse > error_bound) {
-        for (values) |value| {
-            std.debug.print("\nv={}\n\n", .{value});
-        }
-        std.debug.print("\n\n{} {}\n\n", .{ rmse, error_bound });
-    }
     try testing.expect(rmse <= error_bound);
 }
 
