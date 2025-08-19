@@ -12,14 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Implementation of "Sliding-Window" algorithm as described in the paper:
-//! "E. Keogh, S. Chu, D. Hart and M. Pazzani.
-//! An online algorithm for segmenting time series.
-//! IEEE ICDM, pp. 289-296, 2001.
-//! https://doi.org/10.1109/ICDM.2001.989531"
-//! This specific implementation uses the "Root-Mean-Squared-Errors (RMSE)"
-//! as the cost function. Future work may include other cost functions.
-//! This file provides shared functions across different compression methods.
+//! Contains all shared functions used across TerseTS.
 
 const std = @import("std");
 const math = std.math;
