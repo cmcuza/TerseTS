@@ -31,8 +31,9 @@ const ArrayList = std.ArrayList;
 const tersets = @import("../tersets.zig");
 const Method = tersets.Method;
 const Error = tersets.Error;
-const shared = @import("../utilities/shared_structs.zig");
-const DiscretePoint = shared.DiscretePoint;
+const shared_structs = @import("../utilities/shared_structs.zig");
+const shared_functions = @import("../utilities/shared_functions.zig");
+const DiscretePoint = shared_structs.DiscretePoint;
 
 const tester = @import("../tester.zig");
 
@@ -50,7 +51,7 @@ pub fn compress(
     }
     // Sim-Piece Phase 1: Compute `SegmentMetadata` for all segments that can be approximated
     // by the given `error_bound`.
-    var segments_metadata = ArrayList(shared.SegmentMetadata).init(allocator);
+    var segments_metadata = ArrayList(shared_structs.SegmentMetadata).init(allocator);
     defer segments_metadata.deinit();
     try computeSegmentsMetadata(
         uncompressed_values,
@@ -59,12 +60,12 @@ pub fn compress(
     );
 
     // Sim-Piece Phase 2: Merge the `SegmentMetadata` that share the same intercept point.
-    var merged_segments_metadata = ArrayList(shared.SegmentMetadata).init(allocator);
+    var merged_segments_metadata = ArrayList(shared_structs.SegmentMetadata).init(allocator);
     defer merged_segments_metadata.deinit();
     try mergeSegmentsMetadata(segments_metadata, &merged_segments_metadata, allocator);
 
     // Sim-Piece Phase 3: Populate the `SegmentMetadata` HashMap based on the intercept point.
-    var merged_segments_metadata_map = shared.HashMapf64(shared.HashMapf64(ArrayList(usize))).init(allocator);
+    var merged_segments_metadata_map = shared_structs.HashMapf64(shared_structs.HashMapf64(ArrayList(usize))).init(allocator);
     defer {
         // Deinit all ArrayList instances within the inner HashMaps and then deinit the inner HashMaps
         // themselves before finally deinit the outer HashMap.
@@ -88,7 +89,7 @@ pub fn compress(
     try createCompressedRepresentation(merged_segments_metadata_map, compressed_values);
 
     // The last timestamp must be stored, otherwise the end time during decompression is unknown.
-    try appendValue(usize, uncompressed_values.len, compressed_values);
+    try shared_functions.appendValue(usize, uncompressed_values.len, compressed_values);
 }
 
 /// Decompress `compressed_values` produced by "Sim-Piece". The function writes the result to
@@ -101,7 +102,7 @@ pub fn decompress(
 ) Error!void {
     // The compressed representation of Sim-Piece is of variable length. We cannot assert the len
     // of the compressed representation to be equal to any specific number.
-    var segments_metadata = ArrayList(shared.SegmentMetadata).init(allocator);
+    var segments_metadata = ArrayList(shared_structs.SegmentMetadata).init(allocator);
     defer segments_metadata.deinit();
     const compressed_lines_and_index = mem.bytesAsSlice(f64, compressed_values);
 
@@ -132,7 +133,7 @@ pub fn decompress(
     const last_timestamp: usize = @as(usize, @bitCast(compressed_lines_and_index[compressed_index]));
 
     mem.sort(
-        shared.SegmentMetadata,
+        shared_structs.SegmentMetadata,
         segments_metadata.items,
         {},
         compareMetadataByStartTime,
@@ -164,11 +165,11 @@ pub fn decompress(
 /// by a linear function within the `error_bound` from `uncompressed_values`.
 fn computeSegmentsMetadata(
     uncompressed_values: []const f64,
-    segments_metadata: *ArrayList(shared.SegmentMetadata),
+    segments_metadata: *ArrayList(shared_structs.SegmentMetadata),
     error_bound: f32,
 ) Error!void {
     // Adjust the error bound to avoid exceeding it during decompression.
-    const adjusted_error_bound = error_bound - shared.ErrorBoundMargin;
+    const adjusted_error_bound = error_bound - shared_structs.ErrorBoundMargin;
 
     var upper_bound_slope: f64 = math.floatMax(f64);
     var lower_bound_slope: f64 = -math.floatMax(f64);
@@ -184,7 +185,7 @@ fn computeSegmentsMetadata(
     // The quantization can only be done using the original error bound. Afterwards, we add
     // `tersets.ErrorBoundMargin` to avoid exceeding the error bound during decompression.
     var quantized_intercept = quantize(uncompressed_values[0], error_bound) +
-        shared.ErrorBoundMargin;
+        shared_structs.ErrorBoundMargin;
 
     // The first point is already part of `current_segment`, the next point is at index one.
     for (1..uncompressed_values.len) |current_timestamp| {
@@ -219,7 +220,7 @@ fn computeSegmentsMetadata(
 
             start_point = end_point;
             quantized_intercept = quantize(start_point.value, error_bound) +
-                shared.ErrorBoundMargin;
+                shared_structs.ErrorBoundMargin;
             upper_bound_slope = math.floatMax(f64);
             lower_bound_slope = -math.floatMax(f64);
         } else {
@@ -256,14 +257,14 @@ fn computeSegmentsMetadata(
 /// results in `merged_segments_metadata`. The segments are merged based on the intercept value.
 /// The `allocator` is used to allocate memory for the intermediate representations needed.
 fn mergeSegmentsMetadata(
-    segments_metadata: ArrayList(shared.SegmentMetadata),
-    merged_segments_metadata: *ArrayList(shared.SegmentMetadata),
+    segments_metadata: ArrayList(shared_structs.SegmentMetadata),
+    merged_segments_metadata: *ArrayList(shared_structs.SegmentMetadata),
     allocator: mem.Allocator,
 ) !void {
     var timestamps_array = ArrayList(usize).init(allocator);
     defer timestamps_array.deinit();
 
-    var segments_metadata_map = shared.HashMapf64(ArrayList(shared.SegmentMetadata)).init(allocator);
+    var segments_metadata_map = shared_structs.HashMapf64(ArrayList(shared_structs.SegmentMetadata)).init(allocator);
     defer {
         // Deinit all ArrayList instances within the HashMap before deinit it.
         var iterator = segments_metadata_map.iterator();
@@ -292,13 +293,13 @@ fn mergeSegmentsMetadata(
         // Sort in asc order based on the lower bound's slope. Alg 2. Line 5. This enables finding
         // the segments contained inside other segments and merge them.
         mem.sort(
-            shared.SegmentMetadata,
+            shared_structs.SegmentMetadata,
             metadata_array.items,
             {},
             compareMetadataBySlope,
         );
 
-        var merge_metadata: shared.SegmentMetadata = .{
+        var merge_metadata: shared_structs.SegmentMetadata = .{
             .start_time = 0.0,
             .intercept = metadata_array.items[0].intercept,
             .lower_bound_slope = metadata_array.items[0].lower_bound_slope,
@@ -358,7 +359,7 @@ fn mergeSegmentsMetadata(
 
     // This step is needed since the timestamp order is lost due to the HashMap.
     mem.sort(
-        shared.SegmentMetadata,
+        shared_structs.SegmentMetadata,
         merged_segments_metadata.items,
         {},
         compareMetadataByStartTime,
@@ -370,8 +371,8 @@ fn mergeSegmentsMetadata(
 /// timestamps and store it in `merged_segments_metadata_map`. The `allocator` is used to allocate
 /// memory of intermediates.
 fn populateSegmentsMetadataHashMap(
-    merged_segments_metadata: ArrayList(shared.SegmentMetadata),
-    merged_segments_metadata_map: *shared.HashMapf64(shared.HashMapf64(ArrayList(usize))),
+    merged_segments_metadata: ArrayList(shared_structs.SegmentMetadata),
+    merged_segments_metadata_map: *shared_structs.HashMapf64(shared_structs.HashMapf64(ArrayList(usize))),
     allocator: mem.Allocator,
 ) !void {
     for (merged_segments_metadata.items) |segment_metadata| {
@@ -383,7 +384,7 @@ fn populateSegmentsMetadataHashMap(
         // slopes and timestamps associated to it.
         const hash_to_hash_result = try merged_segments_metadata_map.getOrPut(intercept);
         if (!hash_to_hash_result.found_existing) {
-            hash_to_hash_result.value_ptr.* = shared.HashMapf64(
+            hash_to_hash_result.value_ptr.* = shared_structs.HashMapf64(
                 ArrayList(usize),
             ).init(allocator);
         }
@@ -406,7 +407,7 @@ fn populateSegmentsMetadataHashMap(
 /// associated to intercept b_i, a_ij are the slopes associated to intercept b_i, M_ij are
 /// the number of timestamps associated to the slope a_ij, and t_k are the timestamps.
 pub fn createCompressedRepresentation(
-    merged_segments_metadata_map: shared.HashMapf64(shared.HashMapf64(ArrayList(usize))),
+    merged_segments_metadata_map: shared_structs.HashMapf64(shared_structs.HashMapf64(ArrayList(usize))),
     compressed_values: *ArrayList(u8),
 ) !void {
     // Iterate over the outer HashMap to append the intercepts b_i.
@@ -414,24 +415,32 @@ pub fn createCompressedRepresentation(
     while (hash_to_hash_iterator.next()) |hash_to_hash_entry| {
         const current_intercept: f64 = hash_to_hash_entry.key_ptr.*;
 
-        try appendValue(f64, current_intercept, compressed_values);
+        try shared_functions.appendValue(f64, current_intercept, compressed_values);
 
         // Append the number of slopes N_i associated to `current_intercept` b_i.
-        try appendValue(usize, hash_to_hash_entry.value_ptr.*.count(), compressed_values);
+        try shared_functions.appendValue(usize, hash_to_hash_entry.value_ptr.*.count(), compressed_values);
 
         // Iterate over the inner HashMap to append the slopes a_ij associated to b_i.
         var hash_to_array_iterator = hash_to_hash_entry.value_ptr.*.iterator();
         while (hash_to_array_iterator.next()) |hash_to_array_entry| {
             const current_slope = hash_to_array_entry.key_ptr.*;
-            try appendValue(f64, current_slope, compressed_values);
+            try shared_functions.appendValue(f64, current_slope, compressed_values);
 
             // Append the number of timestamps M_ij associated to `current_slope` a_ij.
-            try appendValue(usize, hash_to_array_entry.value_ptr.*.items.len, compressed_values);
+            try shared_functions.appendValue(
+                usize,
+                hash_to_array_entry.value_ptr.*.items.len,
+                compressed_values,
+            );
             var previous_timestamp: usize = 0;
 
             // Iterate over the ArrayList to append the timestamps t_k.
             for (hash_to_array_entry.value_ptr.*.items) |timestamp| {
-                try appendValue(usize, timestamp - previous_timestamp, compressed_values);
+                try shared_functions.appendValue(
+                    usize,
+                    timestamp - previous_timestamp,
+                    compressed_values,
+                );
                 previous_timestamp = timestamp;
             }
         }
@@ -451,15 +460,15 @@ fn quantize(value: f64, error_bound: f32) f64 {
 /// Appends the `metadata` to the HashMap `metadata_map`. The `allocator` is used for allocating
 /// the memory for a new ArrayList if the `metadata.intercept` does not exist.
 pub fn appendSegmentMetadata(
-    metadata_map: *shared.HashMapf64(
-        ArrayList(shared.SegmentMetadata),
+    metadata_map: *shared_structs.HashMapf64(
+        ArrayList(shared_structs.SegmentMetadata),
     ),
-    metadata: shared.SegmentMetadata,
+    metadata: shared_structs.SegmentMetadata,
     allocator: mem.Allocator,
 ) !void {
     const get_result = try metadata_map.getOrPut(metadata.intercept);
     if (!get_result.found_existing) {
-        get_result.value_ptr.* = ArrayList(shared.SegmentMetadata).init(allocator);
+        get_result.value_ptr.* = ArrayList(shared_structs.SegmentMetadata).init(allocator);
     }
     try get_result.value_ptr.*.append(metadata);
 }
@@ -467,8 +476,8 @@ pub fn appendSegmentMetadata(
 /// Compares `metadata_one` and `metadata_two` by their lower bound slope.
 pub fn compareMetadataBySlope(
     _: void,
-    metadata_one: shared.SegmentMetadata,
-    metadata_two: shared.SegmentMetadata,
+    metadata_one: shared_structs.SegmentMetadata,
+    metadata_two: shared_structs.SegmentMetadata,
 ) bool {
     return metadata_one.lower_bound_slope < metadata_two.lower_bound_slope;
 }
@@ -476,31 +485,16 @@ pub fn compareMetadataBySlope(
 /// Compares `metadata_one` and `metadata_two` by their start time.
 pub fn compareMetadataByStartTime(
     _: void,
-    metadata_one: shared.SegmentMetadata,
-    metadata_two: shared.SegmentMetadata,
+    metadata_one: shared_structs.SegmentMetadata,
+    metadata_two: shared_structs.SegmentMetadata,
 ) bool {
     return metadata_one.start_time < metadata_two.start_time;
-}
-
-/// Append `value` of `type` determined at compile time to `compressed_values`.
-pub fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)) !void {
-    switch (@TypeOf(value)) {
-        f64, usize => {
-            const value_as_bytes: [8]u8 = @bitCast(value);
-            try compressed_values.appendSlice(value_as_bytes[0..]);
-        },
-        f32 => {
-            const value_as_bytes: [4]u8 = @bitCast(value);
-            try compressed_values.appendSlice(value_as_bytes[0..]);
-        },
-        else => @compileError("Unsupported type for append value function"),
-    }
 }
 
 /// Computes and stores in `decompressed_values` the decompress representation of the points from
 /// the `start_time` to the `end_time` based on the information stored in `segment_metadata`.
 pub fn decompressSegment(
-    segment_metadata: shared.SegmentMetadata,
+    segment_metadata: shared_structs.SegmentMetadata,
     start_time: usize,
     end_time: usize,
     decompressed_values: *ArrayList(f64),
@@ -515,7 +509,7 @@ pub fn decompressSegment(
 
 test "f64 context can hash" {
     const allocator = testing.allocator;
-    var f64_hash_map = shared.HashMapf64(
+    var f64_hash_map = shared_structs.HashMapf64(
         f64,
     ).init(allocator);
     defer f64_hash_map.deinit();
@@ -545,7 +539,7 @@ test "f64 context can hash" {
 
 test "hashmap can map f64 to segment metadata array list" {
     const allocator = testing.allocator;
-    var f64_metadata_hash_map = shared.HashMapf64(ArrayList(shared.SegmentMetadata)).init(allocator);
+    var f64_metadata_hash_map = shared_structs.HashMapf64(ArrayList(shared_structs.SegmentMetadata)).init(allocator);
     defer {
         var iterator = f64_metadata_hash_map.iterator();
         while (iterator.next()) |entry| {
@@ -554,7 +548,7 @@ test "hashmap can map f64 to segment metadata array list" {
         f64_metadata_hash_map.deinit();
     }
 
-    var f64_usize_hash_map = shared.HashMapf64(usize).init(allocator);
+    var f64_usize_hash_map = shared_structs.HashMapf64(usize).init(allocator);
     defer f64_usize_hash_map.deinit();
 
     var rnd = std.Random.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
@@ -570,9 +564,9 @@ test "hashmap can map f64 to segment metadata array list" {
 
         const metadata_map_result = try f64_metadata_hash_map.getOrPut(rand_number);
         if (!metadata_map_result.found_existing) {
-            metadata_map_result.value_ptr.* = ArrayList(shared.SegmentMetadata).init(allocator);
+            metadata_map_result.value_ptr.* = ArrayList(shared_structs.SegmentMetadata).init(allocator);
         }
-        try metadata_map_result.value_ptr.*.append(shared.SegmentMetadata{
+        try metadata_map_result.value_ptr.*.append(shared_structs.SegmentMetadata{
             .start_time = count_map_result.value_ptr.*,
             .intercept = rand_number,
             .lower_bound_slope = rand_number,

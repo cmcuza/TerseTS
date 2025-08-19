@@ -38,10 +38,11 @@ const ConvexHull = @import(
     "../utilities/convex_hull.zig",
 ).ConvexHull;
 
-const shared = @import("../utilities/shared_structs.zig");
+const shared_structs = @import("../utilities/shared_structs.zig");
+const shared_functions = @import("../utilities/shared_functions.zig");
 
-const LinearFunction = shared.LinearFunction;
-const Segment = shared.Segment;
+const LinearFunction = shared_structs.LinearFunction;
+const Segment = shared_structs.Segment;
 
 const tersets = @import("../tersets.zig");
 const Error = tersets.Error;
@@ -81,7 +82,7 @@ pub fn compressPWCH(
 
     for (0..histogram.len()) |index| {
         var bucket: Bucket = histogram.at(index);
-        try appendValueAndIndexToArrayList(
+        try shared_functions.appendValueAndIndexToArrayList(
             bucket.computeConstantApproximation(),
             bucket.end + 1,
             compressed_values,
@@ -125,19 +126,19 @@ pub fn compressPWLH(
             const begin_value: f64 = @floatCast(linear_approximation.slope *
                 @as(f64, @floatFromInt(bucket.begin)) +
                 linear_approximation.intercept);
-            try appendValue(f64, begin_value, compressed_values);
+            try shared_functions.appendValue(f64, begin_value, compressed_values);
 
             const end_value: f64 = @floatCast(linear_approximation.slope *
                 @as(f64, @floatFromInt(bucket.end)) +
                 linear_approximation.intercept);
 
-            try appendValue(f64, end_value + 1, compressed_values);
+            try shared_functions.appendValue(f64, end_value + 1, compressed_values);
         } else {
-            try appendValue(f64, uncompressed_values[bucket.begin], compressed_values);
-            try appendValue(f64, uncompressed_values[bucket.end], compressed_values);
+            try shared_functions.appendValue(f64, uncompressed_values[bucket.begin], compressed_values);
+            try shared_functions.appendValue(f64, uncompressed_values[bucket.end], compressed_values);
         }
 
-        try appendValue(usize, bucket.end + 1, compressed_values);
+        try shared_functions.appendValue(usize, bucket.end + 1, compressed_values);
     }
 }
 
@@ -513,31 +514,6 @@ const Histogram = struct {
         }
     }
 };
-
-/// Append `compressed_value` and `index` to `compressed_values`.
-fn appendValueAndIndexToArrayList(
-    compressed_value: f64,
-    index: usize,
-    compressed_values: *ArrayList(u8),
-) !void {
-    const value: f64 = compressed_value;
-    const valueAsBytes: [8]u8 = @bitCast(value);
-    try compressed_values.appendSlice(valueAsBytes[0..]);
-    const indexAsBytes: [8]u8 = @bitCast(index); // No -1 due to 0 indexing.
-    try compressed_values.appendSlice(indexAsBytes[0..]);
-}
-
-/// Append `value` of `type` determined at compile time to `compressed_values`.
-fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)) !void {
-    // Compile-time type check.
-    switch (@TypeOf(value)) {
-        f64, usize => {
-            const value_as_bytes: [8]u8 = @bitCast(value);
-            try compressed_values.appendSlice(value_as_bytes[0..]);
-        },
-        else => @compileError("Unsupported type for append value function"),
-    }
-}
 
 test "Hash PriorityQueue with hash_context for MergeError" {
     const allocator = testing.allocator;

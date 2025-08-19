@@ -32,6 +32,7 @@ const HashedPriorityQueue = @import(
 ).HashedPriorityQueue;
 
 const shared_structs = @import("../utilities/shared_structs.zig");
+const shared_functions = @import("../utilities/shared_functions.zig");
 
 const DiscretePoint = shared_structs.DiscretePoint;
 const LinearFunction = shared_structs.LinearFunction;
@@ -51,9 +52,9 @@ pub fn compress(
 ) Error!void {
     // If we have 2 or fewer points, store them without compression.
     if (uncompressed_values.len <= 2) {
-        try appendValue(f64, uncompressed_values[0], compressed_values);
-        try appendValue(f64, uncompressed_values[1], compressed_values);
-        try appendValue(usize, 1, compressed_values);
+        try shared_functions.appendValue(f64, uncompressed_values[0], compressed_values);
+        try shared_functions.appendValue(f64, uncompressed_values[1], compressed_values);
+        try shared_functions.appendValue(usize, 1, compressed_values);
         return;
     }
 
@@ -154,11 +155,11 @@ pub fn compress(
     std.mem.sort(PointArea, heap.items[0..heap.len], {}, PointArea.firstThan);
 
     // Output compressed series: first point, then (index, value) pairs.
-    try appendValue(f64, uncompressed_values[0], compressed_values);
+    try shared_functions.appendValue(f64, uncompressed_values[0], compressed_values);
     for (1..heap.len) |index| {
         const point_index = heap.items[index].index;
-        try appendValue(f64, uncompressed_values[point_index], compressed_values);
-        try appendValue(usize, point_index, compressed_values);
+        try shared_functions.appendValue(f64, uncompressed_values[point_index], compressed_values);
+        try shared_functions.appendValue(usize, point_index, compressed_values);
     }
 
     return;
@@ -265,18 +266,6 @@ fn calculateArea(left_point: DiscretePoint, central_point: DiscretePoint, right_
     const y3: f64 = right_point.value;
 
     return @abs((x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2)) / 2.0);
-}
-
-/// Append `value` of `type` determined at compile time to `compressed_values`.
-fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)) !void {
-    // Compile-time type check
-    switch (@TypeOf(value)) {
-        f64, usize => {
-            const value_as_bytes: [8]u8 = @bitCast(value);
-            try compressed_values.appendSlice(value_as_bytes[0..]);
-        },
-        else => @compileError("Unsupported type for append value function"),
-    }
 }
 
 /// Update the area of the `neighbor` point in the `heap`. The `left_index`, `center_index` and

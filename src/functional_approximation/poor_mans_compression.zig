@@ -28,6 +28,8 @@ const Method = tersets.Method;
 const Error = tersets.Error;
 const tester = @import("../tester.zig");
 
+const shared_functions = @import("../utilities/shared_functions.zig");
+
 /// Compress `uncompressed_values` within `error_bound` using "Poor Man’s Compression - Midrange".
 /// The function writes the result to `compressed_values`. If an error occurs it is returned.
 pub fn compressMidrange(
@@ -44,8 +46,12 @@ pub fn compressMidrange(
         const nextMaximum = @max(value, maximum);
 
         if ((nextMaximum - nextMinimum) > 2 * error_bound) {
-            const compressed_value = (maximum + minimum) / 2;
-            try appendValueAndIndexToArrayList(compressed_value, index, compressed_values);
+            const compressed_value: f64 = @floatCast((maximum + minimum) / 2);
+            try shared_functions.appendValueAndIndexToArrayList(
+                compressed_value,
+                index,
+                compressed_values,
+            );
             minimum = value;
             maximum = value;
         } else {
@@ -55,8 +61,12 @@ pub fn compressMidrange(
         index += 1;
     }
 
-    const compressed_value = (maximum + minimum) / 2;
-    try appendValueAndIndexToArrayList(compressed_value, index, compressed_values);
+    const compressed_value: f64 = @floatCast((maximum + minimum) / 2);
+    try shared_functions.appendValueAndIndexToArrayList(
+        compressed_value,
+        index,
+        compressed_values,
+    );
 }
 
 /// Compress `uncompressed_values` within `error_bound` using "Poor Man’s Compression - Mean".
@@ -79,7 +89,11 @@ pub fn compressMean(
         const nextAverage = (average * length + value) / nextLength;
 
         if ((nextMaximum - nextAverage > error_bound) or (nextAverage - nextMinimum > error_bound)) {
-            try appendValueAndIndexToArrayList(average, index, compressed_values);
+            try shared_functions.appendValueAndIndexToArrayList(
+                @floatCast(average),
+                index,
+                compressed_values,
+            );
             minimum = value;
             maximum = value;
             length = 1;
@@ -93,7 +107,11 @@ pub fn compressMean(
         index += 1;
     }
 
-    try appendValueAndIndexToArrayList(average, index, compressed_values);
+    try shared_functions.appendValueAndIndexToArrayList(
+        @floatCast(average),
+        index,
+        compressed_values,
+    );
 }
 
 /// Decompress `compressed_values` produced by "Poor Man’s Compression - Midrange" and
@@ -118,19 +136,6 @@ pub fn decompress(
         }
         uncompressed_index = index;
     }
-}
-
-/// Append `compressed_value` and `index` to `compressed_values`.
-fn appendValueAndIndexToArrayList(
-    compressed_value: f80,
-    index: usize,
-    compressed_values: *ArrayList(u8),
-) !void {
-    const value: f64 = @floatCast(compressed_value);
-    const valueAsBytes: [8]u8 = @bitCast(value);
-    try compressed_values.appendSlice(valueAsBytes[0..]);
-    const indexAsBytes: [8]u8 = @bitCast(index); // No -1 due to 0 indexing.
-    try compressed_values.appendSlice(indexAsBytes[0..]);
 }
 
 test "midrange can always compress and decompress with zero error bound" {

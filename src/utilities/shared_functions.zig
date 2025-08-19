@@ -65,12 +65,28 @@ pub fn computeRMSE(uncompressed_values: []const f64, seg_start: usize, seg_end: 
 pub fn appendValue(comptime T: type, value: T, compressed_values: *ArrayList(u8)) !void {
     // Compile-time type check
     switch (@TypeOf(value)) {
-        f64, usize => {
+        i64, f64, usize => {
             const value_as_bytes: [8]u8 = @bitCast(value);
+            try compressed_values.appendSlice(value_as_bytes[0..]);
+        },
+        i32, f32 => {
+            const value_as_bytes: [4]u8 = @bitCast(value);
             try compressed_values.appendSlice(value_as_bytes[0..]);
         },
         else => @compileError("Unsupported type for append value function"),
     }
+}
+
+/// Append `compressed_value` and `index` to `compressed_values`.
+pub fn appendValueAndIndexToArrayList(
+    compressed_value: f64,
+    index: usize,
+    compressed_values: *ArrayList(u8),
+) !void {
+    const valueAsBytes: [8]u8 = @bitCast(compressed_value);
+    try compressed_values.appendSlice(valueAsBytes[0..]);
+    const indexAsBytes: [8]u8 = @bitCast(index); // No -1 due to 0 indexing.
+    try compressed_values.appendSlice(indexAsBytes[0..]);
 }
 
 /// Test if the RMSE of the linear regression line that fits the points in the segment in `values`
@@ -84,4 +100,29 @@ pub fn testRMSEisWithinErrorBound(
 
     const rmse = try computeRMSE(values, 0, values.len - 1);
     try testing.expect(rmse <= error_bound);
+}
+
+/// Computes the maximum absolute (Chebyshev, L-inf) error between the actual values and the
+/// linear interpolation over a segment of the input array. This function fits a straight
+/// line between the values at `seg_start` and `seg_end` in `uncompressed_values`, then
+/// calculates the maximum absolute difference between the actual values and the predicted
+/// values (from the fitted line) for all indices in the segment `[seg_start, seg_end]`.
+pub fn computeMaxAbsoluteError(uncompressed_values: []const f64, seg_start: usize, seg_end: usize) f64 {
+    const seg_len: f64 = @floatFromInt(seg_end - seg_start + 1);
+    if (seg_len <= 2) return 0.0; // If the segment has less than 3 points, return zero error.
+
+    const slope: f64 = (uncompressed_values[seg_end] - uncompressed_values[seg_start]) / (seg_len - 1);
+    const intercept: f64 = uncompressed_values[seg_start] - slope * @as(f64, @floatFromInt(seg_start));
+
+    // Calculate the maximum absolute error of the segment.
+    var linf: f64 = 0;
+    var i = seg_start;
+    while (i <= seg_end) : (i += 1) {
+        const pred = slope * @as(f64, @floatFromInt(i)) + intercept; // Predicted value.
+        const diff = @abs(uncompressed_values[i] - pred); // Difference between actual and predicted.
+        linf = @max(diff, linf);
+    }
+
+    // Return max abs.
+    return linf;
 }

@@ -174,31 +174,6 @@ fn computeRMSE(uncompressed_values: []const f64, seg_start: usize, seg_end: usiz
     return math.sqrt(sse / seg_len);
 }
 
-/// Computes the maximum absolute (Chebyshev, L-inf) error between the actual values and the
-/// linear interpolation over a segment of the input array. This function fits a straight
-/// line between the values at `seg_start` and `seg_end` in `uncompressed_values`, then
-/// calculates the maximum absolute difference between the actual values and the predicted
-/// values (from the fitted line) for all indices in the segment `[seg_start, seg_end]`.
-fn computeMaxAbsoluteError(uncompressed_values: []const f64, seg_start: usize, seg_end: usize) f64 {
-    const seg_len: f64 = @floatFromInt(seg_end - seg_start + 1);
-    if (seg_len <= 2) return 0.0; // If the segment has less than 3 points, return zero error.
-
-    const slope: f64 = (uncompressed_values[seg_end] - uncompressed_values[seg_start]) / (seg_len - 1);
-    const intercept: f64 = uncompressed_values[seg_start] - slope * @as(f64, @floatFromInt(seg_start));
-
-    // Calculate the maximum absolute error of the segment.
-    var linf: f64 = 0;
-    var i = seg_start;
-    while (i <= seg_end) : (i += 1) {
-        const pred = slope * @as(f64, @floatFromInt(i)) + intercept; // Predicted value.
-        const diff = @abs(uncompressed_values[i] - pred); // Difference between actual and predicted.
-        linf = @max(diff, linf);
-    }
-
-    // Return max abs.
-    return linf;
-}
-
 test "sliding-window can compress and decompress bounded values with zero error bound" {
     const allocator = testing.allocator;
     const error_bound = 0;

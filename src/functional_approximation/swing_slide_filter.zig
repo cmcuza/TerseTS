@@ -44,11 +44,12 @@ const Error = tersets.Error;
 
 const tester = @import("../tester.zig");
 
-const shared = @import("../utilities/shared_structs.zig");
-const DiscretePoint = shared.DiscretePoint;
-const ContinousPoint = shared.ContinousPoint;
-const Segment = shared.Segment;
-const LinearFunction = shared.LinearFunction;
+const shared_structs = @import("../utilities/shared_structs.zig");
+const shared_functions = @import("../utilities/shared_functions.zig");
+const DiscretePoint = shared_structs.DiscretePoint;
+const ContinousPoint = shared_structs.ContinousPoint;
+const Segment = shared_structs.Segment;
+const LinearFunction = shared_structs.LinearFunction;
 
 const ConvexHull = @import("../utilities/convex_hull.zig").ConvexHull;
 
@@ -63,7 +64,7 @@ pub fn compressSwingFilter(
     // inestabilities. This can happen if the linear approximation is equal to one of the
     // upper or lower bounds.
     const adjusted_error_bound = if (error_bound > 0)
-        error_bound - shared.ErrorBoundMargin
+        error_bound - shared_structs.ErrorBoundMargin
     else
         error_bound;
 
@@ -88,7 +89,7 @@ pub fn compressSwingFilter(
 
     // Add the first point to the compressed values. From this point on, the algorithm will find all
     // connected segments and add them to the compressed values.
-    try appendValue(f64, current_segment.start_point.value, compressed_values);
+    try shared_functions.appendValue(f64, current_segment.start_point.value, compressed_values);
 
     // The first two points are already part of `current_segment`, the next point is at index two.
     var current_timestamp: usize = 2;
@@ -131,16 +132,20 @@ pub fn compressSwingFilter(
 
                 end_value = evaluateLinearFunctionAtTime(linear_approximation, usize, current_timestamp - 1);
 
-                try appendValue(f64, end_value, compressed_values);
+                try shared_functions.appendValue(f64, end_value, compressed_values);
             } else {
                 // Storing uncompressed values instead of those from the linear approximation is crucial
                 // for numerical stability, particularly when the error bound is zero. In such cases,
                 // decompression must be lossless, and even minimal approximation errors are unacceptable.
                 end_value = current_segment.end_point.value;
-                try appendValue(f64, current_segment.end_point.value, compressed_values);
+                try shared_functions.appendValue(
+                    f64,
+                    current_segment.end_point.value,
+                    compressed_values,
+                );
             }
 
-            try appendValue(usize, current_timestamp, compressed_values);
+            try shared_functions.appendValue(usize, current_timestamp, compressed_values);
 
             // Update the current segment.
             current_segment.start_point.time = current_timestamp - 1;
@@ -227,12 +232,12 @@ pub fn compressSwingFilter(
             usize,
             current_timestamp - 1,
         );
-        try appendValue(f64, end_value, compressed_values);
+        try shared_functions.appendValue(f64, end_value, compressed_values);
     } else {
-        try appendValue(f64, current_segment.end_point.value, compressed_values);
+        try shared_functions.appendValue(f64, current_segment.end_point.value, compressed_values);
     }
 
-    try appendValue(usize, current_timestamp, compressed_values);
+    try shared_functions.appendValue(usize, current_timestamp, compressed_values);
 }
 
 /// Compress `uncompressed_values` within `error_bound` using "Slide Filter". The function writes
@@ -249,7 +254,7 @@ pub fn compressSlideFilter(
     // inestabilities. This can happen if the linear approximation is equal to one of the
     // upper or lower bounds.
     const adjusted_error_bound = if (error_bound > 0)
-        error_bound - shared.ErrorBoundMargin
+        error_bound - shared_structs.ErrorBoundMargin
     else
         error_bound;
 
@@ -332,7 +337,7 @@ pub fn compressSlideFilter(
                     current_segment.start_point.time,
                 );
 
-                try appendValue(f64, init_value, compressed_values);
+                try shared_functions.appendValue(f64, init_value, compressed_values);
 
                 const end_value = evaluateLinearFunctionAtTime(
                     current_linear_approximation,
@@ -340,15 +345,23 @@ pub fn compressSlideFilter(
                     current_segment.end_point.time,
                 );
 
-                try appendValue(f64, end_value, compressed_values);
+                try shared_functions.appendValue(f64, end_value, compressed_values);
             } else {
                 // Storing uncompressed values instead of those from the linear approximation is crucial
                 // for numerical stability, particularly when the error bound is zero. In such cases,
                 // decompression must be lossless, and even minimal approximation errors are unacceptable.
-                try appendValue(f64, current_segment.start_point.value, compressed_values);
-                try appendValue(f64, current_segment.end_point.value, compressed_values);
+                try shared_functions.appendValue(
+                    f64,
+                    current_segment.start_point.value,
+                    compressed_values,
+                );
+                try shared_functions.appendValue(
+                    f64,
+                    current_segment.end_point.value,
+                    compressed_values,
+                );
             }
-            try appendValue(usize, current_timestamp, compressed_values);
+            try shared_functions.appendValue(usize, current_timestamp, compressed_values);
 
             // Update the current segment.
             current_segment.start_point.time = current_timestamp;
@@ -432,20 +445,20 @@ pub fn compressSlideFilter(
             current_segment.start_point.time,
         );
 
-        try appendValue(f64, init_value, compressed_values);
+        try shared_functions.appendValue(f64, init_value, compressed_values);
 
         const end_value = evaluateLinearFunctionAtTime(
             linear_approximation,
             usize,
             current_timestamp - 1,
         );
-        try appendValue(f64, end_value, compressed_values);
+        try shared_functions.appendValue(f64, end_value, compressed_values);
     } else {
-        try appendValue(f64, current_segment.start_point.value, compressed_values);
-        try appendValue(f64, current_segment.end_point.value, compressed_values);
+        try shared_functions.appendValue(f64, current_segment.start_point.value, compressed_values);
+        try shared_functions.appendValue(f64, current_segment.end_point.value, compressed_values);
     }
 
-    try appendValue(usize, current_timestamp, compressed_values);
+    try shared_functions.appendValue(usize, current_timestamp, compressed_values);
 }
 
 /// Compress `uncompressed_values` within `error_bound` using "Swing Filter"'s filtering mechanism.
@@ -461,7 +474,7 @@ pub fn compressSwingFilterDisconnected(
     // inestabilities. This can happen if the linear approximation is equal to one of the
     // upper or lower bounds.
     const adjusted_error_bound = if (error_bound > 0)
-        error_bound - shared.ErrorBoundMargin
+        error_bound - shared_structs.ErrorBoundMargin
     else
         error_bound;
 
@@ -500,7 +513,11 @@ pub fn compressSwingFilterDisconnected(
             (lower_limit > (uncompressed_values[current_timestamp] + adjusted_error_bound)))
         {
             // Recording mechanism (the current point is outside the limits).
-            try appendValue(f64, current_segment.start_point.value, compressed_values);
+            try shared_functions.appendValue(
+                f64,
+                current_segment.start_point.value,
+                compressed_values,
+            );
             const segment_size = current_timestamp - current_segment.start_point.time - 1;
             if (segment_size > 1) {
                 // Denominator of Eq. (6).
@@ -524,15 +541,19 @@ pub fn compressSwingFilterDisconnected(
                 };
                 const end_value = evaluateLinearFunctionAtTime(linear_approximation, usize, current_timestamp - 1);
 
-                try appendValue(f64, end_value, compressed_values);
+                try shared_functions.appendValue(f64, end_value, compressed_values);
             } else {
                 // Storing uncompressed values instead of those from the linear approximation is crucial
                 // for numerical stability, particularly when the error bound is zero. In such cases,
                 // decompression must be lossless, and even minimal approximation errors are unacceptable.
-                try appendValue(f64, current_segment.end_point.value, compressed_values);
+                try shared_functions.appendValue(
+                    f64,
+                    current_segment.end_point.value,
+                    compressed_values,
+                );
             }
 
-            try appendValue(usize, current_timestamp, compressed_values);
+            try shared_functions.appendValue(usize, current_timestamp, compressed_values);
 
             // Update the current segment.
             current_segment.start_point.time = current_timestamp;
@@ -595,7 +616,7 @@ pub fn compressSwingFilterDisconnected(
     // Given the way the for loop is structured, the last segment will always have at least one point.
     const segment_size = current_timestamp - current_segment.start_point.time - 1;
 
-    try appendValue(f64, current_segment.start_point.value, compressed_values);
+    try shared_functions.appendValue(f64, current_segment.start_point.value, compressed_values);
     // Check if the last segment has more than one point. If so, the recording mechanism is triggered.
     if (segment_size > 1) {
         // Denominator of Eq. (6).
@@ -623,13 +644,13 @@ pub fn compressSwingFilterDisconnected(
             usize,
             current_timestamp - 1,
         );
-        try appendValue(f64, end_value, compressed_values);
+        try shared_functions.appendValue(f64, end_value, compressed_values);
     } else {
         // Only point left. The `end_point` is at the `current_timestamp`.
-        try appendValue(f64, current_segment.end_point.value, compressed_values);
+        try shared_functions.appendValue(f64, current_segment.end_point.value, compressed_values);
     }
     // The `current_timestamp` indicate the final timestamp.
-    try appendValue(usize, current_timestamp, compressed_values);
+    try shared_functions.appendValue(usize, current_timestamp, compressed_values);
 }
 
 /// Decompress `compressed_values` produced by "Swing Filter". The algorithm writes the result to
@@ -780,18 +801,6 @@ fn evaluateLinearFunctionAtTime(
         return @floatCast(linear_function.slope * usizeToF64(time) + linear_function.intercept);
     } else {
         return @floatCast(linear_function.slope * time + linear_function.intercept);
-    }
-}
-
-/// Append `value` of `type` determined at compile time to `compressed_values`.
-fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)) !void {
-    // Compile-time type check
-    switch (@TypeOf(value)) {
-        f64, usize => {
-            const value_as_bytes: [8]u8 = @bitCast(value);
-            try compressed_values.appendSlice(value_as_bytes[0..]);
-        },
-        else => @compileError("Unsupported type for append value function"),
     }
 }
 

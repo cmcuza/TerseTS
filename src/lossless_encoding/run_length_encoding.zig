@@ -19,14 +19,14 @@
 const std = @import("std");
 const mem = std.mem;
 const ArrayList = std.ArrayList;
+const testing = std.testing;
 
 const tersets = @import("../tersets.zig");
 const Method = tersets.Method;
 const Error = tersets.Error;
 
 const tester = @import("../tester.zig");
-
-const testing = std.testing;
+const shared_functions = @import("../utilities/shared_functions.zig");
 
 /// Compresses the `uncompressed_values` using "Run-Length-Enconding". The function writes the
 /// result to `compressed_values`. If an error occurs it is returned.
@@ -38,24 +38,24 @@ pub fn compress(
     var current_value: f64 = uncompressed_values[0];
 
     // Append the first value to the compressed values.
-    try appendValue(f64, uncompressed_values[0], compressed_values);
+    try shared_functions.appendValue(f64, uncompressed_values[0], compressed_values);
 
     for (uncompressed_values) |value| {
         if (value == current_value) {
             counter += 1;
         } else {
             // Append the count of the previous value.
-            try appendValue(usize, counter, compressed_values);
+            try shared_functions.appendValue(usize, counter, compressed_values);
             // Reset for the new value.
             current_value = value;
             counter = 1;
             // Append the new value.
-            try appendValue(f64, value, compressed_values);
+            try shared_functions.appendValue(f64, value, compressed_values);
         }
     }
 
     // Append the count of the last value.
-    try appendValue(usize, counter, compressed_values);
+    try shared_functions.appendValue(usize, counter, compressed_values);
 }
 
 /// Decompress `compressed_values` produced by "Run-Length-Encoding" and write the
@@ -74,18 +74,6 @@ pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList
         for (0..count) |_| {
             try decompressed_values.append(value);
         }
-    }
-}
-
-/// Append `value` of `type` determined at compile time to `compressed_values`.
-fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)) !void {
-    // Compile-time type check.
-    switch (@TypeOf(value)) {
-        f64, usize => {
-            const value_as_bytes: [8]u8 = @bitCast(value);
-            try compressed_values.appendSlice(value_as_bytes[0..]);
-        },
-        else => @compileError("Unsupported type for append value function"),
     }
 }
 

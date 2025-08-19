@@ -37,6 +37,7 @@ const DiscretePoint = shared_structs.DiscretePoint;
 const LinearFunction = shared_structs.LinearFunction;
 const Segment = shared_structs.Segment;
 
+const shared_functions = @import("../utilities/shared_functions.zig");
 const ConvexHull = @import("../utilities/convex_hull.zig").ConvexHull;
 
 /// Compresses `uncompressed_values` using the "ABCLinearApproximation" algorithm under the
@@ -93,18 +94,50 @@ pub fn compress(
         if (last_valid_line) |valid_line| {
             // If there are only two points in the segment, store then directly to avoid numerical issues.
             if (current_segment_start + 1 == last_valid_end) {
-                try appendValue(f64, uncompressed_values[current_segment_start], compressed_values);
-                try appendValue(f64, uncompressed_values[last_valid_end], compressed_values);
+                try shared_functions.appendValue(
+                    f64,
+                    uncompressed_values[current_segment_start],
+                    compressed_values,
+                );
+                try shared_functions.appendValue(
+                    f64,
+                    uncompressed_values[last_valid_end],
+                    compressed_values,
+                );
             } else {
-                try appendValue(f64, @floatCast(valid_line.slope), compressed_values);
-                try appendValue(f64, @floatCast(valid_line.intercept), compressed_values);
+                try shared_functions.appendValue(
+                    f64,
+                    @floatCast(valid_line.slope),
+                    compressed_values,
+                );
+                try shared_functions.appendValue(
+                    f64,
+                    @floatCast(valid_line.intercept),
+                    compressed_values,
+                );
             }
-            try appendValue(usize, last_valid_end, compressed_values);
+            try shared_functions.appendValue(
+                usize,
+                last_valid_end,
+                compressed_values,
+            );
         } else {
             // If the the last valid line is not valid, then store the uncompressed values directly.
-            try appendValue(f64, uncompressed_values[current_segment_start], compressed_values);
-            try appendValue(f64, uncompressed_values[last_valid_end], compressed_values);
-            try appendValue(usize, last_valid_end, compressed_values);
+            try shared_functions.appendValue(
+                f64,
+                uncompressed_values[current_segment_start],
+                compressed_values,
+            );
+            try shared_functions.appendValue(
+                f64,
+                uncompressed_values[last_valid_end],
+                compressed_values,
+            );
+            try shared_functions.appendValue(
+                usize,
+                last_valid_end,
+                compressed_values,
+            );
         }
 
         // Start next segment after last_valid_end.
@@ -119,9 +152,9 @@ pub fn compress(
         const slope: f64 = 0.0;
         const intercept = value;
 
-        try appendValue(f64, slope, compressed_values);
-        try appendValue(f64, intercept, compressed_values);
-        try appendValue(usize, current_segment_start, compressed_values);
+        try shared_functions.appendValue(f64, slope, compressed_values);
+        try shared_functions.appendValue(f64, intercept, compressed_values);
+        try shared_functions.appendValue(usize, current_segment_start, compressed_values);
     }
 }
 
@@ -279,12 +312,6 @@ fn computeDeviation(point_a: DiscretePoint, point_b: DiscretePoint, point_c: Dis
 
     // Deviation of point C from line defined by `slope` and `intercept`.
     return @abs(pred - point_c.value);
-}
-
-/// Helper to serialize the `value` into bytes and store it in `compressed`.
-fn appendValue(comptime T: type, value: T, compressed: *ArrayList(u8)) !void {
-    const bytes: [8]u8 = @bitCast(value);
-    try compressed.appendSlice(&bytes);
 }
 
 test "abc compressor can always compress and decompress with zero error bound" {

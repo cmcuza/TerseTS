@@ -32,6 +32,8 @@ const Method = tersets.Method;
 const Error = tersets.Error;
 const tester = @import("../tester.zig");
 
+const shared_functions = @import("../utilities/shared_functions.zig");
+
 /// Compress `uncompressed_values` within error_bound using "Bucket Quantization" and a
 /// "Fixed-length Bit-Packing". The function writes the result to `compressed_values`. The
 /// `compressed_values` includes the bit width, original length and smallest value so that it
@@ -57,13 +59,13 @@ pub fn compress(
     }
 
     // Append the minimum value to the header of the compressed values.
-    try appendValue(f64, min_val, compressed_values);
+    try shared_functions.appendValue(f64, min_val, compressed_values);
 
     // All values will map to the closest bucket based on the bucket_size.
     const bucket_size: f32 = 2 * error_bound;
 
     // Append the minimum value to the header of the compressed values.
-    try appendValue(f32, bucket_size, compressed_values);
+    try shared_functions.appendValue(f32, bucket_size, compressed_values);
 
     //Intermediate quantized values.
     var quantized_values = ArrayList(usize).init(allocator);
@@ -185,22 +187,6 @@ pub fn decompress(
             decompressed_value = min_val + @as(f64, @floatFromInt(quantized_value)) * bucket_size;
         }
         try decompressed_values.append(decompressed_value);
-    }
-}
-
-/// Append `value` of `type` determined at compile time to `compressed_values`.
-fn appendValue(comptime T: type, value: T, compressed_values: *ArrayList(u8)) !void {
-    // Compile-time type check.
-    switch (@TypeOf(value)) {
-        f64, usize => {
-            const value_as_bytes: [8]u8 = @bitCast(@as(T, value));
-            try compressed_values.appendSlice(value_as_bytes[0..]);
-        },
-        f32 => {
-            const value_as_bytes: [4]u8 = @bitCast(@as(T, value));
-            try compressed_values.appendSlice(value_as_bytes[0..]);
-        },
-        else => @compileError("Unsupported type for append value function"),
     }
 }
 
