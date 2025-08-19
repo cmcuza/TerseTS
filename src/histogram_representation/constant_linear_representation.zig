@@ -55,9 +55,9 @@ const Approximation = enum(i8) { constant, linear };
 /// using "Piecewice Constant Histogram" compression method. The function writes the result to
 /// `compressed_values`. If an error occurs it is returned.
 pub fn compressPWCH(
+    allocator: mem.Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
-    allocator: mem.Allocator,
     error_bound: f32,
 ) Error!void {
     if (error_bound <= 1.0) {
@@ -93,9 +93,9 @@ pub fn compressPWCH(
 /// using "Piecewice Linear Histogram" compression method. The function writes the result to
 /// `compressed_values`. If an error occurs it is returned.
 pub fn compressPWLH(
+    allocator: mem.Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
-    allocator: mem.Allocator,
     error_bound: f32,
 ) Error!void {
     if (error_bound <= 1.0) {

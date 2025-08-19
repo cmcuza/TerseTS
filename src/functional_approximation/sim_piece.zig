@@ -40,9 +40,9 @@ const tester = @import("../tester.zig");
 /// The function writes the result to `compressed_values`. The `allocator` is used for memory
 /// allocation of intermediate data structures. If an error occurs, it is returned.
 pub fn compress(
+    allocator: mem.Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
-    allocator: mem.Allocator,
     error_bound: f32,
 ) Error!void {
     if (error_bound <= 0.0) {
@@ -644,9 +644,9 @@ test "sim-piece cannot compress NaN values" {
     defer compressed_values.deinit();
 
     compress(
+        allocator,
         uncompressed_values,
         &compressed_values,
-        allocator,
         0.1,
     ) catch |err| {
         try testing.expectEqual(Error.UnsupportedInput, err);
@@ -669,9 +669,9 @@ test "sim-piece cannot compress inf values" {
     defer compressed_values.deinit();
 
     compress(
+        allocator,
         uncompressed_values,
         &compressed_values,
-        allocator,
         0.1,
     ) catch |err| {
         try testing.expectEqual(Error.UnsupportedInput, err);
@@ -694,9 +694,9 @@ test "sim-piece cannot compress f64 with reduced precision" {
     defer compressed_values.deinit();
 
     compress(
+        allocator,
         uncompressed_values,
         &compressed_values,
-        allocator,
         0.1,
     ) catch |err| {
         try testing.expectEqual(Error.UnsupportedInput, err);

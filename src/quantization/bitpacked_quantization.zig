@@ -240,8 +240,8 @@ test "bitpacked quantization can compress and decompress bounded values" {
     }
 
     try tester.testCompressAndDecompress(
-        uncompressed_values.items,
         allocator,
+        uncompressed_values.items,
         Method.BitPackedQuantization,
         error_bound,
         tersets.isWithinErrorBound,
@@ -298,8 +298,8 @@ test "bitpacked quantization can compress and decompress bounded values at diffe
     try tester.generateBoundedRandomValues(&uncompressed_values, -1e8, 1e8, undefined);
 
     try tester.testCompressAndDecompress(
-        uncompressed_values.items,
         allocator,
+        uncompressed_values.items,
         Method.BitPackedQuantization,
         error_bound,
         tersets.isWithinErrorBound,
@@ -321,8 +321,8 @@ test "bitpacked quantization can compress and decompress with zero error bound a
     try tester.generateBoundedRandomValues(&uncompressed_values, -1e14, 1e14, undefined);
 
     try tester.testCompressAndDecompress(
-        uncompressed_values.items,
         allocator,
+        uncompressed_values.items,
         Method.BitPackedQuantization,
         error_bound,
         tersets.isWithinErrorBound,

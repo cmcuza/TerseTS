@@ -107,57 +107,57 @@ pub fn compress(
         },
         .SlideFilter => {
             try swing_slide_filter.compressSlideFilter(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                allocator,
                 error_bound,
             );
         },
         .SimPiece => {
             try sim_piece.compress(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                allocator,
                 error_bound,
             );
         },
         .MixPiece => {
             try mix_piece.compress(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                allocator,
                 error_bound,
             );
         },
         .PiecewiseConstantHistogram => {
             try piecewise_histogram.compressPWCH(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                allocator,
                 error_bound,
             );
         },
         .PiecewiseLinearHistogram => {
             try piecewise_histogram.compressPWLH(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                allocator,
                 error_bound,
             );
         },
         .ABCLinearApproximation => {
             try abc_linear_approximation.compress(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                allocator,
                 error_bound,
             );
         },
         .VisvalingamWhyatt => {
             try vw.compress(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                allocator,
                 error_bound,
             );
         },
@@ -170,9 +170,9 @@ pub fn compress(
         },
         .BottomUp => {
             try bottom_up.compress(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                allocator,
                 error_bound,
             );
         },

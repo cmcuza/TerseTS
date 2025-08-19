@@ -239,9 +239,9 @@ pub fn compressSwingFilter(
 /// the result to `compressed_values`. The `allocator` is used to allocate memory for the convex hull.
 /// If an error occurs it is returned.
 pub fn compressSlideFilter(
+    allocator: mem.Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
-    allocator: mem.Allocator,
     error_bound: f32,
 ) Error!void {
 

@@ -50,9 +50,9 @@ const testing = std.testing;
 /// is used to allocate memory for the HashedPriorityQueue used in the implementation.
 /// If an error occurs it is returned.
 pub fn compress(
+    allocator: mem.Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
-    allocator: mem.Allocator,
     error_bound: f32,
 ) Error!void {
     if (error_bound < 0) {
@@ -423,7 +423,7 @@ test "bottom-up can compress and decompress with zero error bound" {
     try tester.generateBoundedRandomValues(&uncompressed_values, -1e16, 1e16, undefined);
 
     // Call the compress and decompress functions.
-    try compress(uncompressed_values.items, &compressed_values, allocator, error_bound);
+    try compress(allocator, uncompressed_values.items, &compressed_values, error_bound);
     try decompress(compressed_values.items, &decompressed_values);
 
     // Check if the decompressed values have the same lenght as the compressed ones.
@@ -448,7 +448,7 @@ test "bottom-up can compress and decompress with zero error bound odd size" {
     try uncompressed_values.append(tester.generateBoundedRandomValue(f64, -1e16, 1e16, undefined));
 
     // Call the compress and decompress functions.
-    try compress(uncompressed_values.items, &compressed_values, allocator, error_bound);
+    try compress(allocator, uncompressed_values.items, &compressed_values, error_bound);
     try decompress(compressed_values.items, &decompressed_values);
 
     // Check if the decompressed values have the same lenght as the compressed ones.
@@ -474,9 +474,9 @@ test "bottom-up random lines and random error bound compress and decompress" {
     }
 
     try compress(
+        allocator,
         uncompressed_values.items,
         &compressed_values,
-        allocator,
         error_bound,
     );
 

@@ -43,9 +43,9 @@ const ConvexHull = @import("../utilities/convex_hull.zig").ConvexHull;
 /// L-inf norm. The function writes the result to `compressed_values`. The `allocator`
 /// is used to allocate memory for the convex hull. If an error occurs it is returned.
 pub fn compress(
+    allocator: mem.Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
-    allocator: mem.Allocator,
     error_bound: f32,
 ) Error!void {
     if (uncompressed_values.len < 2) return Error.UnsupportedInput;
@@ -353,9 +353,9 @@ test "abc compressor identifies correct ABC points in the convex hull of a bigge
     defer compressed_values.deinit();
 
     try compress(
+        allocator,
         uncompressed_values.items,
         &compressed_values,
-        allocator,
         error_bound,
     );
 

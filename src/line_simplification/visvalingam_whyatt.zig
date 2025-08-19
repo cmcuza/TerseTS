@@ -44,9 +44,9 @@ const tester = @import("../tester.zig");
 /// to `compressed_values`. The `allocator` is used to allocate memory for the HashedPriorityQueue
 /// used in the implementation. If an error occurs it is returned.
 pub fn compress(
+    allocator: mem.Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
-    allocator: mem.Allocator,
     error_bound: f32,
 ) Error!void {
     // If we have 2 or fewer points, store them without compression.
@@ -346,7 +346,7 @@ test "vw compress and decompress with zero error bound" {
     try tester.generateBoundedRandomValues(&uncompressed_values, 0, 1000000, random);
 
     // Call the compress and decompress functions.
-    try compress(uncompressed_values.items, &compressed_values, allocator, error_bound);
+    try compress(allocator, uncompressed_values.items, &compressed_values, error_bound);
     try decompress(compressed_values.items, &decompressed_values);
 
     try std.testing.expect(tersets.isWithinErrorBound(
@@ -370,7 +370,7 @@ test "vw compress and compress with known result" {
     defer decompressed_values.deinit();
 
     // Call the compress function.
-    try compress(uncompressed_values, &compressed_values, allocator, error_bound);
+    try compress(allocator, uncompressed_values, &compressed_values, error_bound);
     try decompress(compressed_values.items, &decompressed_values);
 
     // Check if the decompressed values have the same lenght as the compressed ones.
@@ -403,7 +403,7 @@ test "vw compress and compress with random data" {
     try tester.generateBoundedRandomValues(&uncompressed_values, 0, 1, random);
 
     // Call the compress function.
-    try compress(uncompressed_values.items, &compressed_values, allocator, error_bound);
+    try compress(allocator, uncompressed_values.items, &compressed_values, error_bound);
     try decompress(compressed_values.items, &decompressed_values);
 
     // Check if the decompressed values have the same lenght as the compressed ones.

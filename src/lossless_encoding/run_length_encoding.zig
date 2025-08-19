@@ -89,14 +89,25 @@ fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)
     }
 }
 
-test "run length encoding can compress and decompress values" {
+test "rle can always compress and decompress" {
     const allocator = testing.allocator;
-    try tester.testGenerateCompressAndDecompress(
-        tester.generateRandomValues,
+    const data_distributions = &[_]tester.DataDistribution{
+        .FiniteRandomValues,
+        .LinearFunctions,
+        .BoundedRandomValues,
+        .SinusoidalFunction,
+        .LinearFunctionsWithNansAndInfinities,
+        .RandomValuesWithNansAndInfinities,
+        .SinusoidalFunctionWithNansAndInfinities,
+        .BoundedRandomValuesWithNansAndInfinities,
+    };
+
+    // This function evaluates PoorMansCompressionMidrange using all data distribution stored in
+    // `data_distribution`. The error bound is ignored as RLE does not use it.
+    try tester.testErrorBoundedCompressionMethod(
         allocator,
-        Method.RunLengthEncoding,
-        0,
-        tersets.isWithinErrorBound,
+        Method.PoorMansCompressionMidrange,
+        data_distributions,
     );
 }
 
@@ -129,8 +140,8 @@ test "run length encoding compresses repeated values" {
     }
 
     try tester.testCompressAndDecompress(
-        uncompressed_values.items,
         allocator,
+        uncompressed_values.items,
         Method.RunLengthEncoding,
         0,
         tersets.isWithinErrorBound,
