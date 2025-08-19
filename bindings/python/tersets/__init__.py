@@ -90,6 +90,8 @@ class Method(Enum):
     BottomUp = 11
     MixPiece = 12
     BitPackedQuantization = 13
+    RunLengthEncoding = 14
+
 
 # Public Functions.
 def compress(values: List[float], method: Method, error_bound: float) -> bytes:
