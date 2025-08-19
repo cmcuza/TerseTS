@@ -15,6 +15,7 @@ enum Method {
   SlidingWindow = 10,
   BottomUp = 11,
   MixPiece = 12,
+  BitPackedQuantization = 13,
 };
 
 // A pointer to uncompressed values and the number of values.
