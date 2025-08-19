@@ -1,4 +1,4 @@
-// Copyright 2024 TerseTS Contributors
+// Copyright 2025 TerseTS Contributors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -223,7 +223,7 @@ test "sliding-window can compress and decompress with zero error bound" {
     defer decompressed_values.deinit();
     const error_bound: f32 = 0.0;
 
-    const max_lines: usize = @intFromFloat(@round(tester.generateBoundedRandomValue(f64, 4, 25, undefined)));
+    const max_lines: usize = tester.generateBoundRandomInteger(usize, 4, 25, undefined);
     // Sliding-Window cannot handle very large value due to numerical issues with `math.order()`.
     for (0..max_lines) |_| {
         try tester.generateBoundedRandomValues(&uncompressed_values, -1e16, 1e16, undefined);
@@ -248,7 +248,7 @@ test "sliding-window random lines and random error bound compress and decompress
 
     const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0, 1, undefined);
 
-    const max_lines: usize = @intFromFloat(@round(tester.generateBoundedRandomValue(f64, 4, 25, undefined)));
+    const max_lines: usize = tester.generateBoundRandomInteger(usize, 4, 25, undefined);
     for (0..max_lines) |_| {
         // Generate a random linear function and add it to the uncompressed values.
         try tester.generateRandomLinearFunction(&uncompressed_values, undefined);

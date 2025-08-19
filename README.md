@@ -1,5 +1,5 @@
 <h1 align="center">
-  <img src="docs/tersets.jpg" alt="TerseTS">
+  <img src="docs/tersets.png" alt="TerseTS", width="400">
 </h1>
 
 TerseTS is a library that provides methods for lossless and lossy compressing time series. To match existing literature the methods are organized based on [Time Series Compression Survey](https://dl.acm.org/doi/10.1145/3560814). The library is implemented in Zig and provides a Zig-API and C-API with [bindings](#usage) for other languages.
@@ -188,6 +188,9 @@ TerseTS provides `./bindings/python/tersets/__init__.py` as binding for Python w
 - **Microsoft Windows**: Link the `tersets.dll` to the project. It can be found in the output folder after compiling TerseTS, by default: `zig-out/lib/tersets.dll`.
 - **Linux**: Link the `tersets.so` to the project. It can be found in the output folder after compiling TerseTS, by default: `zig-out/lib/tersets.so`.
 - **macOS**: Link the `tersets.dylib` to the project. It can be found in the output folder after compiling TerseTS, by default: `zig-out/lib/tersets.dylib`.
+
+## Contributing:  
+Please read our [contributing guidelines](.github/CONTRIBUTING.md) before submitting an [issue](https://github.com/cmcuza/TerseTS/issues/new/choose) or a [pull request](https://github.com/cmcuza/TerseTS/compare)..
 
 # License
 TerseTS is licensed under version 2.0 of the Apache License and a copy of the license is bundled with the program.

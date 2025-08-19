@@ -1,4 +1,4 @@
-// Copyright 2024 TerseTS Contributors
+// Copyright 2025 TerseTS Contributors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -380,7 +380,7 @@ test "abc compressor compresses and decompresses constant signal" {
 
     const constant_value: f64 = tester.generateBoundedRandomValue(f64, 0, 1, undefined);
 
-    const number_elements: usize = @intFromFloat(@round(tester.generateBoundedRandomValue(f64, 100, 150, undefined)));
+    const number_elements: usize = tester.generateBoundRandomInteger(usize, 100, 150, undefined);
 
     for (0..number_elements) |_| {
         try uncompressed_values.append(constant_value);

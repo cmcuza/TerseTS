@@ -360,6 +360,18 @@ pub fn replaceNormalValues(
     }
 }
 
+/// Generate a random `f64` value using `random_opt`. If `random_opt` is not passed, a random number
+/// generator is created.
+pub fn generateRandomValue(random_opt: ?Random) f64 {
+    const seed: u64 = @bitCast(time.milliTimestamp());
+    var prng = std.Random.DefaultPrng.init(seed);
+    var random = random_opt orelse prng.random();
+
+    // rand can only generate f64 values in the range [0, 1).
+    const random_value = @as(f64, @bitCast(random.int(u64)));
+    return random_value;
+}
+
 /// Generate a random number of `f64` values using `random` and add them to `uncompressed_values`.
 /// The number of values is randomly chosen between 100 and 150. Each value is a random `f64`
 /// generated from a random `u64` bit pattern, which may include special values such as NaN or inf.
@@ -541,16 +553,29 @@ pub fn generateRandomLinearFunction(uncompressed_values: *ArrayList(f64), random
     }
 }
 
-/// Generate a random value of type `T` between `lower_bound` and `upper_bound` for use in testing using `random`.
-/// `T` must be a floating-point type (e.g., `f32`, `f64`).
-pub fn generateBoundedRandomValue(comptime T: type, lower_bound: T, upper_bound: T, random_opt: ?Random) T {
+/// Generate a random value of type `T` between `at_least` and `at_most` for use in testing using
+/// `random_opt`. `T` must be a floating-point type (e.g., `f32`, `f64`). If random_opt is not
+/// passed, a random number generator is created using the current time as seed.
+pub fn generateBoundedRandomValue(comptime T: type, at_least: T, at_most: T, random_opt: ?Random) T {
     const seed: u64 = @bitCast(time.milliTimestamp());
     var prng = std.Random.DefaultPrng.init(seed);
     var random = random_opt orelse prng.random();
 
     const rand_value: T = random.float(T);
-    const bounded_value = lower_bound + (upper_bound - lower_bound) * rand_value;
+    const bounded_value = at_least + (at_most - at_least) * rand_value;
     return bounded_value;
+}
+
+/// Generate a random value of type `T` between `at_least` and `at_most` for use in testing using
+/// `random_opt`. `T` must be an integer-point type (e.g., `i32`, `usize`). If random_opt is not
+/// passed, a random number generator is created using the current time as seed.
+pub fn generateBoundRandomInteger(comptime T: type, at_least: T, at_most: T, random_opt: ?Random) T {
+    const seed: u64 = @bitCast(time.milliTimestamp());
+    var prng = std.Random.DefaultPrng.init(seed);
+    var random = random_opt orelse prng.random();
+
+    const rand_value: T = random.intRangeAtMost(T, at_least, at_most);
+    return rand_value;
 }
 
 /// Generate a random number of values used for testing. This value needs to be higher than or equal to 2
