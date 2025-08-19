@@ -28,6 +28,7 @@ const vw = @import("line_simplification/visvalingam_whyatt.zig");
 const sliding_window = @import("line_simplification/sliding_window.zig");
 const bottom_up = @import("line_simplification/bottom_up.zig");
 const rle_enconding = @import("lossless_encoding/run_length_encoding.zig");
+const bitpacked_quantization = @import("quantization/bitpacked_quantization.zig");
 
 /// The errors that can occur in TerseTS.
 pub const Error = error{
@@ -38,6 +39,7 @@ pub const Error = error{
     OutOfMemory,
     EmptyConvexHull,
     EmptyQueue,
+    ByteStreamError,
 };
 
 /// The compression methods in TerseTS.
@@ -55,6 +57,7 @@ pub const Method = enum {
     SlidingWindow,
     BottomUp,
     MixPiece,
+    BitPackedQuantization,
     RunLengthEncoding,
 };
 
@@ -176,6 +179,14 @@ pub fn compress(
         .RunLengthEncoding => {
             try rle_enconding.compress(uncompressed_values, &compressed_values);
         },
+        .BitPackedQuantization => {
+            try bitpacked_quantization.compress(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                error_bound,
+            );
+        },
     }
     try compressed_values.append(@intFromEnum(method));
     return compressed_values;
@@ -234,6 +245,9 @@ pub fn decompress(
         },
         .RunLengthEncoding => {
             try rle_enconding.decompress(compressed_values_slice, &decompressed_values);
+        },
+        .BitPackedQuantization => {
+            try bitpacked_quantization.decompress(compressed_values_slice, &decompressed_values);
         },
     }
 
