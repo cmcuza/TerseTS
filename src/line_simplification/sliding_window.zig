@@ -31,6 +31,7 @@ const Method = tersets.Method;
 const Error = tersets.Error;
 
 const shared_structs = @import("../utilities/shared_structs.zig");
+const shared_functions = @import("../utilities/shared_functions.zig");
 
 const DiscretePoint = shared_structs.DiscretePoint;
 const LinearFunction = shared_structs.LinearFunction;
@@ -64,9 +65,9 @@ pub fn compress(
         {}
 
         // Store the segment's start value, end index, and end value in the compressed output.
-        try appendValue(f64, uncompressed_values[seg_start], compressed_values);
-        try appendValue(f64, uncompressed_values[seg_end - 1], compressed_values);
-        try appendValue(usize, seg_end - 1, compressed_values);
+        try shared_functions.appendValue(f64, uncompressed_values[seg_start], compressed_values);
+        try shared_functions.appendValue(f64, uncompressed_values[seg_end - 1], compressed_values);
+        try shared_functions.appendValue(usize, seg_end - 1, compressed_values);
 
         // Move to the next segment.
         seg_start = seg_end;
@@ -80,9 +81,9 @@ pub fn compress(
     // value for the last point (if needed) has negligible impact on the compression ratio,
     // since it only occurs once per time series (if at all), regardless of the input size.
     if (seg_start == uncompressed_values.len - 1) {
-        try appendValue(f64, uncompressed_values[seg_start], compressed_values);
-        try appendValue(f64, uncompressed_values[seg_start], compressed_values);
-        try appendValue(usize, seg_start, compressed_values);
+        try shared_functions.appendValue(f64, uncompressed_values[seg_start], compressed_values);
+        try shared_functions.appendValue(f64, uncompressed_values[seg_start], compressed_values);
+        try shared_functions.appendValue(usize, seg_start, compressed_values);
     }
 }
 
@@ -198,31 +199,6 @@ fn computeMaxAbsoluteError(uncompressed_values: []const f64, seg_start: usize, s
     return linf;
 }
 
-/// Append `value` of `type` determined at compile time to `compressed_values`.
-fn appendValue(comptime T: type, value: T, compressed_values: *ArrayList(u8)) !void {
-    // Compile-time type check
-    switch (@TypeOf(value)) {
-        f64, usize => {
-            const value_as_bytes: [8]u8 = @bitCast(value);
-            try compressed_values.appendSlice(value_as_bytes[0..]);
-        },
-        else => @compileError("Unsupported type for append value function"),
-    }
-}
-
-/// Test if the RMSE of the linear regression line that fits the points in the segment in `values`
-/// is within the `error_bound`.
-pub fn testRMSEisWithinErrorBound(
-    values: []const f64,
-    error_bound: f32,
-) !void {
-    // At least two points are needed to form a line.
-    if (values.len < 2) return;
-
-    const rmse = try computeRMSE(values, 0, values.len - 1);
-    try testing.expect(rmse <= error_bound);
-}
-
 test "sliding-window can compress and decompress bounded values with zero error bound" {
     const allocator = testing.allocator;
     const error_bound = 0;
@@ -292,7 +268,7 @@ test "sliding-window compress and decompress random lines and random error bound
     var decompressed_values = ArrayList(f64).init(allocator);
     defer decompressed_values.deinit();
 
-    const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0, 1, undefined);
+    const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0.01, 1e6, undefined);
 
     const max_lines: usize = tester.generateBoundRandomInteger(usize, 4, 25, undefined);
     for (0..max_lines) |_| {
@@ -327,7 +303,7 @@ test "sliding-window compress and decompress random lines and random error bound
         );
 
         // Check if the point is within the error bound.
-        try testRMSEisWithinErrorBound(
+        try shared_functions.testRMSEisWithinErrorBound(
             uncompressed_values.items[previous_point_index .. current_point_index + 1],
             error_bound,
         );

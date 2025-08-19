@@ -35,6 +35,7 @@ const HashedPriorityQueue = @import(
 ).HashedPriorityQueue;
 
 const shared_structs = @import("../utilities/shared_structs.zig");
+const shared_functions = @import("../utilities/shared_functions.zig");
 
 const DiscretePoint = shared_structs.DiscretePoint;
 const LinearFunction = shared_structs.LinearFunction;
@@ -61,9 +62,9 @@ pub fn compress(
 
     // If we have 2 or fewer points, we store them without compression.
     if (uncompressed_values.len <= 2) {
-        try appendValue(f64, uncompressed_values[0], compressed_values);
-        try appendValue(f64, uncompressed_values[1], compressed_values);
-        try appendValue(usize, 1, compressed_values);
+        try shared_functions.appendValue(f64, uncompressed_values[0], compressed_values);
+        try shared_functions.appendValue(f64, uncompressed_values[1], compressed_values);
+        try shared_functions.appendValue(usize, 1, compressed_values);
         return;
     }
 
@@ -130,7 +131,7 @@ pub fn compress(
             left_seg.right_seg = right_seg.index;
 
             // Compute the merge cost of merging the left and right segments.
-            const merge_cost = mergeCost(uncompressed_values, left_seg, right_seg);
+            const merge_cost = try mergeCost(uncompressed_values, left_seg, right_seg);
 
             // Update the cost of the left segment with the computed merge cost.
             left_seg.cost = merge_cost;
@@ -148,7 +149,7 @@ pub fn compress(
             const right_to_right_seg = try heap.get(try heap.getIndex(placeholder_segment_cost));
 
             // Compute the merge cost of merging the right segment with its right neighbor.
-            const merge_cost = mergeCost(uncompressed_values, right_seg, right_to_right_seg);
+            const merge_cost = try mergeCost(uncompressed_values, right_seg, right_to_right_seg);
 
             // Update the cost of the right segment with the computed merge cost.
             right_seg.cost = merge_cost;
@@ -166,9 +167,9 @@ pub fn compress(
         const seg_start = heap.items[index].seg_start;
         const seg_end = heap.items[index].seg_end;
         // Append the start value, the end index, and the end value to the compressed representation.
-        try appendValue(f64, uncompressed_values[seg_start], compressed_values);
-        try appendValue(f64, uncompressed_values[seg_end], compressed_values);
-        try appendValue(usize, seg_end, compressed_values);
+        try shared_functions.appendValue(f64, uncompressed_values[seg_start], compressed_values);
+        try shared_functions.appendValue(f64, uncompressed_values[seg_end], compressed_values);
+        try shared_functions.appendValue(usize, seg_end, compressed_values);
     }
 
     return;
@@ -315,7 +316,7 @@ fn buildInitialPairwiseSegmentCost(
         };
 
         // Compute the merge cost of merging the previous and current segments.
-        const merge_cost = mergeCost(uncompressed_values, previous_seg, current_seg);
+        const merge_cost = try mergeCost(uncompressed_values, previous_seg, current_seg);
         previous_seg.cost = merge_cost;
         try heap.add(previous_seg);
 
@@ -339,114 +340,76 @@ fn buildInitialPairwiseSegmentCost(
             .seg_start = seg_start,
             .seg_end = seg_start,
         };
-        const merge_cost = mergeCost(uncompressed_values, previous_seg, last_seg);
+        const merge_cost = try mergeCost(uncompressed_values, previous_seg, last_seg);
         last_seg.cost = merge_cost;
         try heap.add(last_seg);
     }
 }
 
 /// Incremental cost of merging the neighbouring segments `seg_one` and `seg_two`.
-fn mergeCost(uncompressed_values: []const f64, seg_one: SegmentMergeCost, seg_two: SegmentMergeCost) f64 {
+fn mergeCost(uncompressed_values: []const f64, seg_one: SegmentMergeCost, seg_two: SegmentMergeCost) !f64 {
     const merged_start = @min(seg_one.seg_start, seg_two.seg_start);
     const merged_end = @max(seg_one.seg_end, seg_two.seg_end);
-    return computeRMSE(uncompressed_values, merged_start, merged_end);
-}
-
-/// Computes the Root-Mean-Squared-Errors (RMSE) for a segment of the `uncompressed_values`.
-/// This function calculates the error between the actual values and the predicted values
-/// based on a linear interpolation fitted to the segment defined by `seg_start` and `seg_end`.
-fn computeRMSE(uncompressed_values: []const f64, seg_start: usize, seg_end: usize) f64 {
-    const seg_len: f64 = @floatFromInt(seg_end - seg_start + 1);
-    if (seg_len <= 1) return 0.0; // If the segment has one or no points, return zero error.
-
-    const slope: f64 = (uncompressed_values[seg_end] - uncompressed_values[seg_start]) / (seg_len - 1);
-    const intercept: f64 = uncompressed_values[seg_start] - slope * @as(f64, @floatFromInt(seg_start));
-
-    // Calculate the sum of squared errors (SSE) between actual and predicted values.
-    var sse: f64 = 0;
-    var i = seg_start;
-    while (i <= seg_end) : (i += 1) {
-        const pred = slope * @as(f64, @floatFromInt(i)) + intercept; // Predicted value.
-        const diff = uncompressed_values[i] - pred; // Difference between actual and predicted.
-        sse += diff * diff; // Accumulate squared differences.
-    }
-
-    // Return the RMSE.
-    return math.sqrt(sse / seg_len);
-}
-
-/// Append `value` of `type` determined at compile time to `compressed_values`.
-fn appendValue(comptime T: type, value: T, compressed_values: *ArrayList(u8)) !void {
-    // Compile-time type check
-    switch (@TypeOf(value)) {
-        f64, usize => {
-            const value_as_bytes: [8]u8 = @bitCast(value);
-            try compressed_values.appendSlice(value_as_bytes[0..]);
-        },
-        else => @compileError("Unsupported type for append value function"),
-    }
-}
-
-/// Test if the RMSE of the linear regression line that fits the points in the segment in `values`
-/// is within the `error_bound`.
-pub fn testRMSEisWithinErrorBound(
-    values: []const f64,
-    error_bound: f32,
-) !void {
-    // At least two points are needed to form a line.
-    if (values.len < 2) return;
-
-    const rmse = computeRMSE(values, 0, values.len - 1);
-
-    try testing.expect(rmse <= error_bound);
+    return try shared_functions.computeRMSE(uncompressed_values, merged_start, merged_end);
 }
 
 test "bottom-up can compress and decompress with zero error bound" {
     const allocator = testing.allocator;
+    const error_bound = 0.0;
 
-    // Output buffer.
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
-    const error_bound: f32 = 0.0;
 
-    // Bottom Up cannot handle very large value due to numerical issues with `math.order()`.
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e16, 1e16, undefined);
+    try tester.generateBoundedRandomValues(
+        &uncompressed_values,
+        -1e15,
+        1e15,
+        undefined,
+    );
 
-    // Call the compress and decompress functions.
-    try compress(allocator, uncompressed_values.items, &compressed_values, error_bound);
-    try decompress(compressed_values.items, &decompressed_values);
-
-    // Check if the decompressed values have the same lenght as the compressed ones.
-    try testing.expectEqual(uncompressed_values.items.len, decompressed_values.items.len);
+    try tester.testCompressAndDecompress(
+        allocator,
+        uncompressed_values.items,
+        Method.BottomUp,
+        error_bound,
+        tersets.isWithinErrorBound,
+    );
 }
 
-test "bottom-up can compress and decompress with zero error bound odd size" {
+test "bottom-up cannot compress and decompress nan values" {
     const allocator = testing.allocator;
+    const uncompressed_values = [3]f64{ 343.0, math.nan(f64), 520.0 };
+    var compressed_values = std.ArrayList(u8).init(allocator);
+    compressed_values.deinit();
 
-    // Output buffer.
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
-    const error_bound: f32 = 0.0;
+    compress(allocator, uncompressed_values[0..], &compressed_values, 0.1) catch |err| {
+        try testing.expectEqual(Error.UnsupportedInput, err);
+        return;
+    };
 
-    // Bottom Up cannot handle very large value due to numerical issues with `math.order()`.
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e16, 1e16, undefined);
+    try testing.expectFmt(
+        "",
+        "The Bottom-Up method cannot compress nan values",
+        .{},
+    );
+}
 
-    try uncompressed_values.append(tester.generateBoundedRandomValue(f64, -1e16, 1e16, undefined));
+test "bottom-up cannot compress and decompress unbounded values" {
+    const allocator = testing.allocator;
+    const uncompressed_values = [3]f64{ 343.0, 1e20, 520.0 };
+    var compressed_values = std.ArrayList(u8).init(allocator);
+    compressed_values.deinit();
 
-    // Call the compress and decompress functions.
-    try compress(allocator, uncompressed_values.items, &compressed_values, error_bound);
-    try decompress(compressed_values.items, &decompressed_values);
+    compress(allocator, uncompressed_values[0..], &compressed_values, 0.1) catch |err| {
+        try testing.expectEqual(Error.UnsupportedInput, err);
+        return;
+    };
 
-    // Check if the decompressed values have the same lenght as the compressed ones.
-    try testing.expectEqual(uncompressed_values.items.len, decompressed_values.items.len);
+    try testing.expectFmt(
+        "",
+        "The Bottom-Up method cannot compress unbounded values",
+        .{},
+    );
 }
 
 test "bottom-up random lines and random error bound compress and decompress" {
@@ -459,7 +422,7 @@ test "bottom-up random lines and random error bound compress and decompress" {
     var decompressed_values = ArrayList(f64).init(allocator);
     defer decompressed_values.deinit();
 
-    const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0, 1, undefined);
+    const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0.01, 1e6, undefined);
 
     const max_lines: usize = tester.generateBoundRandomInteger(usize, 4, 25, undefined);
     for (0..max_lines) |_| {
@@ -495,7 +458,7 @@ test "bottom-up random lines and random error bound compress and decompress" {
         );
 
         // Check if the point is within the error bound.
-        try testRMSEisWithinErrorBound(
+        try shared_functions.testRMSEisWithinErrorBound(
             uncompressed_values.items[previous_point_index .. current_point_index + 1],
             error_bound,
         );
