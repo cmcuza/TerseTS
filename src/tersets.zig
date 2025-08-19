@@ -29,6 +29,7 @@ const sliding_window = @import("line_simplification/sliding_window.zig");
 const bottom_up = @import("line_simplification/bottom_up.zig");
 const rle_enconding = @import("lossless_encoding/run_length_encoding.zig");
 const bitpacked_quantization = @import("quantization/bitpacked_quantization.zig");
+const non_linear_approximation = @import("functional_approximation/non_linear_approximation.zig");
 
 /// The errors that can occur in TerseTS.
 pub const Error = error{
@@ -59,6 +60,7 @@ pub const Method = enum {
     MixPiece,
     BitPackedQuantization,
     RunLengthEncoding,
+    NonLinearApproximation,
 };
 
 /// Compress `uncompressed_values` within `error_bound` using `method` and returns the results
@@ -187,6 +189,14 @@ pub fn compress(
                 error_bound,
             );
         },
+        .NonLinearApproximation => {
+            try non_linear_approximation.compress(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                error_bound,
+            );
+        },
     }
     try compressed_values.append(@intFromEnum(method));
     return compressed_values;
@@ -248,6 +258,9 @@ pub fn decompress(
         },
         .BitPackedQuantization => {
             try bitpacked_quantization.decompress(compressed_values_slice, &decompressed_values);
+        },
+        .NonLinearApproximation => {
+            try non_linear_approximation.decompress(compressed_values_slice, &decompressed_values);
         },
     }
 
