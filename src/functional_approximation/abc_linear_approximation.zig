@@ -361,7 +361,7 @@ test "abc compressor can compress and decompress random lines and error bound" {
 
     const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0, 1, undefined);
 
-    const max_lines: usize = @intFromFloat(@round(tester.generateBoundedRandomValue(f64, 4, 25, undefined)));
+    const max_lines: usize = tester.generateBoundRandomInteger(usize, 4, 25, undefined);
     for (0..max_lines) |_| {
         // Generate a random linear function and add it to the uncompressed values.
         try tester.generateRandomLinearFunction(&uncompressed_values, undefined);
@@ -405,7 +405,7 @@ test "abc compressor compresses and decompresses constant signal" {
 
     const constant_value: f64 = tester.generateBoundedRandomValue(f64, 0, 1, undefined);
 
-    const number_elements: usize = @intFromFloat(@round(tester.generateBoundedRandomValue(f64, 100, 150, undefined)));
+    const number_elements: usize = tester.generateBoundRandomInteger(usize, 100, 150, undefined);
 
     for (0..number_elements) |_| {
         try uncompressed_values.append(constant_value);
