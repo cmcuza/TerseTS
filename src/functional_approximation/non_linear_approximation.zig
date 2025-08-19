@@ -23,6 +23,7 @@
 
 const std = @import("std");
 const mem = std.mem;
+const math = std.math;
 const ArrayList = std.ArrayList;
 const testing = std.testing;
 
@@ -36,6 +37,7 @@ const convex_polygon = @import("../utilities/convex_polygon.zig");
 const shared_functions = @import("../utilities/shared_functions.zig");
 const DiscretePoint = shared_structs.DiscretePoint;
 const LinearFunction = shared_structs.LinearFunction;
+const BorderLine = convex_polygon.BorderLine;
 
 /// Represents the different function types available for approximating time series segments,
 /// as defined in Table I of the NeaTS paper. Each type corresponds to a specific mathematical form.
@@ -152,9 +154,9 @@ pub fn decompress(
         offset += 1;
 
         // Reads the main function parameters (slope and intercept).
-        const param_1 = try shared_functions.readValue(f64, compressed_values[offset..]);
+        const slope = try shared_functions.readValue(f64, compressed_values[offset..]);
         offset += 8;
-        const param_2 = try shared_functions.readValue(f64, compressed_values[offset..]);
+        const intercept = try shared_functions.readValue(f64, compressed_values[offset..]);
         offset += 8;
 
         // Reads the end index of this segment.
@@ -166,9 +168,9 @@ pub fn decompress(
             .start_idx = current_start_idx, // Uses the inferred start index.
             .end_idx = end_idx,
             .function_type = function_type,
-            .parameters = LinearFunction{
-                .slope = param_1,
-                .intercept = param_2,
+            .definition = LinearFunction{
+                .slope = slope,
+                .intercept = intercept,
             },
         };
 
@@ -205,7 +207,7 @@ pub fn decompress(
     for (segments.items) |segment| {
         for (segment.start_idx..segment.end_idx) |i| {
             // Uses 1-based indexing for evaluation.
-            const value = segment.evaluate(@as(f64, @floatFromInt(i + 1)));
+            const value = try segment.evaluate(@as(f64, @floatFromInt(i + 1)));
             try decompressed_values.append(value);
         }
     }
@@ -226,7 +228,7 @@ const FunctionalApproximation = struct {
 
     /// Evaluates the approximating function at the given x-coordinate,
     /// using absolute positioning to match the reference implementation.
-    pub fn evaluate(self: *const FunctionalApproximation, x_axis: f64) f64 {
+    pub fn evaluate(self: *const FunctionalApproximation, x_axis: f64) !f64 {
         return switch (self.function_type) {
             .Linear => self.definition.slope * x_axis + self.definition.intercept,
             .Quadratic => self.definition.slope * x_axis * x_axis + self.definition.intercept,
@@ -243,6 +245,7 @@ const FunctionalApproximation = struct {
                 if (x_axis < 0) break :blk self.definition.intercept;
                 break :blk self.definition.slope * @sqrt(x_axis) + self.definition.intercept;
             },
+            .Undefined => return Error.UnsupportedInput, // Undefined function type cannot be evaluated.
         };
     }
 
@@ -255,15 +258,41 @@ const FunctionalApproximation = struct {
         // We ensure that the `.Undefined` function is not selected we set the cost to +inf.
         return switch (self.function_type) {
             .Quadratic => 3,
-            .Undefined => std.math.inf(usize),
+            .Undefined => 10000,
             else => 2,
         };
     }
 
-    pub fn lessThan(self: *const FunctionalApproximation, other_app: *const FunctionalApproximation) bool {
+    pub fn lessThan(_: void, self: FunctionalApproximation, other_app: FunctionalApproximation) bool {
         return self.start_idx < other_app.end_idx;
     }
 };
+
+/// Calculates the preprocessing shift amount needed to ensure all data values are positive,
+/// which is required for exponential and power functions. Returns 0.0 if no shift is needed.
+fn calculateShiftAmount(data: []const f64, error_bound: f32) f32 {
+    var min_val = std.math.inf(f64);
+    for (data) |val| {
+        min_val = @min(min_val, val);
+    }
+
+    const eps = @as(f64, error_bound);
+    // Determines if a shift is needed to keep all values positive within the error bound
+    if (min_val - eps <= 0) {
+        return @as(f32, @floatCast(eps + 1.0 - min_val));
+    }
+
+    return 0.0;
+}
+
+/// Applies a preprocessing shift to all values in the mutable data array,
+/// ensuring that all values become positive for mathematical functions that require it.
+fn applyShift(data: []f64, shift_amount: f32) void {
+    const shift_f64 = @as(f64, shift_amount);
+    for (data) |*val| {
+        val.* += shift_f64;
+    }
+}
 
 /// Partitions the time series into optimal segments using dynamic programming to minimize
 /// the total compressed size while maintaining error bounds. Considers multiple function
@@ -317,7 +346,7 @@ fn findOptimalFunctionalApproximation(
             if (current_approximation[model_idx].end_idx <= current_position) {
                 // Finds the longest approximation that can be done with function_type
                 // starting at the current position.
-                const functional_approximation = try approximate(
+                const functional_approximation = try computeApproximation(
                     allocator,
                     uncompressed_data,
                     current_position,
@@ -332,7 +361,7 @@ fn findOptimalFunctionalApproximation(
                 if (distances[current_position] > distances[model_start_idx] + cost) {
                     distances[current_position] = distances[model_start_idx] + cost;
                     previous_approximation[current_position] = current_approximation[model_idx];
-                    previous_approximation[current_position].end_idx = current_position;
+                    previous_approximation[current_position].?.end_idx = current_position;
                 }
             }
         }
@@ -357,8 +386,8 @@ fn findOptimalFunctionalApproximation(
     var optimal_segments = ArrayList(FunctionalApproximation).init(allocator);
     while (current_position != 0) {
         const segment = previous_approximation[current_position];
-        try optimal_segments.append(segment);
-        current_position = segment.start_idx; // Moves to the start of the current segment.
+        try optimal_segments.append(segment.?);
+        current_position = segment.?.start_idx; // Moves to the start of the current segment.
     }
 
     // Reverses the segment order since backtracking produces segments in reverse order.
@@ -369,7 +398,7 @@ fn findOptimalFunctionalApproximation(
 /// Finds the longest possible segment starting from `start_idx` that can be approximated
 /// by the given `function_type` while maintaining the error bound. Uses O'Rourke's algorithm
 /// generalized to nonlinear functions through parameter space transformation.
-fn approximate(
+fn computeApproximation(
     allocator: mem.Allocator,
     uncompressed_data: []const f64,
     start_idx: usize,
@@ -385,7 +414,7 @@ fn approximate(
             .start_idx = start_idx,
             .end_idx = start_idx + 1, // Only covers one point
             .function_type = .Linear,
-            .parameters = LinearFunction{
+            .definition = LinearFunction{
                 .slope = 0.0,
                 .intercept = intercept,
             },
@@ -404,7 +433,7 @@ fn approximate(
 
     // Implements O'Rourke's algorithm: processes data points from left to right.
     for (start_idx..n) |end_idx| {
-        const x_axis: f64 = @floatFromInt(end_idx + 1);
+        const x_axis: usize = end_idx + 1;
         const y_axis: f64 = uncompressed_data[end_idx];
 
         // Gets constraints for this data point.
@@ -415,62 +444,40 @@ fn approximate(
             function_type,
         );
 
+        const new_upper_line: BorderLine = .{
+            .definition = constraints.upper,
+            .x_axis_domain = .{ .start = -std.math.inf(f64), .end = std.math.inf(f64) },
+        };
+
+        const new_lower_line: BorderLine = .{
+            .definition = constraints.lower,
+            .x_axis_domain = .{ .start = -std.math.inf(f64), .end = std.math.inf(f64) },
+        };
+
         // Intersects the new constraints with the existing feasible region.
         const intercept = try polygon.update(
-            constraints.upper,
-            constraints.upper,
+            new_upper_line,
+            new_lower_line,
         );
 
         // Checks if the feasible region is still non-empty after adding constraints.
         if (!intercept) {
-            longest_valid_end = end_idx + 1; // +1 because end_idx is exclusive.
-            // Extracts feasible parameters from the polygon's centroid.
-            if (polygon.getFeasiblePoint()) |point| {
-                best_approximation = transformParameters(point, function_type);
-            }
-        } else {
-            break; // Stops when the feasible region becomes empty (no valid parameters exist).
+            const feasible_solution = polygon.computeFeasibleSolution();
+            best_approximation = transformParameters(feasible_solution, function_type);
+            longest_valid_end = end_idx; // Updates the longest valid segment end.
+            break;
         }
     }
 
     // Constructs and validates the final segment if a valid one was found.
-    const segment = FunctionalApproximation{
+    const functional_approximation = FunctionalApproximation{
         .start_idx = start_idx,
         .end_idx = longest_valid_end,
         .function_type = function_type,
         .definition = best_approximation,
     };
 
-    return segment;
-}
-
-/// Transforms parameters from the (m,b) parameter space back to the original function parameters.
-fn transformParameters(
-    linear_function: LinearFunction,
-    function_type: FunctionType,
-) LinearFunction {
-    return switch (function_type) {
-        .Linear => LinearFunction{
-            .slope = linear_function.slope,
-            .intercept = linear_function.intercept,
-        },
-        .Quadratic => LinearFunction{
-            .slope = linear_function.slope,
-            .intercept = linear_function.intercept,
-        },
-        .Exponential => LinearFunction{
-            .slope = linear_function.slope,
-            .intercept = @exp(linear_function.intercept),
-        },
-        .Power => LinearFunction{
-            .slope = linear_function.slope,
-            .intercept = @exp(linear_function.intercept),
-        },
-        .Sqrt => LinearFunction{
-            .slope = linear_function.slope,
-            .intercept = linear_function.intercept,
-        },
-    };
+    return functional_approximation;
 }
 
 /// Transforms error-bound constraints from the original function space to linear functions
@@ -511,33 +518,44 @@ fn getConstraints(
             .lower = LinearFunction{ .slope = -@sqrt(slope), .intercept = y_axis - eps },
             .upper = LinearFunction{ .slope = -@sqrt(slope), .intercept = y_axis + eps },
         },
+        .Undefined => .{
+            .lower = LinearFunction{ .slope = math.inf(f64), .intercept = math.inf(f64) },
+            .upper = LinearFunction{ .slope = math.inf(f64), .intercept = math.inf(f64) },
+        },
     };
 }
 
-/// Calculates the preprocessing shift amount needed to ensure all data values are positive,
-/// which is required for exponential and power functions. Returns 0.0 if no shift is needed.
-fn calculateShiftAmount(data: []const f64, error_bound: f32) f32 {
-    var min_val = std.math.inf(f64);
-    for (data) |val| {
-        min_val = @min(min_val, val);
-    }
-
-    const eps = @as(f64, error_bound);
-    // Determines if a shift is needed to keep all values positive within the error bound
-    if (min_val - eps <= 0) {
-        return @as(f32, @floatCast(eps + 1.0 - min_val));
-    }
-
-    return 0.0;
-}
-
-/// Applies a preprocessing shift to all values in the mutable data array,
-/// ensuring that all values become positive for mathematical functions that require it.
-fn applyShift(data: []f64, shift_amount: f32) void {
-    const shift_f64 = @as(f64, shift_amount);
-    for (data) |*val| {
-        val.* += shift_f64;
-    }
+/// Transforms parameters from the (m,b) parameter space back to the original function parameters.
+fn transformParameters(
+    linear_function: LinearFunction,
+    function_type: FunctionType,
+) LinearFunction {
+    return switch (function_type) {
+        .Linear => LinearFunction{
+            .slope = linear_function.slope,
+            .intercept = linear_function.intercept,
+        },
+        .Quadratic => LinearFunction{
+            .slope = linear_function.slope,
+            .intercept = linear_function.intercept,
+        },
+        .Exponential => LinearFunction{
+            .slope = linear_function.slope,
+            .intercept = @exp(linear_function.intercept),
+        },
+        .Power => LinearFunction{
+            .slope = linear_function.slope,
+            .intercept = @exp(linear_function.intercept),
+        },
+        .Sqrt => LinearFunction{
+            .slope = linear_function.slope,
+            .intercept = linear_function.intercept,
+        },
+        .Undefined => LinearFunction{
+            .slope = math.inf(f64),
+            .intercept = math.inf(f64),
+        },
+    };
 }
 
 /// Removes the preprocessing shift from decompressed data to restore original value ranges.

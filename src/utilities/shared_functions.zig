@@ -68,7 +68,7 @@ pub fn appendValue(comptime T: type, value: T, compressed_values: *ArrayList(u8)
             const value_as_bytes: [4]u8 = @bitCast(value);
             try compressed_values.appendSlice(value_as_bytes[0..]);
         },
-        else => @compileError("Unsupported type for append value function"),
+        else => return Error.UnsupportedInput,
     }
 }
 
@@ -134,7 +134,7 @@ pub fn readValue(comptime T: type, compressed_values: []const u8) Error!T {
 
 /// Returns true if two floating-point `value_a` and `value_b` numbers are approximately equal,
 /// using both absolute and relative tolerances to account for rounding errors.
-inline fn isApproximatelyEqual(value_a: f64, value_b: f64) bool {
+pub fn isApproximatelyEqual(value_a: f64, value_b: f64) bool {
     if (value_a == value_b) return true;
     const abs_diff = @abs(value_a - value_b);
     const max_abs = @max(@abs(value_a), @abs(value_b));
