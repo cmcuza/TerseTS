@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //! Implementation of "ABCLinearApproximation" algorithm from the paper:
-//! "Approximations of One-Dimensional Digital Signals Under the L^\infinity Norm.
+//! "Approximations of One-Dimensional Digital Signals Under the L^\inf Norm.
 //! Dalai, Marco, and Riccardo Leonardi.
 //! IEEE Transactions on Signal Processing, 54, 8, 3111-3124.
 //! https://doi.org/10.1109/TSP.2006.875394.
@@ -37,15 +37,16 @@ const DiscretePoint = shared_structs.DiscretePoint;
 const LinearFunction = shared_structs.LinearFunction;
 const Segment = shared_structs.Segment;
 
+const shared_functions = @import("../utilities/shared_functions.zig");
 const ConvexHull = @import("../utilities/convex_hull.zig").ConvexHull;
 
 /// Compresses `uncompressed_values` using the "ABCLinearApproximation" algorithm under the
-/// L-infinity norm. The function writes the result to `compressed_values`. The `allocator`
+/// L-inf norm. The function writes the result to `compressed_values`. The `allocator`
 /// is used to allocate memory for the convex hull. If an error occurs it is returned.
 pub fn compress(
+    allocator: mem.Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
-    allocator: mem.Allocator,
     error_bound: f32,
 ) Error!void {
     if (uncompressed_values.len < 2) return Error.UnsupportedInput;
@@ -93,18 +94,50 @@ pub fn compress(
         if (last_valid_line) |valid_line| {
             // If there are only two points in the segment, store then directly to avoid numerical issues.
             if (current_segment_start + 1 == last_valid_end) {
-                try appendValue(f64, uncompressed_values[current_segment_start], compressed_values);
-                try appendValue(f64, uncompressed_values[last_valid_end], compressed_values);
+                try shared_functions.appendValue(
+                    f64,
+                    uncompressed_values[current_segment_start],
+                    compressed_values,
+                );
+                try shared_functions.appendValue(
+                    f64,
+                    uncompressed_values[last_valid_end],
+                    compressed_values,
+                );
             } else {
-                try appendValue(f64, @floatCast(valid_line.slope), compressed_values);
-                try appendValue(f64, @floatCast(valid_line.intercept), compressed_values);
+                try shared_functions.appendValue(
+                    f64,
+                    @floatCast(valid_line.slope),
+                    compressed_values,
+                );
+                try shared_functions.appendValue(
+                    f64,
+                    @floatCast(valid_line.intercept),
+                    compressed_values,
+                );
             }
-            try appendValue(usize, last_valid_end, compressed_values);
+            try shared_functions.appendValue(
+                usize,
+                last_valid_end,
+                compressed_values,
+            );
         } else {
             // If the the last valid line is not valid, then store the uncompressed values directly.
-            try appendValue(f64, uncompressed_values[current_segment_start], compressed_values);
-            try appendValue(f64, uncompressed_values[last_valid_end], compressed_values);
-            try appendValue(usize, last_valid_end, compressed_values);
+            try shared_functions.appendValue(
+                f64,
+                uncompressed_values[current_segment_start],
+                compressed_values,
+            );
+            try shared_functions.appendValue(
+                f64,
+                uncompressed_values[last_valid_end],
+                compressed_values,
+            );
+            try shared_functions.appendValue(
+                usize,
+                last_valid_end,
+                compressed_values,
+            );
         }
 
         // Start next segment after last_valid_end.
@@ -119,9 +152,9 @@ pub fn compress(
         const slope: f64 = 0.0;
         const intercept = value;
 
-        try appendValue(f64, slope, compressed_values);
-        try appendValue(f64, intercept, compressed_values);
-        try appendValue(usize, current_segment_start, compressed_values);
+        try shared_functions.appendValue(f64, slope, compressed_values);
+        try shared_functions.appendValue(f64, intercept, compressed_values);
+        try shared_functions.appendValue(usize, current_segment_start, compressed_values);
     }
 }
 
@@ -281,20 +314,36 @@ fn computeDeviation(point_a: DiscretePoint, point_b: DiscretePoint, point_c: Dis
     return @abs(pred - point_c.value);
 }
 
-/// Helper to serialize the `value` into bytes and store it in `compressed`.
-fn appendValue(comptime T: type, value: T, compressed: *ArrayList(u8)) !void {
-    const bytes: [8]u8 = @bitCast(value);
-    try compressed.appendSlice(&bytes);
-}
-
-test "abc compressor can always compress and decompress" {
+test "abc compressor can always compress and decompress with zero error bound" {
     const allocator = testing.allocator;
     try tester.testGenerateCompressAndDecompress(
-        tester.generateFiniteRandomValues,
         allocator,
+        tester.generateFiniteRandomValues,
         Method.ABCLinearApproximation,
         0,
         tersets.isWithinErrorBound,
+    );
+}
+
+test "abc can always compress and decompress any f64 values with positive error bound" {
+    const allocator = testing.allocator;
+    const data_distributions = &[_]tester.DataDistribution{
+        .FiniteRandomValues,
+        .LinearFunctions,
+        .BoundedRandomValues,
+        .SinusoidalFunction,
+        .LinearFunctionsWithNansAndInfinities,
+        .RandomValuesWithNansAndInfinities,
+        .SinusoidalFunctionWithNansAndInfinities,
+        .BoundedRandomValuesWithNansAndInfinities,
+    };
+    // This function evaluates the ABC method using all data distribution stored in
+    // `data_distribution` with a positive error bound ranging from [1e-4, 1)*range
+    // of the generated uncompressed time series.
+    try tester.testErrorBoundedCompressionMethod(
+        allocator,
+        Method.ABCLinearApproximation,
+        data_distributions,
     );
 }
 
@@ -331,9 +380,9 @@ test "abc compressor identifies correct ABC points in the convex hull of a bigge
     defer compressed_values.deinit();
 
     try compress(
+        allocator,
         uncompressed_values.items,
         &compressed_values,
-        allocator,
         error_bound,
     );
 
@@ -347,53 +396,6 @@ test "abc compressor identifies correct ABC points in the convex hull of a bigge
 
     // Ensure values are compressed in one single segment
     try std.testing.expectEqual(compressed_values.items.len / 8, 3);
-}
-
-test "abc compressor can compress and decompress random lines and error bound" {
-    const allocator = testing.allocator;
-
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
-
-    const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0, 1, undefined);
-
-    const max_lines: usize = tester.generateBoundRandomInteger(usize, 4, 25, undefined);
-    for (0..max_lines) |_| {
-        // Generate a random linear function and add it to the uncompressed values.
-        try tester.generateRandomLinearFunction(&uncompressed_values, undefined);
-    }
-
-    try tester.testCompressAndDecompress(
-        uncompressed_values.items,
-        allocator,
-        Method.ABCLinearApproximation,
-        error_bound,
-        tersets.isWithinErrorBound,
-    );
-}
-
-test "abc compressor can compress and decompress odd size" {
-    const allocator = std.testing.allocator;
-    const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0, 1, undefined);
-
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, 1.0, undefined);
-
-    // Add another element to make the uncompressed values of odd size.
-    try uncompressed_values.append(tester.generateBoundedRandomValue(f64, 0, 1, undefined));
-
-    try tester.testCompressAndDecompress(
-        uncompressed_values.items,
-        allocator,
-        Method.ABCLinearApproximation,
-        error_bound,
-        tersets.isWithinErrorBound,
-    );
 }
 
 test "abc compressor compresses and decompresses constant signal" {
@@ -412,8 +414,8 @@ test "abc compressor compresses and decompresses constant signal" {
     }
 
     try tester.testCompressAndDecompress(
-        uncompressed_values.items,
         allocator,
+        uncompressed_values.items,
         Method.ABCLinearApproximation,
         error_bound,
         tersets.isWithinErrorBound,

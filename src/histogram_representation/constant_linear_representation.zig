@@ -38,10 +38,11 @@ const ConvexHull = @import(
     "../utilities/convex_hull.zig",
 ).ConvexHull;
 
-const shared = @import("../utilities/shared_structs.zig");
+const shared_structs = @import("../utilities/shared_structs.zig");
+const shared_functions = @import("../utilities/shared_functions.zig");
 
-const LinearFunction = shared.LinearFunction;
-const Segment = shared.Segment;
+const LinearFunction = shared_structs.LinearFunction;
+const Segment = shared_structs.Segment;
 
 const tersets = @import("../tersets.zig");
 const Error = tersets.Error;
@@ -55,9 +56,9 @@ const Approximation = enum(i8) { constant, linear };
 /// using "Piecewice Constant Histogram" compression method. The function writes the result to
 /// `compressed_values`. If an error occurs it is returned.
 pub fn compressPWCH(
+    allocator: mem.Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
-    allocator: mem.Allocator,
     error_bound: f32,
 ) Error!void {
     if (error_bound <= 1.0) {
@@ -81,7 +82,7 @@ pub fn compressPWCH(
 
     for (0..histogram.len()) |index| {
         var bucket: Bucket = histogram.at(index);
-        try appendValueAndIndexToArrayList(
+        try shared_functions.appendValueAndIndexToArrayList(
             bucket.computeConstantApproximation(),
             bucket.end + 1,
             compressed_values,
@@ -93,9 +94,9 @@ pub fn compressPWCH(
 /// using "Piecewice Linear Histogram" compression method. The function writes the result to
 /// `compressed_values`. If an error occurs it is returned.
 pub fn compressPWLH(
+    allocator: mem.Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
-    allocator: mem.Allocator,
     error_bound: f32,
 ) Error!void {
     if (error_bound <= 1.0) {
@@ -125,19 +126,19 @@ pub fn compressPWLH(
             const begin_value: f64 = @floatCast(linear_approximation.slope *
                 @as(f64, @floatFromInt(bucket.begin)) +
                 linear_approximation.intercept);
-            try appendValue(f64, begin_value, compressed_values);
+            try shared_functions.appendValue(f64, begin_value, compressed_values);
 
             const end_value: f64 = @floatCast(linear_approximation.slope *
                 @as(f64, @floatFromInt(bucket.end)) +
                 linear_approximation.intercept);
 
-            try appendValue(f64, end_value + 1, compressed_values);
+            try shared_functions.appendValue(f64, end_value + 1, compressed_values);
         } else {
-            try appendValue(f64, uncompressed_values[bucket.begin], compressed_values);
-            try appendValue(f64, uncompressed_values[bucket.end], compressed_values);
+            try shared_functions.appendValue(f64, uncompressed_values[bucket.begin], compressed_values);
+            try shared_functions.appendValue(f64, uncompressed_values[bucket.end], compressed_values);
         }
 
-        try appendValue(usize, bucket.end + 1, compressed_values);
+        try shared_functions.appendValue(usize, bucket.end + 1, compressed_values);
     }
 }
 
@@ -514,31 +515,6 @@ const Histogram = struct {
     }
 };
 
-/// Append `compressed_value` and `index` to `compressed_values`.
-fn appendValueAndIndexToArrayList(
-    compressed_value: f64,
-    index: usize,
-    compressed_values: *ArrayList(u8),
-) !void {
-    const value: f64 = compressed_value;
-    const valueAsBytes: [8]u8 = @bitCast(value);
-    try compressed_values.appendSlice(valueAsBytes[0..]);
-    const indexAsBytes: [8]u8 = @bitCast(index); // No -1 due to 0 indexing.
-    try compressed_values.appendSlice(indexAsBytes[0..]);
-}
-
-/// Append `value` of `type` determined at compile time to `compressed_values`.
-fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)) !void {
-    // Compile-time type check.
-    switch (@TypeOf(value)) {
-        f64, usize => {
-            const value_as_bytes: [8]u8 = @bitCast(value);
-            try compressed_values.appendSlice(value_as_bytes[0..]);
-        },
-        else => @compileError("Unsupported type for append value function"),
-    }
-}
-
 test "Hash PriorityQueue with hash_context for MergeError" {
     const allocator = testing.allocator;
 
@@ -809,8 +785,8 @@ test "PWCH can compress and decompress with bounded values and expected maximum 
     // Nevertheless, since all `uncompressed_values` are between 0 and 10, the `error_bound=10`
     // should be fulfilled as the PWCH finds the mean value over the buckets.
     try tester.testCompressAndDecompress(
-        uncompressed_values.items,
         allocator,
+        uncompressed_values.items,
         tersets.Method.PiecewiseConstantHistogram,
         error_bound,
         tersets.isWithinErrorBound,
@@ -956,8 +932,8 @@ test "PWLH can compress and decompress with bounded values and expected maximum 
     // Nevertheless, since all `uncompressed_values` are between 0 and error_bound/4.0, the `error_bound=10`
     // should be fulfilled as the PWLH finds the mean value over the buckets.
     try tester.testCompressAndDecompress(
-        uncompressed_values.items,
         allocator,
+        uncompressed_values.items,
         tersets.Method.PiecewiseLinearHistogram,
         error_bound,
         tersets.isWithinErrorBound,

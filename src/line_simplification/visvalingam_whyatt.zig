@@ -32,6 +32,7 @@ const HashedPriorityQueue = @import(
 ).HashedPriorityQueue;
 
 const shared_structs = @import("../utilities/shared_structs.zig");
+const shared_functions = @import("../utilities/shared_functions.zig");
 
 const DiscretePoint = shared_structs.DiscretePoint;
 const LinearFunction = shared_structs.LinearFunction;
@@ -44,16 +45,16 @@ const tester = @import("../tester.zig");
 /// to `compressed_values`. The `allocator` is used to allocate memory for the HashedPriorityQueue
 /// used in the implementation. If an error occurs it is returned.
 pub fn compress(
+    allocator: mem.Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
-    allocator: mem.Allocator,
     error_bound: f32,
 ) Error!void {
     // If we have 2 or fewer points, store them without compression.
     if (uncompressed_values.len <= 2) {
-        try appendValue(f64, uncompressed_values[0], compressed_values);
-        try appendValue(f64, uncompressed_values[1], compressed_values);
-        try appendValue(usize, 1, compressed_values);
+        try shared_functions.appendValue(f64, uncompressed_values[0], compressed_values);
+        try shared_functions.appendValue(f64, uncompressed_values[1], compressed_values);
+        try shared_functions.appendValue(usize, 1, compressed_values);
         return;
     }
 
@@ -71,7 +72,7 @@ pub fn compress(
     ).init(allocator, {});
     defer heap.deinit();
 
-    // First point cannot be removed. Thus, the area is set to infinity.
+    // First point cannot be removed. Thus, the area is set to inf.
     try heap.add(PointArea{
         .index = 0,
         .area = math.inf(f64),
@@ -93,7 +94,7 @@ pub fn compress(
         });
     }
 
-    // Last point cannot be removed. Thus the area is set to infinity.
+    // Last point cannot be removed. Thus the area is set to inf.
     try heap.add(PointArea{
         .index = uncompressed_values.len - 1,
         .area = math.inf(f64),
@@ -154,11 +155,11 @@ pub fn compress(
     std.mem.sort(PointArea, heap.items[0..heap.len], {}, PointArea.firstThan);
 
     // Output compressed series: first point, then (index, value) pairs.
-    try appendValue(f64, uncompressed_values[0], compressed_values);
+    try shared_functions.appendValue(f64, uncompressed_values[0], compressed_values);
     for (1..heap.len) |index| {
         const point_index = heap.items[index].index;
-        try appendValue(f64, uncompressed_values[point_index], compressed_values);
-        try appendValue(usize, point_index, compressed_values);
+        try shared_functions.appendValue(f64, uncompressed_values[point_index], compressed_values);
+        try shared_functions.appendValue(usize, point_index, compressed_values);
     }
 
     return;
@@ -267,18 +268,6 @@ fn calculateArea(left_point: DiscretePoint, central_point: DiscretePoint, right_
     return @abs((x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2)) / 2.0);
 }
 
-/// Append `value` of `type` determined at compile time to `compressed_values`.
-fn appendValue(comptime T: type, value: T, compressed_values: *std.ArrayList(u8)) !void {
-    // Compile-time type check
-    switch (@TypeOf(value)) {
-        f64, usize => {
-            const value_as_bytes: [8]u8 = @bitCast(value);
-            try compressed_values.appendSlice(value_as_bytes[0..]);
-        },
-        else => @compileError("Unsupported type for append value function"),
-    }
-}
-
 /// Update the area of the `neighbor` point in the `heap`. The `left_index`, `center_index` and
 /// `right_index` are the indices of the points in the `uncompressed_values` array. The
 /// `uncompressed_values` are needed to calculate the area of the triangles formed by the three points.
@@ -346,7 +335,7 @@ test "vw compress and decompress with zero error bound" {
     try tester.generateBoundedRandomValues(&uncompressed_values, 0, 1000000, random);
 
     // Call the compress and decompress functions.
-    try compress(uncompressed_values.items, &compressed_values, allocator, error_bound);
+    try compress(allocator, uncompressed_values.items, &compressed_values, error_bound);
     try decompress(compressed_values.items, &decompressed_values);
 
     try std.testing.expect(tersets.isWithinErrorBound(
@@ -370,7 +359,7 @@ test "vw compress and compress with known result" {
     defer decompressed_values.deinit();
 
     // Call the compress function.
-    try compress(uncompressed_values, &compressed_values, allocator, error_bound);
+    try compress(allocator, uncompressed_values, &compressed_values, error_bound);
     try decompress(compressed_values.items, &decompressed_values);
 
     // Check if the decompressed values have the same lenght as the compressed ones.
@@ -403,7 +392,7 @@ test "vw compress and compress with random data" {
     try tester.generateBoundedRandomValues(&uncompressed_values, 0, 1, random);
 
     // Call the compress function.
-    try compress(uncompressed_values.items, &compressed_values, allocator, error_bound);
+    try compress(allocator, uncompressed_values.items, &compressed_values, error_bound);
     try decompress(compressed_values.items, &decompressed_values);
 
     // Check if the decompressed values have the same lenght as the compressed ones.

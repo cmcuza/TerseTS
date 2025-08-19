@@ -33,6 +33,7 @@ const ContinousPoint = shared.ContinousPoint;
 const Segment = shared.Segment;
 const LinearFunction = shared.LinearFunction;
 
+const time = std.time;
 const tester = @import("../tester.zig");
 
 /// Enum for the angle's `Turn` of three consecutive points A, B, and C. Essentially, it describes
@@ -569,13 +570,15 @@ test "Create incrementally convex hull with known result" {
 
 test "Create incrementally a convex hull with random elements" {
     const allocator = testing.allocator;
-    var rnd = std.Random.DefaultPrng.init(0);
+    const seed: u64 = @bitCast(time.milliTimestamp());
+    var rnd = std.Random.DefaultPrng.init(seed);
+    const random = rnd.random();
 
     var convex_hull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
 
-    for (0..tester.number_of_values) |i| {
-        try convex_hull.add(.{ .time = i, .value = rnd.random().float(f64) });
+    for (0..tester.generateNumberOfValues(random)) |i| {
+        try convex_hull.add(.{ .time = i, .value = random.float(f64) });
     }
 
     try testConvexHullProperty(&convex_hull);
@@ -638,13 +641,15 @@ test "Compute MABR LinearFunction for known Convex Hull two" {
 
 test "Compute MABR LinearFunction for random Convex Hull" {
     const allocator = testing.allocator;
-    var rnd = std.Random.DefaultPrng.init(0);
+    const seed: u64 = @bitCast(time.milliTimestamp());
+    var rnd = std.Random.DefaultPrng.init(seed);
+    const random = rnd.random();
 
     var convex_hull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
 
-    for (0..tester.number_of_values) |i| {
-        try convex_hull.add(.{ .time = i, .value = rnd.random().float(f64) });
+    for (0..tester.generateNumberOfValues(random)) |i| {
+        try convex_hull.add(.{ .time = i, .value = random.float(f64) });
     }
 
     // Calculate MABR Linear Function. The exact value of the `intercept` is unknown but it must be
@@ -721,18 +726,20 @@ test "Merge not-in-place convex hulls with random elements" {
 
 test "Merge in-place single element's convex hull with other convex hull" {
     const allocator = testing.allocator;
-    var rnd = std.Random.DefaultPrng.init(0);
+    const seed: u64 = @bitCast(time.milliTimestamp());
+    var rnd = std.Random.DefaultPrng.init(seed);
+    const random = rnd.random();
 
     var convex_hull_one = try ConvexHull.init(allocator);
     defer convex_hull_one.deinit();
 
-    try convex_hull_one.add(.{ .time = 0, .value = rnd.random().float(f64) });
+    try convex_hull_one.add(.{ .time = 0, .value = random.float(f64) });
 
     var convex_hull_two = try ConvexHull.init(allocator);
     defer convex_hull_two.deinit();
 
-    for (1..tester.number_of_values) |i| {
-        try convex_hull_two.add(.{ .time = i, .value = rnd.random().float(f64) });
+    for (1..tester.generateNumberOfValues(random)) |i| {
+        try convex_hull_two.add(.{ .time = i, .value = random.float(f64) });
     }
 
     try convex_hull_one.merge(&convex_hull_two, null);
@@ -742,18 +749,20 @@ test "Merge in-place single element's convex hull with other convex hull" {
 
 test "Merge not-in-place single element's convex hull with other convex hull" {
     const allocator = testing.allocator;
-    var rnd = std.Random.DefaultPrng.init(0);
+    const seed: u64 = @bitCast(time.milliTimestamp());
+    var rnd = std.Random.DefaultPrng.init(seed);
+    const random = rnd.random();
 
     var convex_hull_one = try ConvexHull.init(allocator);
     defer convex_hull_one.deinit();
 
-    try convex_hull_one.add(.{ .time = 0, .value = rnd.random().float(f64) });
+    try convex_hull_one.add(.{ .time = 0, .value = random.float(f64) });
 
     var convex_hull_two = try ConvexHull.init(allocator);
     defer convex_hull_two.deinit();
 
-    for (1..tester.number_of_values) |i| {
-        try convex_hull_two.add(.{ .time = i, .value = rnd.random().float(f64) });
+    for (1..tester.generateNumberOfValues(random)) |i| {
+        try convex_hull_two.add(.{ .time = i, .value = random.float(f64) });
     }
 
     var convex_hull_merged = try ConvexHull.init(allocator);
@@ -766,19 +775,22 @@ test "Merge not-in-place single element's convex hull with other convex hull" {
 
 test "Merge in-place convex hull with single element's convex hull" {
     const allocator = testing.allocator;
-    var rnd = std.Random.DefaultPrng.init(0);
+    const seed: u64 = @bitCast(time.milliTimestamp());
+    var rnd = std.Random.DefaultPrng.init(seed);
+    const random = rnd.random();
 
     var convex_hull_one = try ConvexHull.init(allocator);
     defer convex_hull_one.deinit();
 
-    for (0..tester.number_of_values) |i| {
-        try convex_hull_one.add(.{ .time = i, .value = rnd.random().float(f64) });
+    const number_of_values = tester.generateNumberOfValues(random);
+    for (0..number_of_values) |i| {
+        try convex_hull_one.add(.{ .time = i, .value = random.float(f64) });
     }
 
     var convex_hull_two = try ConvexHull.init(allocator);
     defer convex_hull_two.deinit();
 
-    try convex_hull_two.add(.{ .time = tester.number_of_values, .value = rnd.random().float(f64) });
+    try convex_hull_two.add(.{ .time = number_of_values, .value = random.float(f64) });
 
     try convex_hull_one.merge(&convex_hull_two, null);
 
@@ -787,19 +799,22 @@ test "Merge in-place convex hull with single element's convex hull" {
 
 test "Merge not-in-place convex hull with single element's convex hull" {
     const allocator = testing.allocator;
-    var rnd = std.Random.DefaultPrng.init(0);
+    const seed: u64 = @bitCast(time.milliTimestamp());
+    var rnd = std.Random.DefaultPrng.init(seed);
+    const random = rnd.random();
 
     var convex_hull_one = try ConvexHull.init(allocator);
     defer convex_hull_one.deinit();
 
-    for (0..tester.number_of_values) |i| {
-        try convex_hull_one.add(.{ .time = i, .value = rnd.random().float(f64) });
+    const number_of_values = tester.generateNumberOfValues(random);
+    for (0..number_of_values) |i| {
+        try convex_hull_one.add(.{ .time = i, .value = random.float(f64) });
     }
 
     var convex_hull_two = try ConvexHull.init(allocator);
     defer convex_hull_two.deinit();
 
-    try convex_hull_two.add(.{ .time = tester.number_of_values, .value = rnd.random().float(f64) });
+    try convex_hull_two.add(.{ .time = number_of_values, .value = random.float(f64) });
 
     var convex_hull_merged = try ConvexHull.init(allocator);
     defer convex_hull_merged.deinit();
@@ -811,13 +826,17 @@ test "Merge not-in-place convex hull with single element's convex hull" {
 
 test "Merge not-in-place does not modify the convex hulls one and two" {
     const allocator = testing.allocator;
-    var rnd = std.Random.DefaultPrng.init(0);
+    const seed: u64 = @bitCast(time.milliTimestamp());
+    var rnd = std.Random.DefaultPrng.init(seed);
+    const random = rnd.random();
 
     // Initialize convex_hull_one.
     var convex_hull_one = try ConvexHull.init(allocator);
     defer convex_hull_one.deinit();
-    for (0..tester.number_of_values) |i| {
-        try convex_hull_one.add(.{ .time = i, .value = rnd.random().float(f64) });
+
+    const number_of_values = tester.generateNumberOfValues(random);
+    for (0..number_of_values) |i| {
+        try convex_hull_one.add(.{ .time = i, .value = random.float(f64) });
     }
 
     // Capture the state of convex_hull_one before merging.
@@ -827,8 +846,8 @@ test "Merge not-in-place does not modify the convex hulls one and two" {
     // Initialize convex_hull_two.
     var convex_hull_two = try ConvexHull.init(allocator);
     defer convex_hull_two.deinit();
-    for (tester.number_of_values..2 * tester.number_of_values) |i| {
-        try convex_hull_two.add(.{ .time = i, .value = rnd.random().float(f64) });
+    for (number_of_values..2 * number_of_values) |i| {
+        try convex_hull_two.add(.{ .time = i, .value = random.float(f64) });
     }
 
     // Capture the state of convex_hull_two before merging.
@@ -886,7 +905,9 @@ test "Compute max error with known points and linear function" {
 
 test "Compute max error with random points and linear function" {
     const allocator = testing.allocator;
-    var rnd = std.Random.DefaultPrng.init(0);
+    const seed: u64 = @bitCast(time.milliTimestamp());
+    var rnd = std.Random.DefaultPrng.init(seed);
+    const random = rnd.random();
 
     var convex_hull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
@@ -894,14 +915,14 @@ test "Compute max error with random points and linear function" {
     var points = ArrayList(f64).init(allocator);
     defer points.deinit();
 
-    for (0..tester.number_of_values) |i| {
-        const rand_value = rnd.random().float(f64);
+    for (0..tester.generateNumberOfValues(random)) |i| {
+        const rand_value = random.float(f64);
         try convex_hull.add(.{ .time = i, .value = rand_value });
         try points.append(rand_value);
     }
 
     // Define a linear function (e.g., y = 2x + 1)
-    const linear_function = LinearFunction{ .slope = rnd.random().float(f64), .intercept = rnd.random().float(f64) };
+    const linear_function = LinearFunction{ .slope = random.float(f64), .intercept = random.float(f64) };
 
     // Manually compute the expected maximum error
     // For each point, compute the absolute difference from the line
@@ -953,20 +974,24 @@ fn testConvexHullProperty(convex_hull: *ConvexHull) !void {
 /// flag. After merging, it validates the properties of the resulting convex hull.
 fn mergeConvexHullsTestHelper(in_place: bool) !void {
     const allocator = testing.allocator;
-    var rnd = std.Random.DefaultPrng.init(0);
+    const seed: u64 = @bitCast(time.milliTimestamp());
+    var rnd = std.Random.DefaultPrng.init(seed);
+    const random = rnd.random();
 
     // Initialize the first convex hull with random points.
     var convex_hull_one = try ConvexHull.init(allocator);
     defer convex_hull_one.deinit();
-    for (0..tester.number_of_values) |i| {
-        try convex_hull_one.add(.{ .time = i, .value = rnd.random().float(f64) });
+
+    const number_of_values = tester.generateNumberOfValues(random);
+    for (0..number_of_values) |i| {
+        try convex_hull_one.add(.{ .time = i, .value = random.float(f64) });
     }
 
     // Initialize the second convex hull with random points.
     var convex_hull_two = try ConvexHull.init(allocator);
     defer convex_hull_two.deinit();
-    for (tester.number_of_values..2 * tester.number_of_values) |i| {
-        try convex_hull_two.add(.{ .time = i, .value = rnd.random().float(f64) });
+    for (number_of_values..2 * number_of_values) |i| {
+        try convex_hull_two.add(.{ .time = i, .value = random.float(f64) });
     }
 
     if (in_place) {
