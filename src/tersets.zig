@@ -66,8 +66,8 @@ pub const Method = enum {
 /// compression functions for memory management. If the compression is sucessful, the `method`
 /// is encoded in the compressed values last byte. If an error occurs it is returned.
 pub fn compress(
-    uncompressed_values: []const f64,
     allocator: Allocator,
+    uncompressed_values: []const f64,
     method: Method,
     error_bound: f32,
 ) Error!ArrayList(u8) {
@@ -107,57 +107,57 @@ pub fn compress(
         },
         .SlideFilter => {
             try swing_slide_filter.compressSlideFilter(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                allocator,
                 error_bound,
             );
         },
         .SimPiece => {
             try sim_piece.compress(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                allocator,
                 error_bound,
             );
         },
         .MixPiece => {
             try mix_piece.compress(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                allocator,
                 error_bound,
             );
         },
         .PiecewiseConstantHistogram => {
             try piecewise_histogram.compressPWCH(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                allocator,
                 error_bound,
             );
         },
         .PiecewiseLinearHistogram => {
             try piecewise_histogram.compressPWLH(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                allocator,
                 error_bound,
             );
         },
         .ABCLinearApproximation => {
             try abc_linear_approximation.compress(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                allocator,
                 error_bound,
             );
         },
         .VisvalingamWhyatt => {
             try vw.compress(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                allocator,
                 error_bound,
             );
         },
@@ -170,9 +170,9 @@ pub fn compress(
         },
         .BottomUp => {
             try bottom_up.compress(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                allocator,
                 error_bound,
             );
         },
@@ -196,8 +196,8 @@ pub fn compress(
 /// The compression `method` to use is encoded in the last byte of the `compressed_values`. If
 /// an error occurs it is returned.
 pub fn decompress(
-    compressed_values: []const u8,
     allocator: Allocator,
+    compressed_values: []const u8,
 ) Error!ArrayList(f64) {
     if (compressed_values.len == 0) return Error.UnsupportedInput;
 
@@ -220,10 +220,10 @@ pub fn decompress(
             try swing_slide_filter.decompressSlideFilter(compressed_values_slice, &decompressed_values);
         },
         .SimPiece => {
-            try sim_piece.decompress(compressed_values_slice, &decompressed_values, allocator);
+            try sim_piece.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .MixPiece => {
-            try mix_piece.decompress(compressed_values_slice, &decompressed_values, allocator);
+            try mix_piece.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .PiecewiseConstantHistogram => {
             try piecewise_histogram.decompressPWCH(compressed_values_slice, &decompressed_values);
@@ -238,7 +238,7 @@ pub fn decompress(
             try vw.decompress(compressed_values_slice, &decompressed_values);
         },
         .SlidingWindow => {
-            try sliding_window.decompress(compressed_values, &decompressed_values);
+            try sliding_window.decompress(compressed_values_slice, &decompressed_values);
         },
         .BottomUp => {
             try bottom_up.decompress(compressed_values_slice, &decompressed_values);

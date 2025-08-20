@@ -32,6 +32,8 @@ const Method = tersets.Method;
 const Error = tersets.Error;
 const tester = @import("../tester.zig");
 
+const shared_functions = @import("../utilities/shared_functions.zig");
+
 /// Compress `uncompressed_values` within error_bound using "Bucket Quantization" and a
 /// "Fixed-length Bit-Packing". The function writes the result to `compressed_values`. The
 /// `compressed_values` includes the bit width, original length and smallest value so that it
@@ -52,18 +54,18 @@ pub fn compress(
     // Find the minimum value.
     var min_val = uncompressed_values[0];
     for (uncompressed_values) |value| {
-        if (!math.isFinite(value) or value > 1e15) return Error.UnsupportedInput;
+        if (!math.isFinite(value) or value > tester.max_test_value) return Error.UnsupportedInput;
         if (value < min_val) min_val = value;
     }
 
     // Append the minimum value to the header of the compressed values.
-    try appendValue(f64, min_val, compressed_values);
+    try shared_functions.appendValue(f64, min_val, compressed_values);
 
     // All values will map to the closest bucket based on the bucket_size.
     const bucket_size: f32 = 2 * error_bound;
 
     // Append the minimum value to the header of the compressed values.
-    try appendValue(f32, bucket_size, compressed_values);
+    try shared_functions.appendValue(f32, bucket_size, compressed_values);
 
     //Intermediate quantized values.
     var quantized_values = ArrayList(usize).init(allocator);
@@ -188,22 +190,6 @@ pub fn decompress(
     }
 }
 
-/// Append `value` of `type` determined at compile time to `compressed_values`.
-fn appendValue(comptime T: type, value: T, compressed_values: *ArrayList(u8)) !void {
-    // Compile-time type check.
-    switch (@TypeOf(value)) {
-        f64, usize => {
-            const value_as_bytes: [8]u8 = @bitCast(@as(T, value));
-            try compressed_values.appendSlice(value_as_bytes[0..]);
-        },
-        f32 => {
-            const value_as_bytes: [4]u8 = @bitCast(@as(T, value));
-            try compressed_values.appendSlice(value_as_bytes[0..]);
-        },
-        else => @compileError("Unsupported type for append value function"),
-    }
-}
-
 /// Convert a floating f64 `value` to its u64 representation, ensuring the sign bit is preserved
 /// in the most significant bit. This is useful for comparing floating-point values in a way that
 /// respects their ordering, including negative values. The function returns the `u64`, where the
@@ -229,22 +215,18 @@ fn orderedBitsToFloat(value: u64) f64 {
 
 test "bitpacked quantization can compress and decompress bounded values" {
     const allocator = testing.allocator;
-    const error_bound = tester.generateBoundedRandomValue(f32, 0, 1e6, undefined);
+    const data_distributions = &[_]tester.DataDistribution{
+        .LinearFunctions,
+        .BoundedRandomValues,
+        .SinusoidalFunction,
+    };
 
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-
-    // Generate 500 random values within the range of -1e13 to 1e13.
-    for (0..5) |_| {
-        try tester.generateBoundedRandomValues(&uncompressed_values, -1e13, 1e13, undefined);
-    }
-
-    try tester.testCompressAndDecompress(
-        uncompressed_values.items,
+    // This function evaluates BitPackedQuantization using all data distribution stored in
+    // `data_distribution`.
+    try tester.testErrorBoundedCompressionMethod(
         allocator,
         Method.BitPackedQuantization,
-        error_bound,
-        tersets.isWithinErrorBound,
+        data_distributions,
     );
 }
 
@@ -298,8 +280,8 @@ test "bitpacked quantization can compress and decompress bounded values at diffe
     try tester.generateBoundedRandomValues(&uncompressed_values, -1e8, 1e8, undefined);
 
     try tester.testCompressAndDecompress(
-        uncompressed_values.items,
         allocator,
+        uncompressed_values.items,
         Method.BitPackedQuantization,
         error_bound,
         tersets.isWithinErrorBound,
@@ -321,8 +303,8 @@ test "bitpacked quantization can compress and decompress with zero error bound a
     try tester.generateBoundedRandomValues(&uncompressed_values, -1e14, 1e14, undefined);
 
     try tester.testCompressAndDecompress(
-        uncompressed_values.items,
         allocator,
+        uncompressed_values.items,
         Method.BitPackedQuantization,
         error_bound,
         tersets.isWithinErrorBound,
