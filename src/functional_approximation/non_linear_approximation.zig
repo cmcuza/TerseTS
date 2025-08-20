@@ -51,7 +51,7 @@ const FunctionType = enum(u8) {
 };
 
 /// Set of function types available for approximating time series segments.
-const function_types = [_]FunctionType{ .Linear, .Quadratic, .Exponential, .Power, .Sqrt };
+const function_types = [_]FunctionType{.Linear};
 
 /// Compresses `uncompressed_data` using NeaTS algorithm by partitioning the time series into
 /// optimal segments with different nonlinear function types and error-bounded approximations.
@@ -304,6 +304,10 @@ fn findOptimalFunctionalApproximation(
 ) !ArrayList(FunctionalApproximation) {
     const n = uncompressed_data.len;
 
+    // Initializes the convex polygon representing the feasible parameter region.
+    var polygon = convex_polygon.ConvexPolygon.init(allocator);
+    defer polygon.deinit();
+
     // Allocates dynamic programming arrays for the shortest path algorithm.
     var distances = try allocator.alloc(usize, n + 1);
     defer allocator.free(distances);
@@ -338,16 +342,15 @@ fn findOptimalFunctionalApproximation(
 
     // Executes the main dynamic programming loop over all starting positions.
     for (0..n) |current_position| {
-        if (distances[current_position] == std.math.maxInt(usize)) continue;
-
         // Tries each combination of function type and error bound.
         // In this case, there is only one error bound, but multiple function types.
         for (function_types, 0..) |function_type, model_idx| {
             if (current_approximation[model_idx].end_idx <= current_position) {
+                std.debug.print("Find Approximate\n", .{});
                 // Finds the longest approximation that can be done with function_type
                 // starting at the current position.
                 const functional_approximation = try computeApproximation(
-                    allocator,
+                    &polygon,
                     uncompressed_data,
                     current_position,
                     function_type,
@@ -399,7 +402,7 @@ fn findOptimalFunctionalApproximation(
 /// by the given `function_type` while maintaining the error bound. Uses O'Rourke's algorithm
 /// generalized to nonlinear functions through parameter space transformation.
 fn computeApproximation(
-    allocator: mem.Allocator,
+    polygon: *convex_polygon.ConvexPolygon,
     uncompressed_data: []const f64,
     start_idx: usize,
     function_type: FunctionType,
@@ -420,10 +423,6 @@ fn computeApproximation(
             },
         };
     }
-
-    // Initializes the convex polygon representing the feasible parameter region.
-    var polygon = convex_polygon.ConvexPolygon.init(allocator);
-    defer polygon.deinit();
 
     // Tracks the end of the longest valid segment found.
     var longest_valid_end: usize = start_idx + 2; // Always can fit 2 points!
@@ -461,12 +460,11 @@ fn computeApproximation(
         );
 
         // Checks if the feasible region is still non-empty after adding constraints.
-        if (!intercept) {
-            const feasible_solution = polygon.computeFeasibleSolution();
-            best_approximation = transformParameters(feasible_solution, function_type);
-            longest_valid_end = end_idx; // Updates the longest valid segment end.
-            break;
-        }
+        if (!intercept) break;
+
+        const feasible_solution = polygon.computeFeasibleSolution();
+        best_approximation = transformParameters(feasible_solution, function_type);
+        longest_valid_end = x_axis; // Updates the longest valid segment end.
     }
 
     // Constructs and validates the final segment if a valid one was found.
@@ -477,6 +475,7 @@ fn computeApproximation(
         .definition = best_approximation,
     };
 
+    polygon.clear();
     return functional_approximation;
 }
 
@@ -570,14 +569,24 @@ fn postprocessData(data: []f64, shift_amount: f32, first_segment_type: FunctionT
     }
 }
 
-test "find optimal approximation with random linear sequences with slope break" {
+pub fn formatSegment(seg: FunctionalApproximation) void {
+    std.debug.print(
+        "Segment[m=[{d:.2}, {d:.2}], slope={d:.3}, intercept={d:.3}, type={}]\n",
+        .{ seg.start_idx, seg.end_idx, seg.definition.slope, seg.definition.intercept, seg.function_type },
+    );
+}
+
+test "find optimal approximation can approximate random lines with linear function" {
     const allocator = testing.allocator;
     const random = tester.getDefaultRandomGenerator();
 
     const error_bound = 0.8;
 
+    std.debug.print("Started Non Linear\n", .{});
     const m1: f64 = tester.generateBoundedRandomValue(f64, 1, 10, undefined);
     const b1: f64 = tester.generateBoundedRandomValue(f64, 1, 10, undefined);
+
+    std.debug.print("m1 = {d:.2} and b1 = {d:.2}\n", .{ m1, b1 });
 
     const uncompressed_values: []f64 = try allocator.alloc(f64, 40);
     defer allocator.free(uncompressed_values);
@@ -590,6 +599,7 @@ test "find optimal approximation with random linear sequences with slope break" 
     // Now second line: slope -1, intercept 10
     const m2: f64 = tester.generateBoundedRandomValue(f64, 1, 10, undefined);
     const b2: f64 = tester.generateBoundedRandomValue(f64, 1, 10, undefined);
+    std.debug.print("m2 = {d:.2} and b2 = {d:.2}\n", .{ m2, b2 });
 
     for (20..40) |i| {
         const y = m2 * @as(f64, @floatFromInt(i)) + b2 + random.float(f64) * 0.1;
@@ -601,8 +611,9 @@ test "find optimal approximation with random linear sequences with slope break" 
         uncompressed_values,
         error_bound,
     );
+    defer optimal.deinit();
 
     for (optimal.items) |segment| {
-        std.debug.print("{}\n", .{segment});
+        formatSegment(segment);
     }
 }

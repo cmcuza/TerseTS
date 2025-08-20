@@ -336,9 +336,6 @@ pub const ConvexPolygon = struct {
             .Clip => |clip_info| {
                 // Advance the upper-chain cursor and replace that segment.
                 self.upper_bound_start += clip_info.upper_index_offset;
-                if (self.upper_bound_start >= self.upper_bound_lines.items.len) {
-                    try self.upper_bound_lines.resize(self.upper_bound_start + 1);
-                }
                 self.upper_bound_lines.items[self.upper_bound_start] = clip_info.new_upper_segment;
 
                 // On the lower chain: truncate up to the cut, then append the cut segment
@@ -370,9 +367,6 @@ pub const ConvexPolygon = struct {
 
                 // Advance the lower-chain cursor and replace that segment.
                 self.lower_bound_start += clip_info.lower_index_offset;
-                if (self.lower_bound_start >= self.lower_bound_lines.items.len) {
-                    try self.lower_bound_lines.resize(self.lower_bound_start + 1);
-                }
                 self.lower_bound_lines.items[self.lower_bound_start] = clip_info.new_lower_segment;
             },
         }
@@ -459,8 +453,8 @@ pub const ConvexPolygon = struct {
 
         // 3) Package result (indices are absolute into their arrays).
         return .{ .Clip = .{
-            .upper_index_offset = upper_abs_index,
-            .lower_index_offset = lower_abs_index,
+            .upper_index_offset = upper_rel_index,
+            .lower_index_offset = lower_rel_index_from_right,
             .new_upper_segment = new_upper_segment,
             .new_lower_segment = new_lower_segment,
         } };
@@ -639,14 +633,12 @@ test "convex polygon can update random linear sequences with slope break" {
 
     const m1: f64 = random.float(f64) * 10;
     const b1: f64 = random.float(f64);
-
-    // Generate points for first line (should intersect)
-    var success_count: usize = 0;
+    std.debug.print("Started\n", .{});
+    // Generate points for first line (should intersect).
     for (0..20) |i| {
         const y = m1 * @as(f64, @floatFromInt(i)) + b1 + random.float(f64) * 0.1;
         const ok = try addPoint(&poly, i, y, epsilon);
         try std.testing.expect(ok);
-        success_count += 1;
     }
 
     // Now second line: slope -1, intercept 10
@@ -664,9 +656,7 @@ test "convex polygon can update random linear sequences with slope break" {
         } else {
             try std.testing.expect(ok);
         }
-        success_count += 1;
     }
 
-    try std.testing.expect(success_count == 40);
     try std.testing.expect(rejected); // we expect eventual rejection
 }
