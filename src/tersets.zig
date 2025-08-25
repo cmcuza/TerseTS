@@ -36,6 +36,7 @@ pub const Error = error{
     UnknownMethod,
     UnsupportedInput,
     UnsupportedErrorBound,
+    CorruptedCompressedData,
     ItemNotFound,
     OutOfMemory,
     EmptyConvexHull,
@@ -260,7 +261,7 @@ pub fn decompress(
             try bitpacked_quantization.decompress(compressed_values_slice, &decompressed_values);
         },
         .NonLinearApproximation => {
-            try non_linear_approximation.decompress(compressed_values_slice, &decompressed_values);
+            try non_linear_approximation.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
     }
 

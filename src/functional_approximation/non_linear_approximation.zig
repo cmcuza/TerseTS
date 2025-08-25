@@ -51,7 +51,7 @@ const FunctionType = enum(u8) {
 };
 
 /// Set of function types available for approximating time series segments.
-const function_types = [_]FunctionType{.Linear};
+const function_types = [_]FunctionType{ .Linear, .Quadratic, .Exponential, .Power, .Sqrt };
 
 /// Compresses `uncompressed_data` using NeaTS algorithm by partitioning the time series into
 /// optimal segments with different nonlinear function types and error-bounded approximations.
@@ -79,13 +79,15 @@ pub fn compress(
         // Allocates memory for a shifted copy of the input data.
         const mutable_data = try allocator.alloc(f64, uncompressed_data.len);
         @memcpy(mutable_data, uncompressed_data); // Copies the original data values.
-        applyShift(mutable_data, shift_amount); // Applies the preprocessing shift.
+        for (mutable_data) |*val| {
+            val.* += shift_amount; // Applies the shift to each data point.
+        }
         break :blk mutable_data;
     };
     defer if (shift_amount != 0.0) allocator.free(working_data); // Releases allocated memory if used.
 
     // Stores the preprocessing information - shift amount is always written (0.0 indicates no shift).
-    try shared_functions.appendValue(f32, shift_amount, compressed_values);
+    try shared_functions.appendValue(f64, shift_amount, compressed_values);
 
     // Defines the error bounds to consider during optimization (currently uses the provided bound).
     // Partitions the time series using dynamic programming to find the optimal segmentation.
@@ -96,75 +98,95 @@ pub fn compress(
     );
     defer optimal_approximation.deinit();
 
-    // Serializes the segments to the compressed output stream.
-    try shared_functions.appendValue(u32, @intCast(optimal_approximation.items.len), compressed_values);
+    const segments_count = optimal_approximation.items.len;
+    // Store the number of segments used in the partitioning.
+    try shared_functions.appendValue(u32, @intCast(segments_count), compressed_values);
 
+    // All function types are stored using 4 bits each, so we can pack 2 per byte.
+    // This saves space in the compressed representation.
+    // For it, we first calculate the number of bytes needed to store all function types.
+    const packed_len: usize = (segments_count + 1) / 2; // ceil(count/2).
+
+    // Allocates space for packed function types (2 per byte).
+    var packed_function_types = try allocator.alloc(u8, packed_len);
+    defer allocator.free(packed_function_types);
+    @memset(packed_function_types, 0);
+    for (optimal_approximation.items, 0..) |approximation, idx| {
+        const code: u8 = @intCast(@intFromEnum(approximation.function_type));
+        const byte_idx: usize = idx / 2;
+        const is_high_nibble: bool = (idx % 2) == 0;
+        // The high nibble stores the function type of the first segment, and the low
+        // nibble stores the second approximation's type.
+        if (is_high_nibble) {
+            packed_function_types[byte_idx] |= @as(u8, code) << 4;
+        } else {
+            packed_function_types[byte_idx] |= @as(u8, code) & 0x0F;
+        }
+    }
+
+    try compressed_values.appendSlice(packed_function_types);
+
+    std.debug.print("Optimal\n", .{});
     for (optimal_approximation.items) |segment| {
-        // Writes the function type as a single byte identifier.
-        try compressed_values.append(@intFromEnum(segment.function_type));
-        // Writes the two main function parameters (slope and intercept).
-        try shared_functions.appendValue(
-            f64,
-            segment.definition.slope,
-            compressed_values,
-        );
-        try shared_functions.appendValue(
-            f64,
-            segment.definition.intercept,
-            compressed_values,
-        );
-        // Writes only the end index since start index can be inferred from previous segment.
-        try shared_functions.appendValue(u32, @intCast(segment.end_idx), compressed_values);
+        formatSegment(segment);
+        // Writes the two main function parameters (slope and intercept) and the end point.
+        try shared_functions.appendValue(f64, segment.definition.slope, compressed_values);
+        try shared_functions.appendValue(f64, segment.definition.intercept, compressed_values);
+        try shared_functions.appendValue(usize, segment.end_idx, compressed_values);
     }
 }
 
 /// Decompress `compressed_values` produced by "NeaTS". The function writes the result to
 /// `decompressed_values`. If an error occurs it is returned.
 pub fn decompress(
+    allocator: mem.Allocator,
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
 ) Error!void {
     // Validates that the compressed data contains some bytes to process.
-    if (compressed_values.len == 0) return Error.UnsupportedInput;
+    if (compressed_values.len < 12) return Error.CorruptedCompressedData;
 
     var offset: usize = 0; // Tracks the current position in the compressed stream.
 
     // Reads the preprocessing shift amount from the compressed stream.
-    if (offset + 4 > compressed_values.len) return Error.UnsupportedInput;
-    const shift_amount = try shared_functions.readValue(f32, compressed_values[offset..]);
-    offset += 4;
+    const shift_amount = try shared_functions.readValue(f64, compressed_values[offset..]);
+    offset += @sizeOf(f64);
 
     // Reads the number of segments that were used in the partitioning.
-    if (offset + 4 > compressed_values.len) return Error.UnsupportedInput;
-    const num_segments = try shared_functions.readValue(u32, compressed_values[offset..]);
-    offset += 4;
+    const num_segments: usize = try shared_functions.readValue(u32, compressed_values[offset..]);
+    offset += @sizeOf(u32);
 
-    // Parses all segment information from the compressed stream.
-    var segments = ArrayList(FunctionalApproximation).init(std.heap.page_allocator);
-    defer segments.deinit();
+    // Read packed function types (2 per byte, low nibble = even index, high nibble = odd).
+    const type_bytes_len: usize = (num_segments + 1) / 2;
 
-    var current_start_idx: u32 = 0; // Tracks the inferred start index for sequential segments.
+    // TODO: Validate num_segments is exactly what can be stored in the remaining bytes.
+    if (offset + type_bytes_len > compressed_values.len) return Error.CorruptedCompressedData;
+    const packed_function_types = compressed_values[offset .. offset + type_bytes_len];
+    offset += type_bytes_len;
 
-    for (1..num_segments + 1) |_| { // Iterates through each segment (1-based for display clarity).
-        // Validates that sufficient bytes remain for segment data.
-        if (offset + 21 > compressed_values.len) return Error.UnsupportedInput;
+    var optimal_approximation = ArrayList(FunctionalApproximation).init(allocator);
+    defer optimal_approximation.deinit();
+    std.debug.print("\nDecompressed\n", .{});
+    var current_start_idx: usize = 0; // Tracks the inferred start index for sequential segments.
+    for (0..num_segments) |segment_idx| { // Iterates through each segment.
+        const packed_code = packed_function_types[segment_idx / 2];
+        const code: u4 = if (segment_idx % 2 != 0)
+            @truncate(packed_code & 0x0F)
+        else
+            @truncate((packed_code >> 4) & 0x0F);
 
-        // Reads the function type identifier.
-        const function_type: FunctionType = @enumFromInt(compressed_values[offset]);
-        offset += 1;
+        const function_type: FunctionType = @enumFromInt(@as(u8, code));
 
-        // Reads the main function parameters (slope and intercept).
+        // Reads the main function parameters (slope and intercept) and end index.
         const slope = try shared_functions.readValue(f64, compressed_values[offset..]);
-        offset += 8;
+        offset += @sizeOf(f64);
         const intercept = try shared_functions.readValue(f64, compressed_values[offset..]);
-        offset += 8;
-
-        // Reads the end index of this segment.
-        const end_idx = try shared_functions.readValue(u32, compressed_values[offset..]);
-        offset += 4;
+        offset += @sizeOf(f64);
+        const end_idx: usize = try shared_functions.readValue(usize, compressed_values[offset..]);
+        offset += @sizeOf(usize);
 
         // Creates a segment with the inferred start index.
-        const segment = FunctionalApproximation{
+        const functional_approximation = FunctionalApproximation{
             .start_idx = current_start_idx, // Uses the inferred start index.
             .end_idx = end_idx,
             .function_type = function_type,
@@ -174,46 +196,29 @@ pub fn decompress(
             },
         };
 
-        try segments.append(segment);
+        formatSegment(functional_approximation);
+
+        try optimal_approximation.append(functional_approximation);
 
         // Updates the start index for the next segment (segments are contiguous).
         current_start_idx = end_idx;
     }
 
-    // Validates and sorts segments to ensure they are properly ordered.
-    std.sort.heap(
-        FunctionalApproximation,
-        segments.items,
-        {},
-        FunctionalApproximation.lessThan,
-    );
-
-    // Validates that the partitioning is complete and well-formed.
-    if (segments.items.len == 0 or segments.items[0].start_idx != 0) {
-        return Error.UnsupportedInput;
-    }
-
-    // Verifies that segments are contiguous without gaps or overlaps.
-    for (0..segments.items.len - 1) |i| {
-        if (segments.items[i].end_idx != segments.items[i + 1].start_idx) {
-            return Error.UnsupportedInput;
-        }
-    }
-
-    // Remembers the first segment type for postprocessing purposes.
-    const first_type = segments.items[0].function_type;
-
     // Generates the reconstructed values using the function approximations.
-    for (segments.items) |segment| {
-        for (segment.start_idx..segment.end_idx) |i| {
+    for (optimal_approximation.items) |functional_approximation| {
+        for (functional_approximation.start_idx..functional_approximation.end_idx) |idx| {
             // Uses 1-based indexing for evaluation.
-            const value = try segment.evaluate(@as(f64, @floatFromInt(i + 1)));
+            const value = try functional_approximation.evaluate(@as(f64, @floatFromInt(idx + 1)));
             try decompressed_values.append(value);
         }
     }
 
     // Applies postprocessing to remove any preprocessing shifts that were applied.
-    postprocessData(decompressed_values.items, shift_amount, first_type);
+    if (shift_amount == 0.0) return;
+
+    for (0..decompressed_values.items.len) |idx| {
+        decompressed_values.items[idx] -= shift_amount;
+    }
 }
 
 /// Represents a segment of a time series that is approximated by a mathematical function.
@@ -229,22 +234,13 @@ const FunctionalApproximation = struct {
     /// Evaluates the approximating function at the given x-coordinate,
     /// using absolute positioning to match the reference implementation.
     pub fn evaluate(self: *const FunctionalApproximation, x_axis: f64) !f64 {
+        const x_rel = x_axis - self.start_idx;
         return switch (self.function_type) {
-            .Linear => self.definition.slope * x_axis + self.definition.intercept,
-            .Quadratic => self.definition.slope * x_axis * x_axis + self.definition.intercept,
-            .Exponential => self.definition.intercept * @exp(self.definition.slope * x_axis),
-            .Power => blk: {
-                if (x_axis <= 0) break :blk self.definition.intercept;
-                break :blk self.definition.intercept * std.math.pow(
-                    f64,
-                    x_axis,
-                    self.definition.slope,
-                );
-            },
-            .Sqrt => blk: {
-                if (x_axis < 0) break :blk self.definition.intercept;
-                break :blk self.definition.slope * @sqrt(x_axis) + self.definition.intercept;
-            },
+            .Linear => self.definition.slope * x_rel + self.definition.intercept,
+            .Quadratic => self.definition.slope * (x_rel * x_rel) + self.definition.intercept,
+            .Exponential => self.definition.intercept * @exp(self.definition.slope * x_rel),
+            .Power => self.definition.intercept * math.pow(f64, x_rel, self.definition.slope),
+            .Sqrt => self.definition.slope * @sqrt(x_rel) + self.definition.intercept,
             .Undefined => return Error.UnsupportedInput, // Undefined function type cannot be evaluated.
         };
     }
@@ -253,11 +249,8 @@ const FunctionalApproximation = struct {
     /// The cost is determined based on the `function_type` field of the `FunctionalApproximation`.
     /// Returns 3 if the function type is `.Quadratic`. Returns 2 for all other function types.
     pub fn getCost(self: *const FunctionalApproximation) usize {
-        // `.Quadratic` is returns 3 because it needs to store also the initial start_idx.
-        // While the rest of `function_type` only need to store the LinearFunction in`definition`.
-        // We ensure that the `.Undefined` function is not selected we set the cost to +inf.
+        // `.Undefined` returns a big number to unsure that it is not selected.
         return switch (self.function_type) {
-            .Quadratic => 3,
             .Undefined => 10000,
             else => 2,
         };
@@ -268,30 +261,25 @@ const FunctionalApproximation = struct {
     }
 };
 
-/// Calculates the preprocessing shift amount needed to ensure all data values are positive,
-/// which is required for exponential and power functions. Returns 0.0 if no shift is needed.
-fn calculateShiftAmount(data: []const f64, error_bound: f32) f32 {
+/// Calculates the preprocessing shift amount needed to ensure all data values are positive.
+/// This is required for exponential and power functions. The function first inspects the
+/// `uncompressed_data` and shifts all values by the minimum value plus the `error_bound`.
+/// If all values are already positive, no shift is applied (returns 0.0).
+fn calculateShiftAmount(uncompressed_data: []const f64, error_bound: f32) f64 {
     var min_val = std.math.inf(f64);
-    for (data) |val| {
+    for (uncompressed_data) |val| {
         min_val = @min(min_val, val);
     }
 
     const eps = @as(f64, error_bound);
-    // Determines if a shift is needed to keep all values positive within the error bound
+    // Determines if a shift is needed to keep all values positive within the error bound.
+    // The shift amount is calculated as (eps + 1.0 - min_val) to ensure positivity of the border
+    // line y = min_val - eps.
     if (min_val - eps <= 0) {
-        return @as(f32, @floatCast(eps + 1.0 - min_val));
+        return eps + 1.0 - min_val;
     }
 
     return 0.0;
-}
-
-/// Applies a preprocessing shift to all values in the mutable data array,
-/// ensuring that all values become positive for mathematical functions that require it.
-fn applyShift(data: []f64, shift_amount: f32) void {
-    const shift_f64 = @as(f64, shift_amount);
-    for (data) |*val| {
-        val.* += shift_f64;
-    }
 }
 
 /// Partitions the time series into optimal segments using dynamic programming to minimize
@@ -346,7 +334,6 @@ fn findOptimalFunctionalApproximation(
         // In this case, there is only one error bound, but multiple function types.
         for (function_types, 0..) |function_type, model_idx| {
             if (current_approximation[model_idx].end_idx <= current_position) {
-                std.debug.print("Find Approximate\n", .{});
                 // Finds the longest approximation that can be done with function_type
                 // starting at the current position.
                 const functional_approximation = try computeApproximation(
@@ -557,18 +544,6 @@ fn transformParameters(
     };
 }
 
-/// Removes the preprocessing shift from decompressed data to restore original value ranges.
-/// Handles special cases for certain function types that may require different treatment.
-fn postprocessData(data: []f64, shift_amount: f32, first_segment_type: FunctionType) void {
-    if (shift_amount == 0.0) return;
-
-    const shift_f64 = @as(f64, shift_amount);
-    for (data, 1..) |*val, idx| { // Start from 1 for consistency.
-        if (idx == 1 and first_segment_type == .Power) continue;
-        val.* -= shift_f64;
-    }
-}
-
 pub fn formatSegment(seg: FunctionalApproximation) void {
     std.debug.print(
         "Segment[m=[{d:.2}, {d:.2}], slope={d:.3}, intercept={d:.3}, type={}]\n",
@@ -582,28 +557,48 @@ test "find optimal approximation can approximate random lines with linear functi
 
     const error_bound = 0.8;
 
-    std.debug.print("Started Non Linear\n", .{});
-    const m1: f64 = tester.generateBoundedRandomValue(f64, 1, 10, undefined);
-    const b1: f64 = tester.generateBoundedRandomValue(f64, 1, 10, undefined);
+    var theta_1: f64 = tester.generateBoundedRandomValue(f64, 1, 10, undefined);
+    var theta_2: f64 = tester.generateBoundedRandomValue(f64, 1, 10, undefined);
 
-    std.debug.print("m1 = {d:.2} and b1 = {d:.2}\n", .{ m1, b1 });
-
-    const uncompressed_values: []f64 = try allocator.alloc(f64, 40);
+    const uncompressed_values: []f64 = try allocator.alloc(f64, 100);
     defer allocator.free(uncompressed_values);
 
     for (0..20) |i| {
-        const y = m1 * @as(f64, @floatFromInt(i)) + b1 + random.float(f64) * 0.1;
-        uncompressed_values[i] = y;
+        const y = theta_1 * @as(f64, @floatFromInt(i)) + theta_2 + random.float(f64) * 0.1;
+        uncompressed_values[i] = y + error_bound;
     }
 
     // Now second line: slope -1, intercept 10
-    const m2: f64 = tester.generateBoundedRandomValue(f64, 1, 10, undefined);
-    const b2: f64 = tester.generateBoundedRandomValue(f64, 1, 10, undefined);
-    std.debug.print("m2 = {d:.2} and b2 = {d:.2}\n", .{ m2, b2 });
+    theta_1 = tester.generateBoundedRandomValue(f64, 0, 1, undefined);
+    theta_2 = tester.generateBoundedRandomValue(f64, 1, 2, undefined);
 
     for (20..40) |i| {
-        const y = m2 * @as(f64, @floatFromInt(i)) + b2 + random.float(f64) * 0.1;
-        uncompressed_values[i] = y;
+        const y = theta_1 * math.pow(f64, @as(f64, @floatFromInt(i)), theta_2) + random.float(f64) * 0.1;
+        uncompressed_values[i] = y + error_bound;
+    }
+
+    theta_1 = tester.generateBoundedRandomValue(f64, 0, 1, undefined);
+    theta_2 = tester.generateBoundedRandomValue(f64, 1, 2, undefined);
+
+    for (40..60) |i| {
+        const y = theta_1 * math.sqrt(@as(f64, @floatFromInt(i))) + theta_2 + random.float(f64) * 0.1;
+        uncompressed_values[i] = y + error_bound;
+    }
+
+    theta_1 = tester.generateBoundedRandomValue(f64, 0, 1, undefined);
+    theta_2 = tester.generateBoundedRandomValue(f64, 0, 0.01, undefined);
+
+    for (60..80) |i| {
+        const y = theta_1 * math.exp(@as(f64, @floatFromInt(i)) * theta_2) + random.float(f64) * 0.1;
+        uncompressed_values[i] = y + error_bound;
+    }
+
+    theta_1 = tester.generateBoundedRandomValue(f64, 0, 1, undefined);
+    theta_2 = tester.generateBoundedRandomValue(f64, 0, 1, undefined);
+
+    for (80..100) |i| {
+        const y = theta_1 * math.pow(f64, @as(f64, @floatFromInt(i)), 2) + theta_2 + random.float(f64) * 0.1;
+        uncompressed_values[i] = y + error_bound;
     }
 
     const optimal = try findOptimalFunctionalApproximation(
@@ -613,7 +608,26 @@ test "find optimal approximation can approximate random lines with linear functi
     );
     defer optimal.deinit();
 
-    for (optimal.items) |segment| {
-        formatSegment(segment);
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+
+    try compress(allocator, uncompressed_values, &compressed_values, error_bound);
+    var decompressed_values = ArrayList(f64).init(allocator);
+    defer decompressed_values.deinit();
+    try decompress(allocator, compressed_values.items, &decompressed_values);
+
+    for (0..uncompressed_values.len) |idx| {
+        const uncompressed_val = uncompressed_values[idx];
+        const decompressed_val = decompressed_values.items[idx];
+        const diff = @abs(uncompressed_val - decompressed_val);
+        if (diff > error_bound) {
+            std.debug.print("Value at index {d} differs too much: original={d:.5}, decompressed={d:.5}, diff={d:.5}\n", .{ idx, uncompressed_val, decompressed_val, diff });
+        }
     }
 }
+
+// Linear = 1, // slope x + intercept.
+// Quadratic = 2, // slope x^2 + intercept.
+// Exponential = 3, // intercept e^(slope x).
+// Sqrt = 4, // slope sqrt(x) + intercept.
+// Power = 5, // intercept x^slope.

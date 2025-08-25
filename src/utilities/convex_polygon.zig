@@ -633,7 +633,6 @@ test "convex polygon can update random linear sequences with slope break" {
 
     const m1: f64 = random.float(f64) * 10;
     const b1: f64 = random.float(f64);
-    std.debug.print("Started\n", .{});
     // Generate points for first line (should intersect).
     for (0..20) |i| {
         const y = m1 * @as(f64, @floatFromInt(i)) + b1 + random.float(f64) * 0.1;

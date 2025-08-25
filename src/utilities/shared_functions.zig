@@ -60,11 +60,11 @@ pub fn computeRMSE(uncompressed_values: []const f64, seg_start: usize, seg_end: 
 pub fn appendValue(comptime T: type, value: T, compressed_values: *ArrayList(u8)) !void {
     // Compile-time type check
     switch (@TypeOf(value)) {
-        i64, f64, usize => {
+        u64, i64, f64, usize => {
             const value_as_bytes: [8]u8 = @bitCast(value);
             try compressed_values.appendSlice(value_as_bytes[0..]);
         },
-        i32, f32 => {
+        u32, i32, f32 => {
             const value_as_bytes: [4]u8 = @bitCast(value);
             try compressed_values.appendSlice(value_as_bytes[0..]);
         },
