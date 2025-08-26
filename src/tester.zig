@@ -737,17 +737,19 @@ pub fn generateRandomExponentialFunction(uncompressed_values: *ArrayList(f64), r
     }
 }
 
-/// Generate a time series with a mix of different bounded value distributions for use in testing
-/// using `random` and add them to `uncompressed_values`. The function generates linear, quadratic,
-/// power, exponential, sinusoidal, and square root functions. The final time series is a
-/// concatenation of these different distributions to create a diverse set of values for testing
-/// purposes, with the order randomized.
+/// Generate a series with a mix of different data distributions using `random` and add them to
+/// `uncompressed_values`. The function generates linear, quadratic, power, exponential, sinusoidal,
+/// and square root functions. The final time series is a concatenation of these different
+/// distributions to create a diverse set of values for testing purposes, with the order randomized.
 pub fn generateMixedBoundedValuesFunctions(
     uncompressed_values: *ArrayList(f64),
     random: Random,
-) error{OutOfMemory}!void { // <- narrow error set
-    const Generator = *const fn (*ArrayList(f64), Random) error{OutOfMemory}!void;
+) Error!void {
+    // Type alias for a pointer to a generator function that takes an ArrayList of f64 and a Random,
+    // and returns an Error or void.
+    const Generator = *const fn (*ArrayList(f64), Random) Error!void;
 
+    // Array of generator function pointers, each generating a different type of mathematical function.
     const generators: [6]Generator = .{
         generateRandomLinearFunction,
         generateRandomQuadraticFunction,
@@ -757,9 +759,13 @@ pub fn generateMixedBoundedValuesFunctions(
         generateRandomSinusoidalFunction,
     };
 
+    // Array of indices corresponding to the generator functions, used for shuffling.
     var indices: [generators.len]usize = undefined;
+
+    // Initialize the indices array with sequential values.
     for (indices, 0..) |_, i| indices[i] = i;
 
+    // Shuffle the indices array using the Fisher-Yates algorithm and a random number generator.
     var i = indices.len;
     while (i > 1) : (i -= 1) {
         const j = random.intRangeAtMost(usize, 0, i - 1);
@@ -768,6 +774,8 @@ pub fn generateMixedBoundedValuesFunctions(
         indices[j] = tmp;
     }
 
+    // Iterate over the shuffled indices and invoke the corresponding generator function,
+    // passing in the uncompressed_values and random number generator.
     for (indices) |idx| {
         try generators[idx](uncompressed_values, random);
     }

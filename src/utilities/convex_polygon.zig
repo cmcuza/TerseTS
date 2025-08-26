@@ -613,6 +613,11 @@ fn addPoint(poly: *ConvexPolygon, x_axis: usize, y_axis: f64, eps: f64) !bool {
 }
 
 test "convex polygon can update random linear sequences with slope break" {
+    // This is a simple randomized test that generates two linear sequences of points
+    // with a break in slope, and verifies that the convex polygon can correctly
+    // incorporate the constraints from these points. The test checks that the polygon
+    // remains feasible after adding points from both sequences, and that it correctly
+    // rejects points that would make the polygon empty.
     const allocator = testing.allocator;
     const random = tester.getDefaultRandomGenerator();
 
@@ -648,5 +653,5 @@ test "convex polygon can update random linear sequences with slope break" {
         }
     }
 
-    try std.testing.expect(rejected); // we expect eventual rejection
+    try std.testing.expect(rejected);
 }

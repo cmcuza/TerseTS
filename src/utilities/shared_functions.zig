@@ -142,3 +142,14 @@ pub fn isApproximatelyEqual(value_a: f64, value_b: f64) bool {
     const max_abs = @max(@abs(value_a), @abs(value_b));
     return abs_diff <= shared_structs.ABS_EPS or abs_diff <= max_abs * shared_structs.REL_EPS;
 }
+
+// pub fn ulp_mag(x: f64) f64 {
+//     const up = math.nextAfter(f64, x, math.inf(f64));
+//     const dn = math.nextAfter(f64, x, math.inf(f64));
+//     return @max(@abs(up - x), @abs(x - dn));
+// }
+
+// pub fn guard(y: f64, eps: f64) f64 {
+//     // ~ a handful of ulps at |y| plus a tiny bit of relative slack.
+//     return 8.0 * (ulp_mag(y) + ulp_mag(eps)) + 1e-15 * @abs(y);
+// }
