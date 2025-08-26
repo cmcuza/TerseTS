@@ -126,9 +126,7 @@ pub fn compress(
 
     try compressed_values.appendSlice(packed_function_types);
 
-    std.debug.print("Optimal\n", .{});
     for (optimal_approximation.items) |segment| {
-        formatSegment(segment);
         // Writes the two main function parameters (slope and intercept) and the end point.
         try shared_functions.appendValue(f64, segment.definition.slope, compressed_values);
         try shared_functions.appendValue(f64, segment.definition.intercept, compressed_values);
@@ -166,7 +164,7 @@ pub fn decompress(
 
     var optimal_approximation = ArrayList(FunctionalApproximation).init(allocator);
     defer optimal_approximation.deinit();
-    std.debug.print("\nDecompressed\n", .{});
+
     var current_start_idx: usize = 0; // Tracks the inferred start index for sequential segments.
     for (0..num_segments) |segment_idx| { // Iterates through each segment.
         const packed_code = packed_function_types[segment_idx / 2];
@@ -195,8 +193,6 @@ pub fn decompress(
                 .intercept = intercept,
             },
         };
-
-        formatSegment(functional_approximation);
 
         try optimal_approximation.append(functional_approximation);
 
@@ -234,7 +230,7 @@ const FunctionalApproximation = struct {
     /// Evaluates the approximating function at the given x-coordinate,
     /// using absolute positioning to match the reference implementation.
     pub fn evaluate(self: *const FunctionalApproximation, x_axis: f64) !f64 {
-        const x_rel = x_axis - self.start_idx;
+        const x_rel = x_axis - @as(f64, @floatFromInt(self.start_idx));
         return switch (self.function_type) {
             .Linear => self.definition.slope * x_rel + self.definition.intercept,
             .Quadratic => self.definition.slope * (x_rel * x_rel) + self.definition.intercept,
@@ -352,7 +348,18 @@ fn findOptimalFunctionalApproximation(
                     distances[current_position] = distances[model_start_idx] + cost;
                     previous_approximation[current_position] = current_approximation[model_idx];
                     previous_approximation[current_position].?.end_idx = current_position;
-                }
+                } // else if (distances[current_position] == distances[model_start_idx] + cost) {
+                //     // If the cost is the same, prefer the one with less error. To avoid
+                //     // running time overhead, we sample only the first, middle and last point.
+                //     const existing_segment = previous_approximation[current_position].?;
+                //     var existing_error: f64 = 0.0;
+                //     var new_error: f64 = 0.0;
+                //     const sample_points = [_]usize{
+                //         existing_segment.start_idx,
+                //         (existing_segment.start_idx + existing_segment.end_idx) / 2,
+                //         existing_segment.end_idx - 1,
+                //     };
+                // }
             }
         }
 
@@ -419,7 +426,7 @@ fn computeApproximation(
 
     // Implements O'Rourke's algorithm: processes data points from left to right.
     for (start_idx..n) |end_idx| {
-        const x_axis: usize = end_idx + 1;
+        const x_axis: usize = end_idx - start_idx + 1;
         const y_axis: f64 = uncompressed_data[end_idx];
 
         // Gets constraints for this data point.
@@ -451,7 +458,7 @@ fn computeApproximation(
 
         const feasible_solution = polygon.computeFeasibleSolution();
         best_approximation = transformParameters(feasible_solution, function_type);
-        longest_valid_end = x_axis; // Updates the longest valid segment end.
+        longest_valid_end = start_idx + x_axis; // Updates the longest valid segment end.
     }
 
     // Constructs and validates the final segment if a valid one was found.
@@ -544,13 +551,6 @@ fn transformParameters(
     };
 }
 
-pub fn formatSegment(seg: FunctionalApproximation) void {
-    std.debug.print(
-        "Segment[m=[{d:.2}, {d:.2}], slope={d:.3}, intercept={d:.3}, type={}]\n",
-        .{ seg.start_idx, seg.end_idx, seg.definition.slope, seg.definition.intercept, seg.function_type },
-    );
-}
-
 test "find optimal approximation can approximate random lines with linear function" {
     const allocator = testing.allocator;
     const random = tester.getDefaultRandomGenerator();
@@ -619,7 +619,7 @@ test "find optimal approximation can approximate random lines with linear functi
     for (0..uncompressed_values.len) |idx| {
         const uncompressed_val = uncompressed_values[idx];
         const decompressed_val = decompressed_values.items[idx];
-        const diff = @abs(uncompressed_val - decompressed_val);
+        const diff: f32 = @floatCast(@abs(uncompressed_val - decompressed_val));
         if (diff > error_bound) {
             std.debug.print("Value at index {d} differs too much: original={d:.5}, decompressed={d:.5}, diff={d:.5}\n", .{ idx, uncompressed_val, decompressed_val, diff });
         }

@@ -16,7 +16,7 @@
 //! for linear functions, supporting incremental intersection of half-plane constraints from the paper:
 //! "O'Rourke, Joseph. An online algorithm for fitting straight lines between data ranges."
 //! Communications of the ACM 24.9 (1981): 574-578.
-//! https://dl.acm.org/doi/pdf/10.1145/358746.358758.
+//! https://dl.acm.org/doi/pdf/10.1145/358746.458758.
 //! The implementation is partially based on the code released at
 //! https://github.com/and-gue/NeaTS (accessed on 15-08-25).
 
@@ -171,7 +171,7 @@ pub const BorderLine = struct {
         if (shared_functions.isApproximatelyEqual(self_slope, other_slope)) {
             std.debug.assert(shared_functions.isApproximatelyEqual(self_intercept, other_intercept));
             return BorderLine{ .definition = .{
-                .slope = 0,
+                .slope = 0.0,
                 .intercept = start_point.value,
             }, .x_axis_domain = .{
                 .start = start_point.time,
@@ -193,13 +193,8 @@ pub const BorderLine = struct {
                     .end = start_point.time,
                 } };
             }
-            const slope = (y_intercept - start_point.value) / (x_intercept - start_point.time);
-            const intercept = y_intercept - slope * x_intercept;
             return BorderLine{
-                .definition = .{
-                    .slope = slope,
-                    .intercept = intercept,
-                },
+                .definition = self.definition,
                 .x_axis_domain = .{
                     .start = start_point.time,
                     .end = x_intercept,
@@ -218,13 +213,8 @@ pub const BorderLine = struct {
                     },
                 };
             }
-            const slope = (y_intercept - end_point.value) / (x_intercept - end_point.time);
-            const intercept = y_intercept - slope * x_intercept;
             return BorderLine{
-                .definition = .{
-                    .slope = slope,
-                    .intercept = intercept,
-                },
+                .definition = self.definition,
                 .x_axis_domain = .{
                     .start = x_intercept,
                     .end = end_point.time,
@@ -325,6 +315,7 @@ pub const ConvexPolygon = struct {
 
             self.upper_bound_start = 0;
             self.lower_bound_start = 0;
+
             return true;
         }
 
@@ -573,7 +564,7 @@ pub const ConvexPolygon = struct {
 /// searches from right to left, effectively reversing the `border_line`'s direction for the search.
 /// Returns the index of the first segment that is not strictly below `target`. If all segments are
 /// strictly below `target`, returns the last index.
-inline fn searchIntersection(
+fn searchIntersection(
     border_line: []const BorderLine,
     target: BorderLine,
     reversed: bool,
@@ -607,7 +598,7 @@ inline fn searchIntersection(
 /// two half-plane boundaries (upper and lower) at the given x position, offset by `eps`, and
 /// updates the polygon by intersecting with these constraints. Returns `true` if the polygon
 /// remains non-empty after the update, `false` otherwise.
-pub fn addPoint(poly: *ConvexPolygon, x_axis: usize, y_axis: f64, eps: f64) !bool {
+fn addPoint(poly: *ConvexPolygon, x_axis: usize, y_axis: f64, eps: f64) !bool {
     const slope = -@as(f64, @floatFromInt(x_axis)); // (-x_k)
     const upper_intercept = y_axis + eps;
     const lower_intercept = y_axis - eps;

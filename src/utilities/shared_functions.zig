@@ -136,6 +136,8 @@ pub fn readValue(comptime T: type, compressed_values: []const u8) Error!T {
 /// using both absolute and relative tolerances to account for rounding errors.
 pub fn isApproximatelyEqual(value_a: f64, value_b: f64) bool {
     if (value_a == value_b) return true;
+    if (!math.isFinite(value_a) or !math.isFinite(value_b))
+        return value_a == value_b; // Handle NaN and infinities.
     const abs_diff = @abs(value_a - value_b);
     const max_abs = @max(@abs(value_a), @abs(value_b));
     return abs_diff <= shared_structs.ABS_EPS or abs_diff <= max_abs * shared_structs.REL_EPS;
