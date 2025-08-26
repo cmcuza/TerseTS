@@ -789,7 +789,7 @@ test "PWCH can compress and decompress with bounded values and expected maximum 
         uncompressed_values.items,
         tersets.Method.PiecewiseConstantHistogram,
         error_bound,
-        tersets.isWithinErrorBound,
+        tester.isWithinErrorBound,
     );
 }
 
@@ -936,6 +936,6 @@ test "PWLH can compress and decompress with bounded values and expected maximum 
         uncompressed_values.items,
         tersets.Method.PiecewiseLinearHistogram,
         error_bound,
-        tersets.isWithinErrorBound,
+        tester.isWithinErrorBound,
     );
 }

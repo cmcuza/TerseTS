@@ -51,6 +51,7 @@ const FunctionType = enum(u8) {
 };
 
 /// Set of function types available for approximating time series segments.
+/// TODO: Make this configurable at running time.
 const function_types = [_]FunctionType{ .Linear, .Quadratic, .Exponential, .Power, .Sqrt };
 
 /// Compresses `uncompressed_data` using NeaTS algorithm by partitioning the time series into
@@ -551,83 +552,22 @@ fn transformParameters(
     };
 }
 
-test "find optimal approximation can approximate random lines with linear function" {
+test "non linear approximator can compress and decompress various function types with positive error bounds" {
     const allocator = testing.allocator;
-    const random = tester.getDefaultRandomGenerator();
+    const data_distributions = &[_]tester.DataDistribution{
+        .LinearFunctions,
+        .QuadradicFunctions,
+        .ExponentialFunctions,
+        .PowerFunctions,
+        .SqrtFunctions,
+        .SinusoidalFunction,
+        .BoundedRandomValues,
+        .MixedBoundedValuesFunctions,
+    };
 
-    const error_bound = 0.8;
-
-    var theta_1: f64 = tester.generateBoundedRandomValue(f64, 1, 10, undefined);
-    var theta_2: f64 = tester.generateBoundedRandomValue(f64, 1, 10, undefined);
-
-    const uncompressed_values: []f64 = try allocator.alloc(f64, 100);
-    defer allocator.free(uncompressed_values);
-
-    for (0..20) |i| {
-        const y = theta_1 * @as(f64, @floatFromInt(i)) + theta_2 + random.float(f64) * 0.1;
-        uncompressed_values[i] = y + error_bound;
-    }
-
-    // Now second line: slope -1, intercept 10
-    theta_1 = tester.generateBoundedRandomValue(f64, 0, 1, undefined);
-    theta_2 = tester.generateBoundedRandomValue(f64, 1, 2, undefined);
-
-    for (20..40) |i| {
-        const y = theta_1 * math.pow(f64, @as(f64, @floatFromInt(i)), theta_2) + random.float(f64) * 0.1;
-        uncompressed_values[i] = y + error_bound;
-    }
-
-    theta_1 = tester.generateBoundedRandomValue(f64, 0, 1, undefined);
-    theta_2 = tester.generateBoundedRandomValue(f64, 1, 2, undefined);
-
-    for (40..60) |i| {
-        const y = theta_1 * math.sqrt(@as(f64, @floatFromInt(i))) + theta_2 + random.float(f64) * 0.1;
-        uncompressed_values[i] = y + error_bound;
-    }
-
-    theta_1 = tester.generateBoundedRandomValue(f64, 0, 1, undefined);
-    theta_2 = tester.generateBoundedRandomValue(f64, 0, 0.01, undefined);
-
-    for (60..80) |i| {
-        const y = theta_1 * math.exp(@as(f64, @floatFromInt(i)) * theta_2) + random.float(f64) * 0.1;
-        uncompressed_values[i] = y + error_bound;
-    }
-
-    theta_1 = tester.generateBoundedRandomValue(f64, 0, 1, undefined);
-    theta_2 = tester.generateBoundedRandomValue(f64, 0, 1, undefined);
-
-    for (80..100) |i| {
-        const y = theta_1 * math.pow(f64, @as(f64, @floatFromInt(i)), 2) + theta_2 + random.float(f64) * 0.1;
-        uncompressed_values[i] = y + error_bound;
-    }
-
-    const optimal = try findOptimalFunctionalApproximation(
+    try tester.testErrorBoundedCompressionMethod(
         allocator,
-        uncompressed_values,
-        error_bound,
+        Method.NonLinearApproximation,
+        data_distributions,
     );
-    defer optimal.deinit();
-
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-
-    try compress(allocator, uncompressed_values, &compressed_values, error_bound);
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
-    try decompress(allocator, compressed_values.items, &decompressed_values);
-
-    for (0..uncompressed_values.len) |idx| {
-        const uncompressed_val = uncompressed_values[idx];
-        const decompressed_val = decompressed_values.items[idx];
-        const diff: f32 = @floatCast(@abs(uncompressed_val - decompressed_val));
-        if (diff > error_bound) {
-            std.debug.print("Value at index {d} differs too much: original={d:.5}, decompressed={d:.5}, diff={d:.5}\n", .{ idx, uncompressed_val, decompressed_val, diff });
-        }
-    }
 }
-
-// Linear = 1, // slope x + intercept.
-// Quadratic = 2, // slope x^2 + intercept.
-// Exponential = 3, // intercept e^(slope x).
-// Sqrt = 4, // slope sqrt(x) + intercept.
-// Power = 5, // intercept x^slope.

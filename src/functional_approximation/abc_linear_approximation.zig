@@ -321,7 +321,7 @@ test "abc compressor can always compress and decompress with zero error bound" {
         tester.generateFiniteRandomValues,
         Method.ABCLinearApproximation,
         0,
-        tersets.isWithinErrorBound,
+        tester.isWithinErrorBound,
     );
 }
 
@@ -418,6 +418,6 @@ test "abc compressor compresses and decompresses constant signal" {
         uncompressed_values.items,
         Method.ABCLinearApproximation,
         error_bound,
-        tersets.isWithinErrorBound,
+        tester.isWithinErrorBound,
     );
 }

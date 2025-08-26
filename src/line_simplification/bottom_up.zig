@@ -372,7 +372,7 @@ test "bottom-up can compress and decompress with zero error bound" {
         uncompressed_values.items,
         Method.BottomUp,
         error_bound,
-        tersets.isWithinErrorBound,
+        tester.isWithinErrorBound,
     );
 }
 
@@ -414,6 +414,7 @@ test "bottom-up cannot compress and decompress unbounded values" {
 
 test "bottom-up random lines and random error bound compress and decompress" {
     const allocator = testing.allocator;
+    const random = tester.getDefaultRandomGenerator();
 
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
@@ -424,11 +425,7 @@ test "bottom-up random lines and random error bound compress and decompress" {
 
     const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0.01, 1e6, undefined);
 
-    const max_lines: usize = tester.generateBoundRandomInteger(usize, 4, 25, undefined);
-    for (0..max_lines) |_| {
-        // Generate a random linear function and add it to the uncompressed values.
-        try tester.generateRandomLinearFunction(&uncompressed_values, undefined);
-    }
+    try tester.generateRandomLinearFunctions(&uncompressed_values, random);
 
     try compress(
         allocator,

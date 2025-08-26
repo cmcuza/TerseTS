@@ -1101,7 +1101,7 @@ test "mix-piece can compress, decompress and merge many segments with non-zero e
         uncompressed_values.items,
         Method.MixPiece,
         error_bound,
-        tersets.isWithinErrorBound,
+        tester.isWithinErrorBound,
     );
 }
 
@@ -1211,7 +1211,7 @@ test "mix-piece handles time series with trend" {
         uncompressed_values.items,
         Method.MixPiece,
         error_bound,
-        tersets.isWithinErrorBound,
+        tester.isWithinErrorBound,
     );
 }
 
@@ -1244,7 +1244,7 @@ test "mix-piece handles cross-intercept grouping" {
         uncompressed_values.items,
         Method.MixPiece,
         error_bound,
-        tersets.isWithinErrorBound,
+        tester.isWithinErrorBound,
     );
 }
 
@@ -1274,7 +1274,7 @@ test "mix-piece handles single point segments" {
         uncompressed_values.items,
         Method.MixPiece,
         error_bound,
-        tersets.isWithinErrorBound,
+        tester.isWithinErrorBound,
     );
 }
 
@@ -1298,6 +1298,6 @@ test "mix-piece floor vs ceil quantization selection" {
         uncompressed_values.items,
         Method.MixPiece,
         error_bound,
-        tersets.isWithinErrorBound,
+        tester.isWithinErrorBound,
     );
 }
