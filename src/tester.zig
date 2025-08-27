@@ -781,26 +781,6 @@ pub fn generateMixedBoundedValuesFunctions(
     }
 }
 
-/// Auxiliary function to validate of the decompressed time series is within the error bound of the
-/// uncompressed time series. The function returns true if all elements are within the error bound,
-/// false otherwise.
-pub fn isWithinErrorBound(
-    uncompressed_values: []const f64,
-    decompressed_values: []const f64,
-    error_bound: f32,
-) bool {
-    if (uncompressed_values.len != decompressed_values.len) {
-        return false;
-    }
-
-    for (0..uncompressed_values.len) |index| {
-        const uncompressed_value = uncompressed_values[index];
-        const decompressed_value = decompressed_values[index];
-        if (@abs(uncompressed_value - decompressed_value) > error_bound) return false;
-    }
-    return true;
-}
-
 /// Generate a random value of type `T` between `at_least` and `at_most` for use in testing using
 /// `random_opt`. `T` must be a floating-point type (e.g., `f32`, `f64`). If random_opt is not
 /// passed, a random number generator is created using the current time as seed.

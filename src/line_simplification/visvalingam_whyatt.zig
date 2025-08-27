@@ -338,7 +338,7 @@ test "vw compress and decompress with zero error bound" {
     try compress(allocator, uncompressed_values.items, &compressed_values, error_bound);
     try decompress(compressed_values.items, &decompressed_values);
 
-    try std.testing.expect(tester.isWithinErrorBound(
+    try std.testing.expect(shared_functions.isWithinErrorBound(
         uncompressed_values.items,
         decompressed_values.items,
         error_bound,

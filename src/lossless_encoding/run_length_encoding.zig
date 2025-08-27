@@ -132,6 +132,6 @@ test "run length encoding compresses repeated values" {
         uncompressed_values.items,
         Method.RunLengthEncoding,
         0,
-        tester.isWithinErrorBound,
+        shared_functions.isWithinErrorBound,
     );
 }
