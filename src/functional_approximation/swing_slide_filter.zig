@@ -867,7 +867,7 @@ test "swing filter can always compress and decompress with zero error bound" {
         tester.generateFiniteRandomValues,
         Method.SwingFilter,
         0,
-        tersets.isWithinErrorBound,
+        shared_functions.isWithinErrorBound,
     );
 }
 
@@ -900,7 +900,7 @@ test "swing filter disconnected can always compress and decompress with zero err
         tester.generateFiniteRandomValues,
         Method.SwingFilterDisconnected,
         0,
-        tersets.isWithinErrorBound,
+        shared_functions.isWithinErrorBound,
     );
 }
 
@@ -934,7 +934,7 @@ test "slide filter can always compress and decompress with zero error bound" {
         tester.generateFiniteRandomValues,
         Method.SlideFilter,
         0,
-        tersets.isWithinErrorBound,
+        shared_functions.isWithinErrorBound,
     );
 }
 

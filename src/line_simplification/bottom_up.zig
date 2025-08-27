@@ -372,7 +372,7 @@ test "bottom-up can compress and decompress with zero error bound" {
         uncompressed_values.items,
         Method.BottomUp,
         error_bound,
-        tersets.isWithinErrorBound,
+        shared_functions.isWithinErrorBound,
     );
 }
 

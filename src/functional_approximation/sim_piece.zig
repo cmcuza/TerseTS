@@ -625,7 +625,7 @@ test "sim-piece can compress, decompress and merge many segments with positive e
         uncompressed_values.items,
         Method.SimPiece,
         error_bound,
-        tersets.isWithinErrorBound,
+        shared_functions.isWithinErrorBound,
     );
 }
 
