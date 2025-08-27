@@ -36,7 +36,11 @@ jobs:
     - uses: mlugg/setup-zig@v2
       with:
         version: 0.14.0  # Use a stable Zig version
-
+    - name: Clear Zig Cache (Windows only)
+      if: runner.os == 'Windows'
+      run: |
+        Remove-Item -Recurse -Force "$env:LOCALAPPDATA\zig" -ErrorAction SilentlyContinue
+      shell: pwsh
     - name: Zig Build Debug
       run: zig build -Doptimize=Debug
     - name: Zig Build ReleaseFast
