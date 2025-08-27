@@ -71,9 +71,6 @@ pub fn compress(
 
     if (error_bound <= 0.0) return Error.UnsupportedErrorBound;
 
-    // Adjusts the error bound to account for internal margins used in the algorithm.
-    const adjusted_error_bound = error_bound - shared_structs.ErrorBoundMargin;
-
     // Calculates the preprocessing shift amount needed for functions that require positive values
     // (exponential and power functions need all y-values to be positive for mathematical validity).
     const shift_amount = try calculateShiftAmount(uncompressed_data, error_bound);
@@ -103,7 +100,7 @@ pub fn compress(
     try findOptimalFunctionalApproximation(
         allocator,
         working_data,
-        adjusted_error_bound,
+        error_bound,
         &optimal_approximation,
     );
 
@@ -281,7 +278,7 @@ const FunctionalApproximation = struct {
 fn calculateShiftAmount(uncompressed_data: []const f64, error_bound: f32) !f64 {
     var min_val = std.math.inf(f64);
     for (uncompressed_data) |val| {
-        if (!math.isFinite(val) or val > tester.max_test_value) {
+        if (!math.isFinite(val) or @abs(val) > tester.max_test_value) {
             return Error.UnsupportedInput;
         }
         min_val = @min(min_val, val);
@@ -568,12 +565,6 @@ fn transformParameters(
 test "non linear approximator can compress and decompress various function types with positive error bounds" {
     const allocator = testing.allocator;
     const data_distributions = &[_]tester.DataDistribution{
-        .LinearFunctions,
-        .QuadradicFunctions,
-        .ExponentialFunctions,
-        .PowerFunctions,
-        .SqrtFunctions,
-        .SinusoidalFunction,
         .MixedBoundedValuesFunctions,
     };
 

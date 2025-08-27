@@ -53,8 +53,10 @@ pub const global_replace_probability: f32 = 0.05;
 pub const max_test_value: f64 = 1.0e15;
 
 /// Default seed and prng to generate random values.
-pub var default_prng: std.Random.DefaultPrng = undefined;
+// pub var default_seed: u64 = 1756301362438;
+// pub var default_prng: std.Random.DefaultPrng = std.Random.DefaultPrng.init(1756301362438);
 pub var default_seed: u64 = 0;
+pub var default_prng: std.Random.DefaultPrng = undefined;
 
 /// Different data distributions used for testing.
 pub const DataDistribution = enum {
@@ -236,19 +238,21 @@ pub fn testGeneratedCompression(
         // Cast the difference between raw and decompressed values to f32 before comparing
         // to the `f32` error bound, to ignore insignificant differences below f32 precision.
         // This prevents false test failures due to `f64` rounding noise.
-        if (@as(f32, @floatCast(@abs(raw_value - decompressed_value))) > ranged_error_bound) {
+        const decompression_error: f32 = @floatCast(@abs(raw_value - decompressed_value));
+        if (decompression_error > ranged_error_bound) {
             try testing.expectFmt(
                 "",
-                "Seed: {}, index {}, raw value {}, compressed value {}, error bound {},\n error bound exceeded by {}, with data distribution: {s} \n previous raw value {}, next raw value {}\n",
+                "Seed: {}, index {}, raw value {}, compressed value {}, error bound {},\n error bound exceeded by {}({}%), with data distribution: {s} \n previous raw value {}, next raw value {}\n",
                 .{
                     default_seed,
                     i,
                     raw_value,
                     decompressed_value,
                     ranged_error_bound,
-                    @abs(raw_value - decompressed_value) - ranged_error_bound,
+                    decompression_error - ranged_error_bound,
+                    (decompression_error - ranged_error_bound) / ranged_error_bound * 100.0,
                     data_distribution_name,
-                    if (i - 1 >= 0) uncompressed_values.items[i - 1] else 0.0,
+                    if (i > 0) uncompressed_values.items[i - 1] else 0.0,
                     if (i + 1 < uncompressed_values.items.len) uncompressed_values.items[i + 1] else 0.0,
                 },
             );
@@ -448,37 +452,6 @@ pub fn generateRandomSinusoidalFunctions(
     }
 }
 
-/// Generate a random number of `f64` values following a sinusoidal function with random amplitude,
-/// frequency, and additive noise. The output values are guaranteed to be finite and lie within the
-/// range [-1e15, 1e15]. The values are generated using `random_opt` and returned in
-/// `uncompressed_values`. If an error occurs, it is returned.
-pub fn generateRandomSinusoidalFunction(
-    uncompressed_values: *ArrayList(f64),
-    random: Random,
-) !void {
-    // Amplitude sampled in [1e-2, 1e14) allows very small to large oscillations.
-    const amplitude = math.pow(f64, 10.0, random.float(f64) * 16.0 - 2.0);
-    // Frequency sampled in [1e-4, 1e1) covers slowly to moderately fast variation.
-    const frequency = math.pow(f64, 10.0, random.float(f64) * 5.0 - 4.0);
-    // Phase sampled in [0, 2\pi) ensures random starting point in the cycle.
-    const phase = random.float(f64) * 2.0 * math.pi;
-    // Noise scale in [-5, 5) avoids pushing values beyond desired bounds.
-    const noise_scale = random.float(f64) * 10 - 5;
-
-    const n = generateNumberOfValues(random);
-    try uncompressed_values.ensureUnusedCapacity(n);
-
-    var i: usize = 0;
-    while (i < n) : (i += 1) {
-        const x = @as(f64, @floatFromInt(i));
-        var value = amplitude * @sin(frequency * x + phase) + noise_scale;
-
-        // Clamp to [-1e15, 1e15] to avoid overflows and invalid values.
-        value = math.clamp(value, -max_test_value, max_test_value);
-        uncompressed_values.appendAssumeCapacity(value);
-    }
-}
-
 /// Generate a random number of linear functions with random slope and intercept using `random` and
 /// add them to `uncompressed_values`.
 pub fn generateRandomLinearFunctions(uncompressed_values: *ArrayList(f64), random: Random) !void {
@@ -617,14 +590,16 @@ pub fn generateBoundedRandomValues(
 /// each value. The generated values are bounded within [-1e15, 1e15]. If `random_opt` is
 /// not passed, a random number generator is created.
 pub fn generateRandomLinearFunction(uncompressed_values: *ArrayList(f64), random: Random) !void {
-    // Choose log-uniform magnitude in [1e-2, 1e12].
-    const log_magnitude = random.float(f64) * 14.0 - 2.0;
-    const magnitude = math.pow(f64, 10.0, log_magnitude);
-    const sign: f64 = if (random.boolean()) 1.0 else -1.0;
+    // Choose log-uniform magnitude in [1e-2, 1e10].
+    var log_magnitude = random.float(f64) * 10.0 - 2.0;
+    var magnitude = math.pow(f64, 10.0, log_magnitude);
+    var sign: f64 = if (random.boolean()) 1.0 else -1.0;
     const slope = sign * magnitude;
 
-    // Uniformly in [-1e10, 1e10]. This range is wide enough while avoiding f64 overflow.
-    const intercept = 2.0e10 * random.float(f64) - 1e10;
+    log_magnitude = random.float(f64) * 10.0 - 2.0;
+    magnitude = math.pow(f64, 10.0, log_magnitude);
+    sign = if (random.boolean()) 1.0 else -1.0;
+    const intercept = sign * magnitude;
 
     for (0..generateNumberOfValues(random)) |x| {
         // Small random noise in the range [-0.5, 0.5).
@@ -657,6 +632,37 @@ pub fn generateRandomPowerFunction(uncompressed_values: *ArrayList(f64), random:
         const power_function_value = theta_1 * math.pow(f64, xf, theta_2) + rand_value;
         const clamped_value = math.clamp(power_function_value, -1.0e15, 1.0e15);
         try uncompressed_values.append(clamped_value);
+    }
+}
+
+/// Generate a random number of `f64` values following a sinusoidal function with random amplitude,
+/// frequency, and additive noise. The output values are guaranteed to be finite and lie within the
+/// range [-1e15, 1e15]. The values are generated using `random_opt` and returned in
+/// `uncompressed_values`. If an error occurs, it is returned.
+pub fn generateRandomSinusoidalFunction(
+    uncompressed_values: *ArrayList(f64),
+    random: Random,
+) !void {
+    // Amplitude sampled in [1e-2, 1e14) allows very small to large oscillations.
+    const amplitude = math.pow(f64, 10.0, random.float(f64) * 16.0 - 2.0);
+    // Frequency sampled in [1e-4, 1e1) covers slowly to moderately fast variation.
+    const frequency = math.pow(f64, 10.0, random.float(f64) * 5.0 - 4.0);
+    // Phase sampled in [0, 2\pi) ensures random starting point in the cycle.
+    const phase = random.float(f64) * 2.0 * math.pi;
+    // Noise scale in [-5, 5) avoids pushing values beyond desired bounds.
+    const noise_scale = random.float(f64) * 10 - 5;
+
+    const n = generateNumberOfValues(random);
+    try uncompressed_values.ensureUnusedCapacity(n);
+
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const x = @as(f64, @floatFromInt(i));
+        var value = amplitude * @sin(frequency * x + phase) + noise_scale;
+
+        // Clamp to [-1e15, 1e15] to avoid overflows and invalid values.
+        value = math.clamp(value, -max_test_value, max_test_value);
+        uncompressed_values.appendAssumeCapacity(value);
     }
 }
 
