@@ -271,7 +271,7 @@ When implementing a new method (e.g., `Method.MyNewMethod`), you should:
            tester.generateRandomValues,
            Method.MyNewMethod,
            0,
-           tersets.isWithinErrorBound,
+           shared_functions.isWithinErrorBound,
        );
     }
     ```

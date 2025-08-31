@@ -145,7 +145,7 @@ test "midrange can always compress and decompress with zero error bound" {
         tester.generateRandomValues,
         Method.PoorMansCompressionMidrange,
         0,
-        tersets.isWithinErrorBound,
+        shared_functions.isWithinErrorBound,
     );
 }
 
@@ -179,7 +179,7 @@ test "mean can always compress and decompress with zero error bound" {
         tester.generateRandomValues,
         Method.PoorMansCompressionMean,
         0,
-        tersets.isWithinErrorBound,
+        shared_functions.isWithinErrorBound,
     );
 }
 

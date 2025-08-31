@@ -284,7 +284,7 @@ test "bitpacked quantization can compress and decompress bounded values at diffe
         uncompressed_values.items,
         Method.BitPackedQuantization,
         error_bound,
-        tersets.isWithinErrorBound,
+        shared_functions.isWithinErrorBound,
     );
 }
 
@@ -307,7 +307,7 @@ test "bitpacked quantization can compress and decompress with zero error bound a
         uncompressed_values.items,
         Method.BitPackedQuantization,
         error_bound,
-        tersets.isWithinErrorBound,
+        shared_functions.isWithinErrorBound,
     );
 }
 

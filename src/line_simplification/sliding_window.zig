@@ -193,7 +193,7 @@ test "sliding-window can compress and decompress bounded values with zero error 
         uncompressed_values.items,
         Method.SlidingWindow,
         error_bound,
-        tersets.isWithinErrorBound,
+        shared_functions.isWithinErrorBound,
     );
 }
 
