@@ -142,6 +142,26 @@ pub fn computeMaxAbsoluteError(uncompressed_values: []const f64, seg_start: usiz
     return linf;
 }
 
+/// Auxiliary function to validate of the decompressed time series is within the error bound of the
+/// uncompressed time series. The function returns true if all elements are within the error bound,
+/// false otherwise.
+pub fn isWithinErrorBound(
+    uncompressed_values: []const f64,
+    decompressed_values: []const f64,
+    error_bound: f32,
+) bool {
+    if (uncompressed_values.len != decompressed_values.len) {
+        return false;
+    }
+
+    for (0..uncompressed_values.len) |index| {
+        const uncompressed_value = uncompressed_values[index];
+        const decompressed_value = decompressed_values[index];
+        if (@abs(uncompressed_value - decompressed_value) > error_bound) return false;
+    }
+    return true;
+}
+
 /// Reads a value of compile-time known type `T` from the beginning of the `compressed_values` byte slice.
 /// Returns the value or an error if the slice is too short.
 pub fn readValue(comptime T: type, compressed_values: []const u8) Error!T {
