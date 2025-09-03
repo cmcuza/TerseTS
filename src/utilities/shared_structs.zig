@@ -28,6 +28,10 @@ pub const DiscretePoint = Point(usize);
 /// `Point` with continous `time` axis.
 pub const ContinousPoint = Point(f64);
 
+/// Absolute and relative tolerances for floating-point comparisons.
+pub const ABS_EPS: f64 = 1e-12;
+pub const REL_EPS: f64 = 1e-15;
+
 /// `Segment` models a straight line segment from `start_point` to `end_point`. All segments
 /// have discrete points.
 pub const Segment = struct {

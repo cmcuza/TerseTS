@@ -22,6 +22,8 @@ const tester = @import("../tester.zig");
 const Error = tersets.Error;
 const testing = std.testing;
 
+const shared_structs = @import("shared_structs.zig");
+
 /// Computes the Root-Mean-Squared-Errors (RMSE) for a segment of the `uncompressed_values`.
 /// This function calculates the error between the actual values and the predicted values
 /// based on a linear regression model fitted to the segment defined by `seg_start` and `seg_end`.
@@ -58,15 +60,15 @@ pub fn computeRMSE(uncompressed_values: []const f64, seg_start: usize, seg_end: 
 pub fn appendValue(comptime T: type, value: T, compressed_values: *ArrayList(u8)) !void {
     // Compile-time type check
     switch (@TypeOf(value)) {
-        i64, f64, usize => {
+        u64, i64, f64, usize => {
             const value_as_bytes: [8]u8 = @bitCast(value);
             try compressed_values.appendSlice(value_as_bytes[0..]);
         },
-        i32, f32 => {
+        u32, i32, f32 => {
             const value_as_bytes: [4]u8 = @bitCast(value);
             try compressed_values.appendSlice(value_as_bytes[0..]);
         },
-        else => @compileError("Unsupported type for append value function"),
+        else => return Error.UnsupportedInput,
     }
 }
 
@@ -138,4 +140,25 @@ pub fn isWithinErrorBound(
         if (@abs(uncompressed_value - decompressed_value) > error_bound) return false;
     }
     return true;
+}
+
+/// Reads a value of compile-time known type `T` from the beginning of the `compressed_values` byte slice.
+/// Returns the value or an error if the slice is too short.
+pub fn readValue(comptime T: type, compressed_values: []const u8) Error!T {
+    const size = @sizeOf(T);
+    if (size > compressed_values.len) {
+        return Error.UnsupportedInput; // Not enough bytes to read the value.
+    }
+    return @bitCast(compressed_values[0..size].*);
+}
+
+/// Returns true if two floating-point `value_a` and `value_b` numbers are approximately equal,
+/// using both absolute and relative tolerances to account for rounding errors.
+pub fn isApproximatelyEqual(value_a: f64, value_b: f64) bool {
+    if (value_a == value_b) return true;
+    if (!math.isFinite(value_a) or !math.isFinite(value_b))
+        return value_a == value_b; // Handle NaN and infinities.
+    const abs_diff = @abs(value_a - value_b);
+    const max_abs = @max(@abs(value_a), @abs(value_b));
+    return abs_diff <= shared_structs.ABS_EPS or abs_diff <= max_abs * shared_structs.REL_EPS;
 }

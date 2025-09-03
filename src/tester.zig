@@ -53,14 +53,21 @@ pub const global_replace_probability: f32 = 0.05;
 pub const max_test_value: f64 = 1.0e15;
 
 /// Default seed and prng to generate random values.
-pub var default_prng: std.Random.DefaultPrng = undefined;
+// pub var default_seed: u64 = 1756301362438;
+// pub var default_prng: std.Random.DefaultPrng = std.Random.DefaultPrng.init(1756301362438);
 pub var default_seed: u64 = 0;
+pub var default_prng: std.Random.DefaultPrng = undefined;
 
 /// Different data distributions used for testing.
 pub const DataDistribution = enum {
     LinearFunctions,
+    QuadradicFunctions,
+    ExponentialFunctions,
+    PowerFunctions,
+    SqrtFunctions,
     BoundedRandomValues,
     SinusoidalFunction,
+    MixedBoundedValuesFunctions,
     FiniteRandomValues,
     RandomValuesWithNansAndInfinities,
     LinearFunctionsWithNansAndInfinities,
@@ -91,6 +98,34 @@ pub fn testErrorBoundedCompressionMethod(
                 error_bound,
                 "Linear Functions",
             ),
+            .QuadradicFunctions => try testGeneratedCompression(
+                allocator,
+                generateRandomQuadraticFunctions,
+                method,
+                error_bound,
+                "Quadratic Functions",
+            ),
+            .PowerFunctions => try testGeneratedCompression(
+                allocator,
+                generateRandomPowerFunctions,
+                method,
+                error_bound,
+                "Power Functions",
+            ),
+            .ExponentialFunctions => try testGeneratedCompression(
+                allocator,
+                generateRandomExponentialFunctions,
+                method,
+                error_bound,
+                "Exponential Functions",
+            ),
+            .SqrtFunctions => try testGeneratedCompression(
+                allocator,
+                generateRandomSqrtFunctions,
+                method,
+                error_bound,
+                "Square Root Functions",
+            ),
             .BoundedRandomValues => try testGeneratedCompression(
                 allocator,
                 generateDefaultBoundedValues,
@@ -100,10 +135,17 @@ pub fn testErrorBoundedCompressionMethod(
             ),
             .SinusoidalFunction => try testGeneratedCompression(
                 allocator,
-                generateRandomSinusoidalFunction,
+                generateRandomSinusoidalFunctions,
                 method,
                 error_bound,
                 "Sinusoidal Function",
+            ),
+            .MixedBoundedValuesFunctions => try testGeneratedCompression(
+                allocator,
+                generateMixedBoundedValuesFunctions,
+                method,
+                error_bound,
+                "Mixed Bounded Values Functions",
             ),
             .FiniteRandomValues => try testGeneratedCompression(
                 allocator,
@@ -196,19 +238,21 @@ pub fn testGeneratedCompression(
         // Cast the difference between raw and decompressed values to f32 before comparing
         // to the `f32` error bound, to ignore insignificant differences below f32 precision.
         // This prevents false test failures due to `f64` rounding noise.
-        if (@as(f32, @floatCast(@abs(raw_value - decompressed_value))) > ranged_error_bound) {
+        const decompression_error: f32 = @floatCast(@abs(raw_value - decompressed_value));
+        if (decompression_error > ranged_error_bound) {
             try testing.expectFmt(
                 "",
-                "Seed: {}, index {}, raw value {}, compressed value {}, error bound {},\n error bound exceeded by {}, with data distribution: {s} \n previous raw value {}, next raw value {}\n",
+                "Seed: {}, index {}, raw value {}, compressed value {}, error bound {},\n error bound exceeded by {}({}%), with data distribution: {s} \n previous raw value {}, next raw value {}\n",
                 .{
                     default_seed,
                     i,
                     raw_value,
                     decompressed_value,
                     ranged_error_bound,
-                    @abs(raw_value - decompressed_value) - ranged_error_bound,
+                    decompression_error - ranged_error_bound,
+                    (decompression_error - ranged_error_bound) / ranged_error_bound * 100.0,
                     data_distribution_name,
-                    if (i - 1 >= 0) uncompressed_values.items[i - 1] else 0.0,
+                    if (i > 0) uncompressed_values.items[i - 1] else 0.0,
                     if (i + 1 < uncompressed_values.items.len) uncompressed_values.items[i + 1] else 0.0,
                 },
             );
@@ -395,35 +439,16 @@ pub fn generateFiniteRandomValues(uncompressed_values: *ArrayList(f64), random: 
     }
 }
 
-/// Generate a random number of `f64` values following a sinusoidal function
-/// with random amplitude, frequency, and additive noise. The output values are
-/// guaranteed to be finite and lie within the range [-1e15, 1e15]. The values
-/// are generated using `random` and returned in `uncompressed_values`. If an
-/// error occurs, it is returned.
-pub fn generateRandomSinusoidalFunction(
+/// Generate a random number of sinusoidal functions with random with random amplitudes, frequencys,
+/// and additive noise using `random` and add them to `uncompressed_values`.
+pub fn generateRandomSinusoidalFunctions(
     uncompressed_values: *ArrayList(f64),
     random: Random,
 ) !void {
-    // Amplitude sampled in [1e-2, 1e14) allows very small to large oscillations.
-    const amplitude = math.pow(f64, 10.0, random.float(f64) * 16.0 - 2.0);
-    // Frequency sampled in [1e-4, 1e1) covers slowly to moderately fast variation.
-    const frequency = math.pow(f64, 10.0, random.float(f64) * 5.0 - 4.0);
-    // Phase sampled in [0, 2\pi) ensures random starting point in the cycle.
-    const phase = random.float(f64) * 2.0 * math.pi;
-    // Noise scale in [-5, 5) avoids pushing values beyond desired bounds.
-    const noise_scale = random.float(f64) * 10 - 5;
-
-    const n = generateNumberOfValues(random);
-    try uncompressed_values.ensureUnusedCapacity(n);
-
-    var i: usize = 0;
-    while (i < n) : (i += 1) {
-        const x = @as(f64, @floatFromInt(i));
-        var value = amplitude * @sin(frequency * x + phase) + noise_scale;
-
-        // Clamp to [-1e15, 1e15] to avoid overflows and invalid values.
-        value = math.clamp(value, -max_test_value, max_test_value);
-        uncompressed_values.appendAssumeCapacity(value);
+    // Generate a random number of lines using `global_at_least` and `global_at_most`.
+    const num_functions = random.intRangeAtMost(u32, global_at_least, global_at_most);
+    for (0..num_functions) |_| {
+        try generateRandomSinusoidalFunction(uncompressed_values, random);
     }
 }
 
@@ -434,6 +459,46 @@ pub fn generateRandomLinearFunctions(uncompressed_values: *ArrayList(f64), rando
     const num_lines = random.intRangeAtMost(u32, global_at_least, global_at_most);
     for (0..num_lines) |_| {
         try generateRandomLinearFunction(uncompressed_values, random);
+    }
+}
+
+/// Generate a random number of quadratic functions with random coefficients using `random` and
+/// add them to `uncompressed_values`.
+pub fn generateRandomQuadraticFunctions(uncompressed_values: *ArrayList(f64), random: Random) !void {
+    // Generate a random number of functions using `global_at_least` and `global_at_most`.
+    const num_functions = random.intRangeAtMost(u32, global_at_least, global_at_most);
+    for (0..num_functions) |_| {
+        try generateRandomQuadraticFunction(uncompressed_values, random);
+    }
+}
+
+/// Generate a random number of power functions with random coefficients using `random` and
+/// add them to `uncompressed_values`.
+pub fn generateRandomPowerFunctions(uncompressed_values: *ArrayList(f64), random: Random) !void {
+    // Generate a random number of functions using `global_at_least` and `global_at_most`.
+    const num_functions = random.intRangeAtMost(u32, global_at_least, global_at_most);
+    for (0..num_functions) |_| {
+        try generateRandomPowerFunction(uncompressed_values, random);
+    }
+}
+
+/// Generate a random number of exponential functions with random coefficients using `random` and
+/// add them to `uncompressed_values`.
+pub fn generateRandomExponentialFunctions(uncompressed_values: *ArrayList(f64), random: Random) !void {
+    // Generate a random number of functions using `global_at_least` and `global_at_most`.
+    const num_functions = random.intRangeAtMost(u32, global_at_least, global_at_most);
+    for (0..num_functions) |_| {
+        try generateRandomExponentialFunction(uncompressed_values, random);
+    }
+}
+
+/// Generate a random number of square root functions with random coefficients using `random` and
+/// add them to `uncompressed_values`.
+pub fn generateRandomSqrtFunctions(uncompressed_values: *ArrayList(f64), random: Random) !void {
+    // Generate a random number of functions using `global_at_least` and `global_at_most`.
+    const num_functions = random.intRangeAtMost(u32, global_at_least, global_at_most);
+    for (0..num_functions) |_| {
+        try generateRandomSqrtFunction(uncompressed_values, random);
     }
 }
 
@@ -524,18 +589,17 @@ pub fn generateBoundedRandomValues(
 /// and intercept, and add them to `uncompressed_values`. Small random noise is added to
 /// each value. The generated values are bounded within [-1e15, 1e15]. If `random_opt` is
 /// not passed, a random number generator is created.
-pub fn generateRandomLinearFunction(uncompressed_values: *ArrayList(f64), random_opt: ?Random) !void {
-    // If `random_opt` is not passed, a random number generator is created using the current time as seed.
-    var random = resolveRandom(random_opt);
-
-    // Choose log-uniform magnitude in [1e-2, 1e12].
-    const log_magnitude = random.float(f64) * 14.0 - 2.0;
-    const magnitude = math.pow(f64, 10.0, log_magnitude);
-    const sign: f64 = if (random.boolean()) 1.0 else -1.0;
+pub fn generateRandomLinearFunction(uncompressed_values: *ArrayList(f64), random: Random) !void {
+    // Choose log-uniform magnitude in [1e-2, 1e10].
+    var log_magnitude = random.float(f64) * 10.0 - 2.0;
+    var magnitude = math.pow(f64, 10.0, log_magnitude);
+    var sign: f64 = if (random.boolean()) 1.0 else -1.0;
     const slope = sign * magnitude;
 
-    // Uniformly in [-1e10, 1e10]. This range is wide enough while avoiding f64 overflow.
-    const intercept = 2.0e10 * random.float(f64) - 1e10;
+    log_magnitude = random.float(f64) * 10.0 - 2.0;
+    magnitude = math.pow(f64, 10.0, log_magnitude);
+    sign = if (random.boolean()) 1.0 else -1.0;
+    const intercept = sign * magnitude;
 
     for (0..generateNumberOfValues(random)) |x| {
         // Small random noise in the range [-0.5, 0.5).
@@ -543,6 +607,183 @@ pub fn generateRandomLinearFunction(uncompressed_values: *ArrayList(f64), random
         const linear_function_value = slope * @as(f64, @floatFromInt(x)) + intercept + rand_value;
         const clamped_value = math.clamp(linear_function_value, -1.0e15, 1.0e15);
         try uncompressed_values.append(clamped_value);
+    }
+}
+
+/// Generate a random number of `f64` values following a power function with random coefficients
+/// theta_1 * x ^ theta_2, and add them to `uncompressed_values`. Small random noise is added to
+/// each value. The generated values are bounded within [-1e15, 1e15]. If `random_opt` is
+/// not passed, a random number generator is created.
+pub fn generateRandomPowerFunction(uncompressed_values: *ArrayList(f64), random: Random) !void {
+
+    // theta_1 in [1e-2, 1e6] (log-uniform).
+    const log_theta_1 = random.float(f64) * 7.0;
+    const sign: f64 = if (random.boolean()) 1.0 else -1.0;
+    const theta_1 = math.pow(f64, 10.0, log_theta_1) * sign;
+
+    // theta_2 in [0.1, 4.0] (uniform). Too high exponents lead to overflow.
+    const theta_2 = 0.1 + 3.9 * random.float(f64);
+
+    for (0..generateNumberOfValues(random)) |x| {
+        // Avoid x=0 for negative/low exponents, so use x+1
+        const xf = @as(f64, @floatFromInt(x)) + 1.0;
+        // Small random noise in the range [-0.5, 0.5)
+        const rand_value = random.float(f64) - 0.5;
+        const power_function_value = theta_1 * math.pow(f64, xf, theta_2) + rand_value;
+        const clamped_value = math.clamp(power_function_value, -1.0e15, 1.0e15);
+        try uncompressed_values.append(clamped_value);
+    }
+}
+
+/// Generate a random number of `f64` values following a sinusoidal function with random amplitude,
+/// frequency, and additive noise. The output values are guaranteed to be finite and lie within the
+/// range [-1e15, 1e15]. The values are generated using `random_opt` and returned in
+/// `uncompressed_values`. If an error occurs, it is returned.
+pub fn generateRandomSinusoidalFunction(
+    uncompressed_values: *ArrayList(f64),
+    random: Random,
+) !void {
+    // Amplitude sampled in [1e-2, 1e14) allows very small to large oscillations.
+    const amplitude = math.pow(f64, 10.0, random.float(f64) * 16.0 - 2.0);
+    // Frequency sampled in [1e-4, 1e1) covers slowly to moderately fast variation.
+    const frequency = math.pow(f64, 10.0, random.float(f64) * 5.0 - 4.0);
+    // Phase sampled in [0, 2\pi) ensures random starting point in the cycle.
+    const phase = random.float(f64) * 2.0 * math.pi;
+    // Noise scale in [-5, 5) avoids pushing values beyond desired bounds.
+    const noise_scale = random.float(f64) * 10 - 5;
+
+    const n = generateNumberOfValues(random);
+    try uncompressed_values.ensureUnusedCapacity(n);
+
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const x = @as(f64, @floatFromInt(i));
+        var value = amplitude * @sin(frequency * x + phase) + noise_scale;
+
+        // Clamp to [-1e15, 1e15] to avoid overflows and invalid values.
+        value = math.clamp(value, -max_test_value, max_test_value);
+        uncompressed_values.appendAssumeCapacity(value);
+    }
+}
+
+/// Generate a random number of `f64` values following a quadratic function with random coefficients
+/// theta_1 * x ^ 2 + theta_2, and add them to `uncompressed_values`. Small random noise is added to
+/// each value. The generated values are bounded within [-1e15, 1e15]. If `random_opt` is
+/// not passed, a random number generator is created.
+pub fn generateRandomQuadraticFunction(uncompressed_values: *ArrayList(f64), random: Random) !void {
+    // theta_1 in [-1e6, 1e6] (log-uniform).
+    const log_theta_1 = random.float(f64) * 7.0;
+    var sign: f64 = if (random.boolean()) 1.0 else -1.0;
+    const theta_1 = math.pow(f64, 10.0, log_theta_1) * sign;
+
+    // theta_2 in [-1e10, 1e10] (log-uniform).
+    const log_theta_2 = random.float(f64) * 10.0;
+    sign = if (random.boolean()) 1.0 else -1.0;
+    const theta_2 = math.pow(f64, 10.0, log_theta_2) * sign;
+
+    for (0..generateNumberOfValues(random)) |x| {
+        const xf = @as(f64, @floatFromInt(x));
+        // Small random noise in the range [-0.5, 0.5)
+        const rand_value = random.float(f64) - 0.5;
+        const power_function_value = theta_1 * xf * xf + theta_2 + rand_value;
+        const clamped_value = math.clamp(power_function_value, -1.0e15, 1.0e15);
+        try uncompressed_values.append(clamped_value);
+    }
+}
+
+/// Generate a random number of `f64` values following a square root function with random coefficients
+/// theta_1 * \sqrt(x) + theta_2, and add them to `uncompressed_values`. Small random noise is added to
+/// each value. The generated values are bounded within [-1e15, 1e15]. If `random_opt` is
+/// not passed, a random number generator is created.
+pub fn generateRandomSqrtFunction(uncompressed_values: *ArrayList(f64), random: Random) !void {
+    // theta_1 in [-1e10, 1e10] (log-uniform).
+    const log_theta_1 = random.float(f64) * 10.0;
+    var sign: f64 = if (random.boolean()) 1.0 else -1.0;
+    const theta_1 = math.pow(f64, 10.0, log_theta_1) * sign;
+
+    // theta_2 in [-1e10, 1e10] (log-uniform).
+    const log_theta_2 = random.float(f64) * 10.0;
+    sign = if (random.boolean()) 1.0 else -1.0;
+    const theta_2 = math.pow(f64, 10.0, log_theta_2) * sign;
+
+    for (0..generateNumberOfValues(random)) |x| {
+        const xf = @as(f64, @floatFromInt(x));
+        // Small random noise in the range [-0.5, 0.5)
+        const rand_value = random.float(f64) - 0.5;
+        const power_function_value = theta_1 * @sqrt(xf) + theta_2 + rand_value;
+        const clamped_value = math.clamp(power_function_value, -1.0e15, 1.0e15);
+        try uncompressed_values.append(clamped_value);
+    }
+}
+
+/// Generate a random number of `f64` values following a exponential function with random coefficients
+/// theta_1 * e ^ (x * theta_2), and add them to `uncompressed_values`. Small random noise is added to
+/// each value. The generated values are bounded within [-1e15, 1e15]. If `random_opt` is
+/// not passed, a random number generator is created.
+pub fn generateRandomExponentialFunction(uncompressed_values: *ArrayList(f64), random: Random) !void {
+
+    // This function is prone to overflow, thus using smaller ranges for the coefficients.
+    // theta_1 in [-1e5, 1e5] (log-uniform).
+    const log_theta_1 = random.float(f64) * 5.0;
+    var sign: f64 = if (random.boolean()) 1.0 else -1.0;
+    const theta_1 = math.pow(f64, 10.0, log_theta_1) * sign;
+
+    // theta_2 in [0.001, 0.01] (log-uniform).
+    const log_theta_2 = random.float(f64) - 3.0;
+    sign = if (random.boolean()) 1.0 else -1.0;
+    const theta_2 = math.pow(f64, 10.0, log_theta_2) * sign;
+
+    for (0..generateNumberOfValues(random)) |x| {
+        const xf = @as(f64, @floatFromInt(x));
+        // Small random noise in the range [-0.5, 0.5)
+        const rand_value = random.float(f64) - 0.5;
+        const power_function_value = theta_1 * @sqrt(xf) + theta_2 + rand_value;
+        const clamped_value = math.clamp(power_function_value, -1.0e15, 1.0e15);
+        try uncompressed_values.append(clamped_value);
+    }
+}
+
+/// Generate a series with a mix of different data distributions using `random` and add them to
+/// `uncompressed_values`. The function generates linear, quadratic, power, exponential, sinusoidal,
+/// and square root functions. The final time series is a concatenation of these different
+/// distributions to create a diverse set of values for testing purposes, with the order randomized.
+pub fn generateMixedBoundedValuesFunctions(
+    uncompressed_values: *ArrayList(f64),
+    random: Random,
+) Error!void {
+    // Type alias for a pointer to a generator function that takes an ArrayList of f64 and a Random,
+    // and returns an Error or void.
+    const Generator = *const fn (*ArrayList(f64), Random) Error!void;
+
+    // Array of generator function pointers, each generating a different type of mathematical function.
+    const generators: [6]Generator = .{
+        generateRandomLinearFunction,
+        generateRandomQuadraticFunction,
+        generateRandomPowerFunction,
+        generateRandomExponentialFunction,
+        generateRandomSqrtFunction,
+        generateRandomSinusoidalFunction,
+    };
+
+    // Array of indices corresponding to the generator functions, used for shuffling.
+    var indices: [generators.len]usize = undefined;
+
+    // Initialize the indices array with sequential values.
+    for (indices, 0..) |_, i| indices[i] = i;
+
+    // Shuffle the indices array using the Fisher-Yates algorithm and a random number generator.
+    var i = indices.len;
+    while (i > 1) : (i -= 1) {
+        const j = random.intRangeAtMost(usize, 0, i - 1);
+        const tmp = indices[i - 1];
+        indices[i - 1] = indices[j];
+        indices[j] = tmp;
+    }
+
+    // Iterate over the shuffled indices and invoke the corresponding generator function,
+    // passing in the uncompressed_values and random number generator.
+    for (indices) |idx| {
+        try generators[idx](uncompressed_values, random);
     }
 }
 

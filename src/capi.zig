@@ -103,11 +103,12 @@ fn errorToInt(err: Error) i32 {
         Error.UnknownMethod => return 1,
         Error.UnsupportedInput => return 2,
         Error.UnsupportedErrorBound => return 3,
-        Error.OutOfMemory => return 4,
-        Error.ItemNotFound => return 5,
-        Error.EmptyConvexHull => return 6,
-        Error.EmptyQueue => return 7,
-        Error.ByteStreamError => return 8,
+        Error.CorruptedCompressedData => return 4,
+        Error.OutOfMemory => return 5,
+        Error.ItemNotFound => return 6,
+        Error.EmptyConvexHull => return 7,
+        Error.EmptyQueue => return 8,
+        Error.ByteStreamError => return 9,
     }
 }
 
