@@ -97,26 +97,6 @@ pub fn testRMSEisWithinErrorBound(
     try testing.expect(rmse <= error_bound);
 }
 
-/// Auxiliary function to validate of the decompressed time series is within the error bound of the
-/// uncompressed time series. The function returns true if all elements are within the error bound,
-/// false otherwise.
-pub fn isWithinErrorBound(
-    uncompressed_values: []const f64,
-    decompressed_values: []const f64,
-    error_bound: f32,
-) bool {
-    if (uncompressed_values.len != decompressed_values.len) {
-        return false;
-    }
-
-    for (0..uncompressed_values.len) |index| {
-        const uncompressed_value = uncompressed_values[index];
-        const decompressed_value = decompressed_values[index];
-        if (@abs(uncompressed_value - decompressed_value) > error_bound) return false;
-    }
-    return true;
-}
-
 /// Computes the maximum absolute (Chebyshev, L-inf) error between the actual values and the
 /// linear interpolation over a segment of the input array. This function fits a straight
 /// line between the values at `seg_start` and `seg_end` in `uncompressed_values`, then
