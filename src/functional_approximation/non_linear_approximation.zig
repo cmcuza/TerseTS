@@ -18,8 +18,15 @@
 //! https://doi.org/10.48550/arXiv.2412.16266.
 //! The implementation is partially based on the authors implementation at
 //! https://github.com/and-gue/NeaTS (accessed on 15-08-25).
-//! Contrary to the original implementation, this version only implements the lossy compression
-//! phase and accepts a single error bound.
+//! NeaTS compresses time series in two stages:
+//!   1. A lossy functional approximation under a pointwise error bound.
+//!   2. A lossless residual encoding that enables exact decompression.
+//! In this file, we implement only the lossy compression phase, which partitions the series
+//! into segments and fits them using nonlinear functions under a bounded error constraint.
+//! The lossless residual compression phase is left as future work. Moreover, this version
+//! supports only a single error bound per run, unlike the original, which supports multiple.
+//! The decision is aligned with the design of the TerseTS framework, where only a single error
+//! tolerance is currently supported.
 
 const std = @import("std");
 const mem = std.mem;
