@@ -1,5 +1,24 @@
 #include <stdint.h>
 
+// Mirror the compression methods provided by TerseTS.
+enum Method {
+  PoorMansCompressionMidrange = 0,
+  PoorMansCompressionMean = 1,
+  SwingFilter = 2,
+  SwingFilterDisconnected = 3,
+  SlideFilter = 4,
+  SimPiece = 5,
+  PiecewiseConstantHistogram = 6,
+  PiecewiseLinearHistogram = 7,
+  ABCLinearApproximation = 8,
+  VisvalingamWhyatt = 9,
+  SlidingWindow = 10,
+  BottomUp = 11,
+  MixPiece = 12,
+  BitPackedQuantization = 13,
+  RunLengthEncoding = 14,
+};
+
 // A pointer to uncompressed values and the number of values.
 struct UncompressedValues {
   double const * const data;

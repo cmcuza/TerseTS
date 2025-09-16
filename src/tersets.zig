@@ -27,6 +27,8 @@ const abc_linear_approximation = @import("functional_approximation/abc_linear_ap
 const vw = @import("line_simplification/visvalingam_whyatt.zig");
 const sliding_window = @import("line_simplification/sliding_window.zig");
 const bottom_up = @import("line_simplification/bottom_up.zig");
+const rle_enconding = @import("lossless_encoding/run_length_encoding.zig");
+const bitpacked_quantization = @import("quantization/bitpacked_quantization.zig");
 
 /// The errors that can occur in TerseTS.
 pub const Error = error{
@@ -37,6 +39,7 @@ pub const Error = error{
     OutOfMemory,
     EmptyConvexHull,
     EmptyQueue,
+    ByteStreamError,
 };
 
 /// The compression methods in TerseTS.
@@ -54,6 +57,8 @@ pub const Method = enum {
     SlidingWindow,
     BottomUp,
     MixPiece,
+    BitPackedQuantization,
+    RunLengthEncoding,
 };
 
 /// Compress `uncompressed_values` within `error_bound` using `method` and returns the results
@@ -61,8 +66,8 @@ pub const Method = enum {
 /// compression functions for memory management. If the compression is sucessful, the `method`
 /// is encoded in the compressed values last byte. If an error occurs it is returned.
 pub fn compress(
-    uncompressed_values: []const f64,
     allocator: Allocator,
+    uncompressed_values: []const f64,
     method: Method,
     error_bound: f32,
 ) Error!ArrayList(u8) {
@@ -102,57 +107,57 @@ pub fn compress(
         },
         .SlideFilter => {
             try swing_slide_filter.compressSlideFilter(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                allocator,
                 error_bound,
             );
         },
         .SimPiece => {
             try sim_piece.compress(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                allocator,
                 error_bound,
             );
         },
         .MixPiece => {
             try mix_piece.compress(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                allocator,
                 error_bound,
             );
         },
         .PiecewiseConstantHistogram => {
             try piecewise_histogram.compressPWCH(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                allocator,
                 error_bound,
             );
         },
         .PiecewiseLinearHistogram => {
             try piecewise_histogram.compressPWLH(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                allocator,
                 error_bound,
             );
         },
         .ABCLinearApproximation => {
             try abc_linear_approximation.compress(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                allocator,
                 error_bound,
             );
         },
         .VisvalingamWhyatt => {
             try vw.compress(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                allocator,
                 error_bound,
             );
         },
@@ -165,9 +170,20 @@ pub fn compress(
         },
         .BottomUp => {
             try bottom_up.compress(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
+                error_bound,
+            );
+        },
+        .RunLengthEncoding => {
+            try rle_enconding.compress(uncompressed_values, &compressed_values);
+        },
+        .BitPackedQuantization => {
+            try bitpacked_quantization.compress(
                 allocator,
+                uncompressed_values,
+                &compressed_values,
                 error_bound,
             );
         },
@@ -180,8 +196,8 @@ pub fn compress(
 /// The compression `method` to use is encoded in the last byte of the `compressed_values`. If
 /// an error occurs it is returned.
 pub fn decompress(
-    compressed_values: []const u8,
     allocator: Allocator,
+    compressed_values: []const u8,
 ) Error!ArrayList(f64) {
     if (compressed_values.len == 0) return Error.UnsupportedInput;
 
@@ -204,10 +220,10 @@ pub fn decompress(
             try swing_slide_filter.decompressSlideFilter(compressed_values_slice, &decompressed_values);
         },
         .SimPiece => {
-            try sim_piece.decompress(compressed_values_slice, &decompressed_values, allocator);
+            try sim_piece.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .MixPiece => {
-            try mix_piece.decompress(compressed_values_slice, &decompressed_values, allocator);
+            try mix_piece.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .PiecewiseConstantHistogram => {
             try piecewise_histogram.decompressPWCH(compressed_values_slice, &decompressed_values);
@@ -222,34 +238,20 @@ pub fn decompress(
             try vw.decompress(compressed_values_slice, &decompressed_values);
         },
         .SlidingWindow => {
-            try sliding_window.decompress(compressed_values, &decompressed_values);
+            try sliding_window.decompress(compressed_values_slice, &decompressed_values);
         },
         .BottomUp => {
             try bottom_up.decompress(compressed_values_slice, &decompressed_values);
         },
+        .RunLengthEncoding => {
+            try rle_enconding.decompress(compressed_values_slice, &decompressed_values);
+        },
+        .BitPackedQuantization => {
+            try bitpacked_quantization.decompress(compressed_values_slice, &decompressed_values);
+        },
     }
 
     return decompressed_values;
-}
-
-/// Auxiliary function to validate of the decompressed time series is within the error bound of the
-/// uncompressed time series. The function returns true if all elements are within the error bound,
-/// false otherwise.
-pub fn isWithinErrorBound(
-    uncompressed_values: []const f64,
-    decompressed_values: []const f64,
-    error_bound: f32,
-) bool {
-    if (uncompressed_values.len != decompressed_values.len) {
-        return false;
-    }
-
-    for (0..uncompressed_values.len) |index| {
-        const uncompressed_value = uncompressed_values[index];
-        const decompressed_value = decompressed_values[index];
-        if (@abs(uncompressed_value - decompressed_value) > error_bound) return false;
-    }
-    return true;
 }
 
 /// Get the maximum index of the available methods in TerseTS.
