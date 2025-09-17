@@ -120,12 +120,12 @@ def compress(values, method, error_bound: float) -> bytes:
         available = ", ".join(m.name for m in Method)
         raise TypeError(f"'{method}' is not a valid TerseTS Method. Available: {available}")
 
-    if _HAS_NUMPY and isinstance(values, _np.ndarray):
+    if _HAS_NUMPY and isinstance(values, np.ndarray):
         return _compress_numpy(values, method, error_bound)
 
     # Duck-typing for array-likes
     if _HAS_NUMPY and hasattr(values, "__array_interface__"):
-        return _compress_numpy(_np.ascontiguousarray(values, dtype=_np.float64), method, error_bound)
+        return _compress_numpy(np.ascontiguousarray(values, dtype=np.float64), method, error_bound)
 
     if isinstance(values, (list, tuple)):
         return _compress_list(list(values), method, error_bound)
