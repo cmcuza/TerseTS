@@ -72,14 +72,13 @@ __library = __load_library()
 class __UncompressedValues(Structure):
     _fields_ = [("data", POINTER(c_double)), ("len", c_size_t)]
 
-
 class __CompressedValues(Structure):
     _fields_ = [("data", POINTER(c_ubyte)), ("len", c_size_t)]
-
 
 class __Configuration(Structure):
     _fields_ = [("method", c_ubyte), ("error_bound", c_float)]
 
+# Declare function signatures (safer; avoids silent arg mismatch).
 __library.compress.argtypes = [__UncompressedValues, POINTER(__CompressedValues), __Configuration]
 __library.compress.restype  = c_int
 __library.decompress.argtypes = [__CompressedValues, POINTER(__UncompressedValues)]
@@ -110,8 +109,8 @@ def compress(values, method, error_bound: float) -> bytes:
     Compress a sequence of floats.
 
     Accepts:
-      - numpy.ndarray[float64] (uses zero-copy fast path when NumPy is available)
-      - list/tuple[float]      (fast ctypes path)
+      - numpy.ndarray[float64]  -> zero-copy input when NumPy is installed (~2x faster)
+      - list/tuple[float]       -> fast ctypes path
     Returns:
       - bytes (payload + trailing method byte)
     """
@@ -119,82 +118,68 @@ def compress(values, method, error_bound: float) -> bytes:
         available = ", ".join(m.name for m in Method)
         raise TypeError(f"'{method}' is not a valid TerseTS Method. Available: {available}")
 
+    # Prepare an __UncompressedValues view + keep a Python ref alive during the call.
+    uncompressed_values = __UncompressedValues()
+
     if _INSTALLED_NUMPY and isinstance(values, np.ndarray):
-        return _compress_numpy(values, method, error_bound)
+        # Ensure dtype and contiguity so we can pass the data pointer directly (zero-copy).
+        if values.dtype != np.float64 or not values.flags["C_CONTIGUOUS"]:
+            values = np.ascontiguousarray(values, dtype=np.float64)
+        uncompressed_values.data = values.ctypes.data_as(POINTER(c_double))
+        uncompressed_values.len  = values.size
+    elif isinstance(values, (list, tuple)):
+        # Build a contiguous C array of f64 from the Python sequence.
+        buf = (c_double * len(values))(*values)
+        uncompressed_values.data = buf
+        uncompressed_values.len  = len(values)
+    else:
+        raise TypeError("compress(values, ...): values must be a numpy.ndarray[float64] or a list/tuple of floats.")
 
-    if isinstance(values, list):
-        return _compress_list(values, method, error_bound)
-        
+    compressed_values = __CompressedValues()
+    configuration = __Configuration(method.value, error_bound)
+    tersets_error = __library.compress(uncompressed_values, byref(compressed_values), configuration)
+    if tersets_error != 0:
+        raise RuntimeError(f"compress failed: {tersets_error}")
 
-    raise TypeError(
-        "compress(values, ...): 'values' must be a numpy.ndarray[float64] "
-        "or a list of floats."
-    )
+    # Copy the compressed bytes into Python-owned memory (safe to return).
+    return string_at(compressed_values.data, compressed_values.len)
 
 
 def decompress(values: bytes) -> List[float]:
     """
-    Decompress a TerseTS's compressed representation to Python list[float].
+    Decompress a TerseTS compressed buffer to Python list[float].
 
     Accepts:
-      - bytes 
+      - bytes / bytearray / memoryview  (pass bytes for best performance)
     Returns:
       - list[float]
     """
+    # Normalize input to a bytes-like view, then prepare an __CompressedValues.
+    if not isinstance(values, (bytes, bytearray, memoryview)):
+        raise TypeError("decompress(values): values must be bytes, bytearray, or memoryview")
+
     compressed_values = __CompressedValues()
-    
-    components = (c_ubyte * len(values)).from_buffer_copy(values)
-    
-    compressed_values.data = cast(components, POINTER(c_ubyte))
-    compressed_values.len  = len(values)
-    
+
+    if _INSTALLED_NUMPY:
+        # Zero-copy view of the compressed input; avoids building a c_ubyte[] buffer.
+        view = np.frombuffer(values, dtype=np.uint8)
+        compressed_values.data = view.ctypes.data_as(POINTER(c_ubyte))
+        compressed_values.len  = view.size
+    else:
+        # No NumPy: make a temporary c_ubyte[] copy to pass into the capi.zig.
+        buf = (c_ubyte * len(values)).from_buffer_copy(values)
+        compressed_values.data = cast(buf, POINTER(c_ubyte))
+        compressed_values.len  = len(values)
+
     uncompressed_values = __UncompressedValues()
     tersets_error = __library.decompress(compressed_values, byref(uncompressed_values))
-    
     if tersets_error != 0:
         raise RuntimeError(f"decompress failed: {tersets_error}")
-    
+
+    if _INSTALLED_NUMPY:
+        # Create a view over the returned f64s and immediately materialize a Python list.
+        # (tolist() detaches from the Zig buffer; no extra copy of the NumPy array needed).
+        return np.ctypeslib.as_array(uncompressed_values.data, shape=(uncompressed_values.len,)).tolist()
+
+    # ctypes-only: slice the pointer into a Python list of floats.
     return uncompressed_values.data[: uncompressed_values.len]
-
-
-# --- Private functions ---
-def _compress_numpy(values, method: Method, error_bound: float) -> bytes:
-    if values.dtype != np.float64 or not values.flags["C_CONTIGUOUS"]:
-        values = np.ascontiguousarray(values, dtype=np.float64)
-    
-    uncompressed_values = __UncompressedValues()
-    
-    uncompressed_values.data = values.ctypes.data_as(POINTER(c_double))
-    uncompressed_values.len  = values.size
-    
-    compressed_values = __CompressedValues()
-    
-    configuration = __Configuration(method.value, error_bound)
-    
-    tersets_error = __library.compress(uncompressed_values, byref(compressed_values), configuration)
-    
-    if tersets_error != 0:
-        raise RuntimeError(f"compress failed: {tersets_error}")
-    
-    return string_at(compressed_values.data, compressed_values.len)
-
-
-def _compress_list(values: List[float], method: Method, error_bound: float) -> bytes:
-    uncompressed_values = __UncompressedValues()
-    
-    uncompressed_values.data = (c_double * len(values))(*values)
-    uncompressed_values.len  = len(values)
-    
-    compressed_values = __CompressedValues()
-    
-    configuration = __Configuration(method.value, error_bound)
-    
-    tersets_error = __library.compress(uncompressed_values, byref(compressed_values), configuration)
-    
-    if tersets_error != 0:
-        raise RuntimeError(f"compress failed: {tersets_error}")
-    
-    return string_at(compressed_values.data, compressed_values.len)
-     
-
-
