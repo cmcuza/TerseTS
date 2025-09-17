@@ -24,10 +24,10 @@ from ctypes import cdll, Structure, c_ubyte, c_float, c_int, \
 
 try:
     import numpy as np
-    _HAS_NUMPY = True
+    _INSTALLED_NUMPY = True
 except Exception:
     np = None
-    _HAS_NUMPY = False
+    _INSTALLED_NUMPY = False
 
 # Private function to load the library.
 def __load_library():
@@ -104,7 +104,6 @@ class Method(Enum):
     BitPackedQuantization = 13
     RunLengthEncoding = 14
 
-
 # ---- Public API ----
 def compress(values, method, error_bound: float) -> bytes:
     """
@@ -120,46 +119,45 @@ def compress(values, method, error_bound: float) -> bytes:
         available = ", ".join(m.name for m in Method)
         raise TypeError(f"'{method}' is not a valid TerseTS Method. Available: {available}")
 
-    if _HAS_NUMPY and isinstance(values, np.ndarray):
+    if _INSTALLED_NUMPY and isinstance(values, np.ndarray):
         return _compress_numpy(values, method, error_bound)
 
-    # Duck-typing for array-likes
-    if _HAS_NUMPY and hasattr(values, "__array_interface__"):
-        return _compress_numpy(np.ascontiguousarray(values, dtype=np.float64), method, error_bound)
-
-    if isinstance(values, (list, tuple)):
-        return _compress_list(list(values), method, error_bound)
+    if isinstance(values, list):
+        return _compress_list(values, method, error_bound)
+        
 
     raise TypeError(
         "compress(values, ...): 'values' must be a numpy.ndarray[float64] "
-        "or a list/tuple of floats."
+        "or a list of floats."
     )
 
 
-def decompress(values) -> List[float]:
+def decompress(values: bytes) -> List[float]:
     """
-    Decompress a compressed stream to Python list[float].
+    Decompress a TerseTS's compressed representation to Python list[float].
 
     Accepts:
-      - bytes / bytearray / memoryview (recommended)
-      - list[int] (0..255 or signed) also accepted
+      - bytes 
     Returns:
       - list[float]
     """
-    if _HAS_NUMPY:
-        return _decompress_numpy(values)
-    return _decompress_ctypes(values)
+    compressed_values = __CompressedValues()
+    
+    components = (c_ubyte * len(values)).from_buffer_copy(values)
+    
+    compressed_values.data = cast(components, POINTER(c_ubyte))
+    compressed_values.len  = len(values)
+    
+    uncompressed_values = __UncompressedValues()
+    tersets_error = __library.decompress(compressed_values, byref(uncompressed_values))
+    
+    if tersets_error != 0:
+        raise RuntimeError(f"decompress failed: {tersets_error}")
+    
+    return uncompressed_values.data[: uncompressed_values.len]
 
 
 # --- Private functions ---
-def _ensure_bytes(values):
-    if isinstance(values, (bytes, bytearray, memoryview)):
-        return bytes(values)
-    if isinstance(values, list):
-        return bytes((b & 0xFF for b in values))
-    raise TypeError("compressed 'values' must be bytes-like or list[int]")
-
-
 def _compress_numpy(values, method: Method, error_bound: float) -> bytes:
     if values.dtype != np.float64 or not values.flags["C_CONTIGUOUS"]:
         values = np.ascontiguousarray(values, dtype=np.float64)
@@ -197,43 +195,6 @@ def _compress_list(values: List[float], method: Method, error_bound: float) -> b
         raise RuntimeError(f"compress failed: {tersets_error}")
     
     return string_at(compressed_values.data, compressed_values.len)
-
-
-def _decompress_numpy(values: bytes) -> List[float]:
-    view = np.frombuffer(_ensure_bytes(values), dtype=np.uint8)  # zero-copy view.
-    
-    compressed_values  = __CompressedValues()
-    
-    compressed_values.data = view.ctypes.data_as(POINTER(c_ubyte))
-    compressed_values.len  = view.size
-    
-    uncompressed_values = __UncompressedValues()
-    
-    tersets_error = __library.decompress(compressed_values, byref(uncompressed_values))
-    
-    if tersets_error != 0:
-        raise RuntimeError(f"decompress failed: {tersets_error}")
-    
-    return np.ctypeslib.as_array(uncompressed_values.data, shape=(uncompressed_values.len,)).tolist()
-
-
-def _decompress_ctypes(values: bytes) -> List[float]:
-    buf = _ensure_bytes(values)
-    
-    compressed_values = __CompressedValues()
-    # Need a writable buffer for ctypes without NumPy: make a copy.
-    
-    arr = (c_ubyte * len(buf)).from_buffer_copy(buf)
-    
-    compressed_values.data = cast(arr, POINTER(c_ubyte))
-    compressed_values.len  = len(buf)
-    
-    uncompressed_values = __UncompressedValues()
-    tersets_error = __library.decompress(compressed_values, byref(uncompressed_values))
-    
-    if tersets_error != 0:
-        raise RuntimeError(f"decompress failed: {tersets_error}")
-    
-    return uncompressed_values.data[: uncompressed_values.len]  
+     
 
 
