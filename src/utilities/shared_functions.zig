@@ -82,6 +82,20 @@ pub fn appendValueAndIndexToArrayList(
     try compressed_values.appendSlice(indexAsBytes[0..]);
 }
 
+/// Read a value of type `T` from `values` starting at `*offset`, advancing `*offset` by `@sizeOf(T)`.
+pub fn readValue(comptime T: type, values: []const u8, offset: *usize) Error!T {
+    const offset_delta = @sizeOf(T);
+    if (values.len - offset.* < offset_delta) return Error.UnsupportedInput;
+
+    // Read into a fixed-size byte array, then bit-cast.
+    var bytes: [@sizeOf(T)]u8 = undefined;
+    std.mem.copyForwards(u8, bytes[0..], values[offset.* .. offset.* + offset_delta]);
+
+    offset.* += offset_delta;
+    const value: T = @bitCast(bytes);
+    return value;
+}
+
 /// Test if the RMSE of the linear regression line that fits the points in the segment in `values`
 /// is within the `error_bound`.
 pub fn testRMSEisWithinErrorBound(

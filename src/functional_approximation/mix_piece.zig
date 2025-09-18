@@ -213,7 +213,6 @@ pub fn decompress(
     const part3_count = header[2]; // Number of ungrouped segments in Part 3.
 
     var offset: usize = 3 * @sizeOf(usize);
-    const size_f64 = @sizeOf(f64);
 
     // Part 1. Parse Same Intercept Groups.
     if (part1_count > 0) {
@@ -221,38 +220,22 @@ pub fn decompress(
         // Each group has: intercept, slopes_count,
         // then for each slope: slope, timestamps_count, timestamps.
         for (0..part1_count) |_| {
-            const intercept = mem.bytesAsSlice(
-                f64,
-                compressed_values[offset .. offset + size_f64],
-            )[0];
-            offset += size_f64;
+            const intercept = try shared_functions.readValue(f64, compressed_values, &offset);
 
-            const slopes_count = @as(usize, @bitCast(mem.bytesAsSlice(
-                f64,
-                compressed_values[offset .. offset + @sizeOf(f64)],
-            )[0]));
-            offset += size_f64;
+            const slopes_count = try shared_functions.readValue(usize, compressed_values, &offset);
 
             for (0..slopes_count) |_| {
-                const slope = mem.bytesAsSlice(
-                    f64,
-                    compressed_values[offset .. offset + size_f64],
-                )[0];
-                offset += size_f64;
+                const slope = try shared_functions.readValue(f64, compressed_values, &offset);
 
-                const timestamps_count = @as(usize, @bitCast(mem.bytesAsSlice(
-                    f64,
-                    compressed_values[offset .. offset + size_f64],
-                )[0]));
-                offset += size_f64;
+                const timestamps_count = try shared_functions.readValue(
+                    usize,
+                    compressed_values,
+                    &offset,
+                );
 
                 var timestamp: usize = 0;
                 for (0..timestamps_count) |_| {
-                    const delta = @as(usize, @bitCast(mem.bytesAsSlice(
-                        f64,
-                        compressed_values[offset .. offset + size_f64],
-                    )[0]));
-                    offset += size_f64;
+                    const delta = try shared_functions.readValue(usize, compressed_values, &offset);
 
                     timestamp += delta;
                     try all_segments.append(.{
@@ -271,31 +254,15 @@ pub fn decompress(
         // We need to parse part2_count slope groups.
         // Each group has: slope, pair_count, then for each pair: intercept, timestamp_delta.
         for (0..part2_count) |_| {
-            const slope = mem.bytesAsSlice(
-                f64,
-                compressed_values[offset .. offset + size_f64],
-            )[0];
-            offset += size_f64;
+            const slope = try shared_functions.readValue(f64, compressed_values, &offset);
 
-            const pair_count = @as(usize, @bitCast(mem.bytesAsSlice(
-                f64,
-                compressed_values[offset .. offset + size_f64],
-            )[0]));
-            offset += size_f64;
+            const pair_count = try shared_functions.readValue(usize, compressed_values, &offset);
 
             var timestamp: usize = 0;
             for (0..pair_count) |_| {
-                const intercept = mem.bytesAsSlice(
-                    f64,
-                    compressed_values[offset .. offset + size_f64],
-                )[0];
-                offset += size_f64;
+                const intercept = try shared_functions.readValue(f64, compressed_values, &offset);
 
-                const delta = @as(usize, @bitCast(mem.bytesAsSlice(
-                    f64,
-                    compressed_values[offset .. offset + size_f64],
-                )[0]));
-                offset += size_f64;
+                const delta = try shared_functions.readValue(usize, compressed_values, &offset);
 
                 timestamp += delta;
                 try all_segments.append(.{
@@ -313,23 +280,11 @@ pub fn decompress(
         // Each segment has: slope, intercept, timestamp_delta.
         var timestamp: usize = 0;
         for (0..part3_count) |_| {
-            const slope = mem.bytesAsSlice(
-                f64,
-                compressed_values[offset .. offset + size_f64],
-            )[0];
-            offset += size_f64;
+            const slope = try shared_functions.readValue(f64, compressed_values, &offset);
 
-            const intercept = mem.bytesAsSlice(
-                f64,
-                compressed_values[offset .. offset + size_f64],
-            )[0];
-            offset += size_f64;
+            const intercept = try shared_functions.readValue(f64, compressed_values, &offset);
 
-            const delta = @as(usize, @bitCast(mem.bytesAsSlice(
-                f64,
-                compressed_values[offset .. offset + size_f64],
-            )[0]));
-            offset += size_f64;
+            const delta = try shared_functions.readValue(usize, compressed_values, &offset);
 
             timestamp += delta;
             try all_segments.append(.{
@@ -348,10 +303,7 @@ pub fn decompress(
         }
     }.compare);
 
-    const final_timestamp = mem.bytesAsSlice(
-        usize,
-        compressed_values[offset .. offset + @sizeOf(usize)],
-    )[0];
+    const final_timestamp = try shared_functions.readValue(usize, compressed_values, &offset);
 
     // Decompress each segment separately.
     for (0..all_segments.items.len) |i| {
