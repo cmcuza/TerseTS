@@ -165,7 +165,8 @@ test "error for empty input when compressing" {
         configuration,
     );
 
-    try testing.expectEqual(2, return_code);
+    try testing.expectEqual(0, return_code);
+    try testing.expectEqual(0, compressed_values.len);
 }
 
 test "error for negative error bound when compressing" {
@@ -200,7 +201,7 @@ test "error for empty input when decompressing" {
 
     const return_code = decompress(compressed_values, &decompressed_values);
 
-    try testing.expectEqual(2, return_code);
+    try testing.expectEqual(4, return_code);
 }
 
 test "can compress and decompress" {
