@@ -311,12 +311,12 @@ fn calculateShiftAmount(uncompressed_data: []const f64, error_bound: f32) !f64 {
         min_val = @min(min_val, val);
     }
 
-    const eps = @as(f64, error_bound);
+    const error_bound_f64 = @as(f64, error_bound);
     // Determines if a shift is needed to keep all values positive within the error bound.
-    // The shift amount is calculated as (eps + 1.0 - min_val) to ensure positivity of the border
-    // line y = min_val - eps.
-    if (min_val - eps <= 0) {
-        return eps + 1.0 - min_val;
+    // The shift amount is calculated as (error_bound + 1.0 - min_val) to ensure positivity of the
+    // border line y = min_val - error_bound.
+    if (min_val - error_bound_f64 <= 0) {
+        return error_bound_f64 + 1.0 - min_val;
     }
 
     return 0.0;

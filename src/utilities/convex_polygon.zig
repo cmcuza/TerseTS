@@ -608,7 +608,7 @@ fn searchIntersection(
 /// updates the polygon by intersecting with these constraints. Returns `true` if the polygon
 /// remains non-empty after the update, `false` otherwise.
 fn addPoint(poly: *ConvexPolygon, x_axis: usize, y_axis: f64, eps: f64) !bool {
-    const slope = -@as(f64, @floatFromInt(x_axis)); // (-x_k)
+    const slope = -@as(f64, @floatFromInt(x_axis)); // (-x_k).
     const upper_intercept = y_axis + eps;
     const lower_intercept = y_axis - eps;
 
