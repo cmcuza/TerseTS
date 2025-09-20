@@ -83,7 +83,7 @@ pub fn appendValueAndIndexToArrayList(
 }
 
 /// Read a value of type `T` from `values` starting at `*offset`, advancing `*offset` by `@sizeOf(T)`.
-pub fn readValue(comptime T: type, values: []const u8, offset: *usize) Error!T {
+pub fn readOffsetValue(comptime T: type, values: []const u8, offset: *usize) Error!T {
     const offset_delta = @sizeOf(T);
     if (values.len - offset.* < offset_delta) return Error.UnsupportedInput;
 

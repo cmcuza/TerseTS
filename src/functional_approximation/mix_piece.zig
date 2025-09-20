@@ -220,14 +220,14 @@ pub fn decompress(
         // Each group has: intercept, slopes_count,
         // then for each slope: slope, timestamps_count, timestamps.
         for (0..part1_count) |_| {
-            const intercept = try shared_functions.readValue(f64, compressed_values, &offset);
+            const intercept = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
 
-            const slopes_count = try shared_functions.readValue(usize, compressed_values, &offset);
+            const slopes_count = try shared_functions.readOffsetValue(usize, compressed_values, &offset);
 
             for (0..slopes_count) |_| {
-                const slope = try shared_functions.readValue(f64, compressed_values, &offset);
+                const slope = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
 
-                const timestamps_count = try shared_functions.readValue(
+                const timestamps_count = try shared_functions.readOffsetValue(
                     usize,
                     compressed_values,
                     &offset,
@@ -235,7 +235,7 @@ pub fn decompress(
 
                 var timestamp: usize = 0;
                 for (0..timestamps_count) |_| {
-                    const delta = try shared_functions.readValue(usize, compressed_values, &offset);
+                    const delta = try shared_functions.readOffsetValue(usize, compressed_values, &offset);
 
                     timestamp += delta;
                     try all_segments.append(.{
@@ -254,15 +254,15 @@ pub fn decompress(
         // We need to parse part2_count slope groups.
         // Each group has: slope, pair_count, then for each pair: intercept, timestamp_delta.
         for (0..part2_count) |_| {
-            const slope = try shared_functions.readValue(f64, compressed_values, &offset);
+            const slope = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
 
-            const pair_count = try shared_functions.readValue(usize, compressed_values, &offset);
+            const pair_count = try shared_functions.readOffsetValue(usize, compressed_values, &offset);
 
             var timestamp: usize = 0;
             for (0..pair_count) |_| {
-                const intercept = try shared_functions.readValue(f64, compressed_values, &offset);
+                const intercept = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
 
-                const delta = try shared_functions.readValue(usize, compressed_values, &offset);
+                const delta = try shared_functions.readOffsetValue(usize, compressed_values, &offset);
 
                 timestamp += delta;
                 try all_segments.append(.{
@@ -280,11 +280,11 @@ pub fn decompress(
         // Each segment has: slope, intercept, timestamp_delta.
         var timestamp: usize = 0;
         for (0..part3_count) |_| {
-            const slope = try shared_functions.readValue(f64, compressed_values, &offset);
+            const slope = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
 
-            const intercept = try shared_functions.readValue(f64, compressed_values, &offset);
+            const intercept = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
 
-            const delta = try shared_functions.readValue(usize, compressed_values, &offset);
+            const delta = try shared_functions.readOffsetValue(usize, compressed_values, &offset);
 
             timestamp += delta;
             try all_segments.append(.{
@@ -303,7 +303,7 @@ pub fn decompress(
         }
     }.compare);
 
-    const final_timestamp = try shared_functions.readValue(usize, compressed_values, &offset);
+    const final_timestamp = try shared_functions.readOffsetValue(usize, compressed_values, &offset);
 
     // Decompress each segment separately.
     for (0..all_segments.items.len) |i| {
