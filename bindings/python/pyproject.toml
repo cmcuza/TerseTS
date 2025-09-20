@@ -39,5 +39,5 @@ classifiers = [
 ]
 
 [build-system]
-requires = ["setuptools", "ziglang==0.14.*"]
+requires = ["setuptools", "ziglang"]
 build-backend = "setuptools.build_meta"
