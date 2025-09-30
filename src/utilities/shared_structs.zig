@@ -28,6 +28,12 @@ pub const DiscretePoint = Point(usize);
 /// `Point` with continous `time` axis.
 pub const ContinousPoint = Point(f64);
 
+/// ParameterSpacePoint represents a point in a generic 2D parameter space.
+pub const ParameterSpacePoint = struct {
+    x_axis: f64,
+    y_axis: f64,
+};
+
 /// Absolute and relative tolerances for floating-point comparisons.
 pub const ABS_EPS: f64 = 1e-12;
 pub const REL_EPS: f64 = 1e-15;

@@ -26,39 +26,42 @@ const ArrayList = std.ArrayList;
 const testing = std.testing;
 const shared_structs = @import("../utilities/shared_structs.zig");
 const LinearFunction = shared_structs.LinearFunction;
-const ContinousPoint = shared_structs.ContinousPoint;
+const ParameterSpacePoint = shared_structs.ParameterSpacePoint;
 
 const shared_functions = @import("../utilities/shared_functions.zig");
 const tester = @import("../tester.zig");
 
+/// Represents a domain on the X axis with a `start` and `end` value.
+/// This means that the values of the x axis are in the interval [start, end].
+/// Useful for defining intervals in the parameter space.
 const XAxisDomain = struct { start: f64, end: f64 };
 
 /// Result of clipping a convex polygon with a new half-plane (lower or upper bound).
-/// If `NoClip`, the polygon is fully inside the half-plane; no changes are needed.
-/// If `Reject`, the polygon lies entirely outside the half-plane; intersection is empty.
+/// If `NoClip`, the polygon is fully inside the half-plane: no changes are needed.
+/// If `Reject`, the polygon lies entirely outside the half-plane: intersection is empty.
 /// If `Clip`, the polygon intersects the half-plane. In this case, the structure contains
 /// `upper_index_offset` and `lower_index_offset` indicating how far into the upper and lower
-/// chains the existing polygon must be trimmed; and `new_upper_segment` and `new_lower_segment`
-/// to replace the border segments created at the intersection with the clipping line.
+/// bounds the existing polygon must be trimmed; and `new_upper_line` and `new_lower_line`
+/// to replace the border lines created at the intersection with the clipping line.
 const ClipOutcome = union(enum) {
     NoClip,
     Reject,
     Clip: struct {
-        upper_index_offset: usize, // offset into upper bound chain.
-        lower_index_offset: usize, // offset into lower bound chain.
-        new_upper_segment: BorderLine, // replacement segment on upper bound.
-        new_lower_segment: BorderLine, // replacement segment on lower bound.
+        upper_index_offset: usize, // Offset into upper bound.
+        lower_index_offset: usize, // Offset into lower bound.
+        new_upper_line: BorderLine, // New border line on upper bound.
+        new_lower_line: BorderLine, // New border line on lower bound.
     },
 };
 
-/// `BorderLine` represents Line in the parameter-space of the slope and intercept of a LinearFunction.
-/// The structure contains the `definition` of the LinearFunction as well as the `x_axis_domain` in
-/// which the line is defined. This structure is used to contain the borders of the ConvexPolygon.
+/// `BorderLine` represents line in the parameter-space of the slope and intercept of a LinearFunction.
+/// The structure contains the `definition` of the `LinearFunction` as well as the `x_axis_domain` in
+/// which the line is defined. This structure is used to contain the borders of the `ConvexPolygon`.
 pub const BorderLine = struct {
     x_axis_domain: XAxisDomain, // Start and end of the x-axis domain of the border line.
     definition: LinearFunction, // Parameters defining the border line.
 
-    /// Creates a new BorderLine with `definition=(slope, intercept)` and `x_axis_domain=(start, end)`.
+    /// Creates a new `BorderLine` with `definition=(slope, intercept)` and `x_axis_domain=(start, end)`.
     pub fn init(slope: f64, intercept: f64, start: f64, end: f64) BorderLine {
         return BorderLine{
             .x_axis_domain = .{ .start = start, .end = end },
@@ -66,73 +69,75 @@ pub const BorderLine = struct {
         };
     }
 
-    /// Builds a BorderLine from two ContinousPoints in the slope-intercept parameter-space. If
-    /// `continous_point_one` and `continous_point_two` have the same time axis, the function
-    /// returns a degenerate horizontal segment over that interval.
+    /// Builds a `BorderLine` from two `ParameterSpacePoint` in the slope-intercept parameter-space.
+    /// If `point_one` and `point_two` have the same time axis, the function returns a degenerate
+    /// horizontal segment over that interval. In this parameter space, the `x_axis` corresponds
+    /// to the slope of the linear function, and the `y_axis` to the intercept.
     pub fn buildBorderLineFromPoints(
-        continous_point_one: ContinousPoint,
-        continous_point_two: ContinousPoint,
+        point_one: ParameterSpacePoint,
+        point_two: ParameterSpacePoint,
     ) BorderLine {
         if (shared_functions.isApproximatelyEqual(
-            continous_point_one.time,
-            continous_point_two.time,
+            point_one.x_axis,
+            point_two.x_axis,
         )) {
             // Vertical in (m,b): represent as zero-slope b line over [m, m].
             return .{
                 .x_axis_domain = .{
-                    .start = continous_point_one.time,
-                    .end = continous_point_two.time,
+                    .start = point_one.x_axis,
+                    .end = point_two.x_axis,
                 },
                 .definition = .{
                     .slope = 0,
-                    .intercept = continous_point_one.value,
+                    .intercept = point_one.y_axis,
                 },
             };
         }
-        const slope = (continous_point_two.value - continous_point_one.value) /
-            (continous_point_two.time - continous_point_one.time);
-        // In the slope-intercept space the equation of the function is inverted.
-        const intercept = continous_point_one.value - slope * continous_point_one.time;
+        const slope = (point_two.y_axis - point_one.y_axis) /
+            (point_two.x_axis - point_one.x_axis);
+
+        // Compute the intercept using point_one.
+        const intercept = point_one.y_axis - slope * point_one.x_axis;
 
         return .{ .definition = .{
             .slope = slope,
             .intercept = intercept,
         }, .x_axis_domain = .{
-            .start = continous_point_one.time,
-            .end = continous_point_two.time,
+            .start = point_one.x_axis,
+            .end = point_two.x_axis,
         } };
     }
 
-    /// Computes a ContinousPoint which contains the time value equal to the `start` of the BorderLine
-    /// and the value is equal to the evaluated start in the `definition` of the `self` BorderLine.
-    pub fn evaluateAtStart(self: *const BorderLine) ContinousPoint {
+    /// Computes a `ParameterSpacePoint` which contains the time value equal to the `start` of the `BorderLine`
+    /// and the value is equal to the evaluated start in the `definition` of the `self` `BorderLine`.
+    pub fn evaluateAtStart(self: *const BorderLine) ParameterSpacePoint {
         const start = self.x_axis_domain.start;
         return .{
-            .time = start,
-            .value = self.definition.slope * start + self.definition.intercept,
+            .x_axis = start,
+            .y_axis = self.definition.slope * start + self.definition.intercept,
         };
     }
 
-    /// Computes a ContinousPoint which contains the time value equal to the `end` of the BorderLine
-    /// and the value is equal to the evaluated `end` in the `definition` of the `self` BorderLine.
-    pub fn evaluateAtEnd(self: *const BorderLine) ContinousPoint {
+    /// Computes a `ParameterSpacePoint` which contains the time value equal to the `end` of the `BorderLine`
+    /// and the value is equal to the evaluated `end` in the `definition` of the `self` `BorderLine`.
+    pub fn evaluateAtEnd(self: *const BorderLine) ParameterSpacePoint {
         const end = self.x_axis_domain.end;
         return .{
-            .time = end,
-            .value = self.definition.slope * end + self.definition.intercept,
+            .x_axis = end,
+            .y_axis = self.definition.slope * end + self.definition.intercept,
         };
     }
 
-    /// Evaluates the `self` BorderLine at a given `x_axis_value` using the its `definition`.
-    /// The function returns the y_axis_value as a f64.
+    /// Evaluates the `self` `BorderLine` at a given `x_axis_value` using its `definition`.
+    /// The function returns the `y_axis_value` as a `f64`.
     pub fn evaluateAt(self: *const BorderLine, x_axis_value: f64) f64 {
         return self.definition.slope * x_axis_value + self.definition.intercept;
     }
 
-    /// Returns true or false depending of the `self` BorderLine is strictly less than the
-    /// `other_border_line` BorderLine. The comparison is done only in the y_axis of the
-    /// evaluated `x_axis_domain`. Since dealing with floating points, we consider rounding
-    /// error when comparing by using approximate equalities.
+    /// Returns true if the `self` `BorderLine` is strictly less than the `other_border_line` at
+    /// both endpoints of its domain. The comparison is performed by evaluating both lines at the
+    /// start and end of `self.x_axis_domain` and comparing their evaluated values. Floating point
+    /// comparisons use approximate equality to avoid rounding errors.
     pub fn isLessThan(self: *const BorderLine, other_border_line: BorderLine) bool {
         const start = self.x_axis_domain.start;
         const end = self.x_axis_domain.end;
@@ -172,10 +177,10 @@ pub const BorderLine = struct {
             std.debug.assert(shared_functions.isApproximatelyEqual(self_intercept, other_intercept));
             return BorderLine{ .definition = .{
                 .slope = 0.0,
-                .intercept = start_point.value,
+                .intercept = start_point.y_axis,
             }, .x_axis_domain = .{
-                .start = start_point.time,
-                .end = end_point.time,
+                .start = start_point.x_axis,
+                .end = end_point.x_axis,
             } };
         }
 
@@ -184,24 +189,24 @@ pub const BorderLine = struct {
         const y_intercept = self.evaluateAt(x_intercept);
 
         if (is_upper) {
-            if (shared_functions.isApproximatelyEqual(x_intercept, start_point.time)) {
+            if (shared_functions.isApproximatelyEqual(x_intercept, start_point.x_axis)) {
                 return BorderLine{ .definition = .{
                     .slope = 0,
                     .intercept = y_intercept,
                 }, .x_axis_domain = .{
                     .start = x_intercept,
-                    .end = start_point.time,
+                    .end = start_point.x_axis,
                 } };
             }
             return BorderLine{
                 .definition = self.definition,
                 .x_axis_domain = .{
-                    .start = start_point.time,
+                    .start = start_point.x_axis,
                     .end = x_intercept,
                 },
             };
         } else {
-            if (shared_functions.isApproximatelyEqual(x_intercept, end_point.time)) {
+            if (shared_functions.isApproximatelyEqual(x_intercept, end_point.x_axis)) {
                 return BorderLine{
                     .definition = .{
                         .slope = 0,
@@ -209,7 +214,7 @@ pub const BorderLine = struct {
                     },
                     .x_axis_domain = .{
                         .start = x_intercept,
-                        .end = end_point.time,
+                        .end = end_point.x_axis,
                     },
                 };
             }
@@ -217,7 +222,7 @@ pub const BorderLine = struct {
                 .definition = self.definition,
                 .x_axis_domain = .{
                     .start = x_intercept,
-                    .end = end_point.time,
+                    .end = end_point.x_axis,
                 },
             };
         }
@@ -226,10 +231,10 @@ pub const BorderLine = struct {
 
 /// `ConvexPolygon` represents a convex polygon in the (slope, intercept) parameter space.
 /// It maintains the feasible region for linear model parameters under bounded error constraints.
-/// The polygon is defined by two chains of line segments (`upper_bound_lines` and
+/// The polygon is defined by two arrays of `BorderLine` (`upper_bound_lines` and
 /// `lower_bound_lines`) and supports incremental updates via intersection with new half-plane
-/// constraints. A key function updates the polygon which performs clipping operations to refine
-/// the feasible region in the polygon.
+/// constraints. The function `update` updates the polygon which performs clipping operations to
+/// refine the feasible region in the polygon.
 pub const ConvexPolygon = struct {
     // Vertices defining the upper segments of the Polygon.
     upper_bound_lines: ArrayList(BorderLine),
@@ -293,14 +298,14 @@ pub const ConvexPolygon = struct {
                 seed_lower.computeIntersection(new_lower_bound, false)
                     .computeIntersection(new_upper_bound, true);
 
-            // Build the bridge edges that close the polygon (left and right vertical-ish edges in (x,y)).
+            // Build the interception edges that close the polygon (left and right vertical-ish edges in (x,y)).
             const upper_end = BorderLine.buildBorderLineFromPoints(
-                upper_start.evaluateAtEnd(), // right endpoint of upper spine.
-                lower_start.evaluateAtEnd(), // right endpoint of lower spine.
+                upper_start.evaluateAtEnd(), // Right endpoint of upper spine.
+                lower_start.evaluateAtEnd(), // Right endpoint of lower spine.
             );
             const lower_end = BorderLine.buildBorderLineFromPoints(
-                upper_start.evaluateAtStart(), // left endpoint of upper spine.
-                lower_start.evaluateAtStart(), // left endpoint of lower spine.
+                upper_start.evaluateAtStart(), // Left endpoint of upper spine.
+                lower_start.evaluateAtStart(), // Left endpoint of lower spine.
             );
 
             // Replace the seed with the four segments defining the first polygon.
@@ -319,46 +324,49 @@ pub const ConvexPolygon = struct {
             return true;
         }
 
-        // Case 3: General step, clip by LOWER, then clip by UPPER.
+        // Case 3: General step, clip with lower bounds, then clip by upper bounds.
         // 3a) Clip with lower bound.
         switch (self.clipWithLowerBound(new_lower_bound)) {
-            .Reject => return false, // would empty the region
-            .NoClip => {}, // nothing to do before upper clip
+            .Reject => return false, // Would empty the region.
+            .NoClip => {
+                // Nothing to do before upper clip.
+                // The border line is included in the current polygon.
+            },
             .Clip => |clip_info| {
-                // Advance the upper-chain cursor and replace that segment.
+                // Advance the upper-chain start and replace that segment.
                 self.upper_bound_start += clip_info.upper_index_offset;
-                self.upper_bound_lines.items[self.upper_bound_start] = clip_info.new_upper_segment;
+                self.upper_bound_lines.items[self.upper_bound_start] = clip_info.new_upper_line;
 
                 // On the lower chain: truncate up to the cut, then append the cut segment
-                // followed by the “bridge” that connects left endpoints of the two cut segments.
+                // followed by the "intercept" (bridge) that connects left endpoints of the two cut segments.
                 const bridge_lower = BorderLine.buildBorderLineFromPoints(
-                    clip_info.new_upper_segment.evaluateAtStart(),
-                    clip_info.new_lower_segment.evaluateAtStart(),
+                    clip_info.new_upper_line.evaluateAtStart(),
+                    clip_info.new_lower_line.evaluateAtStart(),
                 );
                 try self.lower_bound_lines.resize(self.lower_bound_start + clip_info.lower_index_offset);
-                try self.lower_bound_lines.append(clip_info.new_lower_segment);
+                try self.lower_bound_lines.append(clip_info.new_lower_line);
                 try self.lower_bound_lines.append(bridge_lower);
             },
         }
 
         // 3b) Clip with upper bound.
         switch (self.clipWithUpperBound(new_upper_bound)) {
-            .Reject => return false, // would empty the region
-            .NoClip => return true, // done; lower clip (if any) already applied
+            .Reject => return false, // Would empty the region.
+            .NoClip => return true, // Done; lower clip (if any) already applied.
             .Clip => |clip_info| {
                 // On the upper chain: truncate up to the cut, then append the cut segment
                 // followed by the “bridge” that connects right endpoints of the two cut segments.
                 const bridge_upper = BorderLine.buildBorderLineFromPoints(
-                    clip_info.new_upper_segment.evaluateAtEnd(),
-                    clip_info.new_lower_segment.evaluateAtEnd(),
+                    clip_info.new_upper_line.evaluateAtEnd(),
+                    clip_info.new_lower_line.evaluateAtEnd(),
                 );
                 try self.upper_bound_lines.resize(self.upper_bound_start + clip_info.upper_index_offset);
-                try self.upper_bound_lines.append(clip_info.new_upper_segment);
+                try self.upper_bound_lines.append(clip_info.new_upper_line);
                 try self.upper_bound_lines.append(bridge_upper);
 
-                // Advance the lower-chain cursor and replace that segment.
+                // Advance the lower-chain start and replace that segment.
                 self.lower_bound_start += clip_info.lower_index_offset;
-                self.lower_bound_lines.items[self.lower_bound_start] = clip_info.new_lower_segment;
+                self.lower_bound_lines.items[self.lower_bound_start] = clip_info.new_lower_line;
             },
         }
 
@@ -389,10 +397,10 @@ pub const ConvexPolygon = struct {
         var intercept: f64 = 0.0;
 
         if ((self.lower_bound_lines.items.len == 1) and (self.upper_bound_lines.items.len == 1)) {
-            intercept = (upper_left.value + lower_right.value) / 2.0;
+            intercept = (upper_left.y_axis + lower_right.y_axis) / 2.0;
         } else {
-            slope = (upper_left.time + lower_right.time) / 2.0;
-            intercept = (upper_left.value + lower_right.value) / 2.0;
+            slope = (upper_left.x_axis + lower_right.x_axis) / 2.0;
+            intercept = (upper_left.y_axis + lower_right.y_axis) / 2.0;
         }
 
         return LinearFunction{
@@ -407,6 +415,7 @@ pub const ConvexPolygon = struct {
     }
 
     /// Clips the convex polygon against a new half-plane boundary `bound_line`.
+    /// Clipping means intersecting the polygon with a new half-plane `bound_line`.
     /// If `is_upper = true`, the clipping is performed against the *upper* hull; otherwise against
     /// the lower bound line. The function searches for where the new boundary intersects the
     /// polygon’s current upper and lower chains, computes the intersection segments, and
@@ -431,12 +440,12 @@ pub const ConvexPolygon = struct {
         const lower_abs_index = self.lower_bound_start + lower_rel_index_from_right;
 
         // 2) Compute clipped segments at those positions.
-        const new_upper_segment = self.upper_bound_lines.items[upper_abs_index]
+        const new_upper_line = self.upper_bound_lines.items[upper_abs_index]
             .computeIntersection(
             bound_line,
             is_upper,
         );
-        const new_lower_segment = self.lower_bound_lines.items[lower_abs_index]
+        const new_lower_line = self.lower_bound_lines.items[lower_abs_index]
             .computeIntersection(
             bound_line,
             is_upper,
@@ -446,8 +455,8 @@ pub const ConvexPolygon = struct {
         return .{ .Clip = .{
             .upper_index_offset = upper_rel_index,
             .lower_index_offset = lower_rel_index_from_right,
-            .new_upper_segment = new_upper_segment,
-            .new_lower_segment = new_lower_segment,
+            .new_upper_line = new_upper_line,
+            .new_lower_line = new_lower_line,
         } };
     }
 
@@ -475,21 +484,21 @@ pub const ConvexPolygon = struct {
 
         // Narrow the candidate upper line to the polygon’s current x-axis domain [x_left, x_right].
         var narrowed_line = new_upper_bound_line;
-        narrowed_line.x_axis_domain.start = upper_left_point.time;
-        narrowed_line.x_axis_domain.end = lower_right_point.time;
+        narrowed_line.x_axis_domain.start = upper_left_point.x_axis;
+        narrowed_line.x_axis_domain.end = lower_right_point.x_axis;
 
         // Evaluate the narrowed line at both ends.
-        const upper_left_eval = narrowed_line.evaluateAtStart().value;
-        const upper_right_eval = narrowed_line.evaluateAtEnd().value;
+        const upper_left_eval = narrowed_line.evaluateAtStart().y_axis;
+        const upper_right_eval = narrowed_line.evaluateAtEnd().y_axis;
 
         // 1) NoClip: line lies entirely above polygon’s lower-right corner, no clipping required.
-        if (upper_right_eval >= lower_right_point.value) {
+        if (upper_right_eval >= lower_right_point.y_axis) {
             return .NoClip;
         }
 
         // 2) Clip: line is above the polygon’s upper-left corner and below the lower-right corner.
-        if ((upper_left_eval >= upper_left_point.value) and
-            (upper_right_eval < lower_right_point.value))
+        if ((upper_left_eval >= upper_left_point.y_axis) and
+            (upper_right_eval < lower_right_point.y_axis))
         {
             // Perform actual split on both upper & lower chains with this upper bound.
             return self.clip(narrowed_line, true); // true = clip with upper bound.
@@ -523,20 +532,20 @@ pub const ConvexPolygon = struct {
 
         // Narrow the candidate lower line to the polygon’s current x-axis domain [x_left, x_right].
         var narrowed_line = new_lower_bound_line;
-        narrowed_line.x_axis_domain.start = upper_left_point.time;
-        narrowed_line.x_axis_domain.end = lower_right_point.time;
+        narrowed_line.x_axis_domain.start = upper_left_point.x_axis;
+        narrowed_line.x_axis_domain.end = lower_right_point.x_axis;
 
         // Evaluate the narrowed line at both ends of the domain.
-        const left_eval = narrowed_line.evaluateAtStart().value;
-        const right_eval = narrowed_line.evaluateAtEnd().value;
+        const left_eval = narrowed_line.evaluateAtStart().y_axis;
+        const right_eval = narrowed_line.evaluateAtEnd().y_axis;
 
         // 1) NoClip: the new lower bound is at/below the polygon's upper-left corner.
-        if (left_eval <= upper_left_point.value) {
+        if (left_eval <= upper_left_point.y_axis) {
             return .NoClip;
         }
 
         // 2) Clip: it starts above the upper-left corner but ends at/below the lower-right corner.
-        if ((left_eval > upper_left_point.value) and (right_eval <= lower_right_point.value)) {
+        if ((left_eval > upper_left_point.y_axis) and (right_eval <= lower_right_point.y_axis)) {
             return self.clip(narrowed_line, false); // false = clip with lower bound.
         }
 
@@ -545,13 +554,13 @@ pub const ConvexPolygon = struct {
     }
 
     /// Returns the upper-left corner point of the polygon (start of current upper bound line).
-    fn upperLeft(self: *const ConvexPolygon) ContinousPoint {
+    fn upperLeft(self: *const ConvexPolygon) ParameterSpacePoint {
         const upper_line = self.upper_bound_lines.items[self.upper_bound_start];
         return upper_line.evaluateAtStart();
     }
 
     /// Returns the lower-right corner point of the polygon (end of current lower bound line).
-    fn lowerRight(self: *const ConvexPolygon) ContinousPoint {
+    fn lowerRight(self: *const ConvexPolygon) ParameterSpacePoint {
         const lower_line = self.lower_bound_lines.items[self.lower_bound_start];
         return lower_line.evaluateAtEnd();
     }
@@ -578,7 +587,7 @@ fn searchIntersection(
 
     while (lower < higher) {
         const middle = lower + (higher - lower) / 2;
-        const idx = if (!reversed) middle else n - middle; // map "from-right" index to forward index.
+        const idx = if (!reversed) middle else n - middle; // Map "from-right" index to forward index.
         if (border_line[idx].isLessThan(target)) {
             lower = middle + 1; // Go right.
         } else {
@@ -593,13 +602,13 @@ fn searchIntersection(
     return n - clamped_lower_bound;
 }
 
-/// Helper function to adds a new point constraint to the convex polygon, representing the feasible
+/// Helper function to add a new point constraint to the convex polygon, representing the feasible
 /// region for a linear function passing within `eps` of the point (`x_axis`, `y_axis`). Constructs
 /// two half-plane boundaries (upper and lower) at the given x position, offset by `eps`, and
 /// updates the polygon by intersecting with these constraints. Returns `true` if the polygon
 /// remains non-empty after the update, `false` otherwise.
 fn addPoint(poly: *ConvexPolygon, x_axis: usize, y_axis: f64, eps: f64) !bool {
-    const slope = -@as(f64, @floatFromInt(x_axis)); // (-x_k)
+    const slope = -@as(f64, @floatFromInt(x_axis)); // (-x_k).
     const upper_intercept = y_axis + eps;
     const lower_intercept = y_axis - eps;
 

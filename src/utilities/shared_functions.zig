@@ -68,7 +68,7 @@ pub fn appendValue(comptime T: type, value: T, compressed_values: *ArrayList(u8)
             const value_as_bytes: [4]u8 = @bitCast(value);
             try compressed_values.appendSlice(value_as_bytes[0..]);
         },
-        else => return Error.UnsupportedInput,
+        else => @compileError("Unsupported type for append value function"),
     }
 }
 
@@ -142,8 +142,9 @@ pub fn isWithinErrorBound(
     return true;
 }
 
-/// Reads a value of compile-time known type `T` from the beginning of the `compressed_values` byte slice.
-/// Returns the value or an error if the slice is too short.
+/// Reads a value of compile-time known type `T` from the beginning of the `compressed_values` byte
+/// slice. Returns the value if the `compressed_values` contains at least `@sizeOf(T)` bytes. Return
+/// an error otherwise.
 pub fn readValue(comptime T: type, compressed_values: []const u8) Error!T {
     const size = @sizeOf(T);
     if (size > compressed_values.len) {
@@ -152,8 +153,13 @@ pub fn readValue(comptime T: type, compressed_values: []const u8) Error!T {
     return @bitCast(compressed_values[0..size].*);
 }
 
-/// Returns true if two floating-point `value_a` and `value_b` numbers are approximately equal,
-/// using both absolute and relative tolerances to account for rounding errors.
+/// Returns `true` if two floating-point `value_a` and `value_b` numbers are approximately equal,
+/// using both absolute and relative tolerances to account for rounding errors. This function is
+/// necessary because direct comparison of floating-point values can fail due to rounding errors
+/// and representation limitations inherent in floating-point arithmetic. Absolute tolerance is used
+/// for values close to zero, while relative tolerance is used for larger magnitude values to ensure
+/// a meaningful comparison. The values are fixed to 1e-12 and 1e-15 for absolute and relative
+/// tolerances, respectively, which are suitable for f64 values.
 pub fn isApproximatelyEqual(value_a: f64, value_b: f64) bool {
     if (value_a == value_b) return true;
     if (!math.isFinite(value_a) or !math.isFinite(value_b))

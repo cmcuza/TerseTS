@@ -22,11 +22,10 @@
 //!   1. A lossy functional approximation under a pointwise error bound.
 //!   2. A lossless residual encoding that enables exact decompression.
 //! In this file, we implement only the lossy compression phase, which partitions the series
-//! into segments and fits them using nonlinear functions under a bounded error constraint.
+//! into segments and fits them using nonlinear functions under multiple error bounds.
 //! The lossless residual compression phase is left as future work. Moreover, this version
-//! supports only a single error bound per run, unlike the original, which supports multiple.
-//! The decision is aligned with the design of the TerseTS framework, where only a single error
-//! tolerance is currently supported.
+//! supports only a single error bound per run. This decision is aligned with the design of
+//! the TerseTS framework, where only a single error bound is currently supported.
 
 const std = @import("std");
 const mem = std.mem;
@@ -47,21 +46,29 @@ const LinearFunction = shared_structs.LinearFunction;
 const BorderLine = convex_polygon.BorderLine;
 
 /// Represents the different function types available for approximating time series segments,
-/// as defined in Table I of the NeaTS paper. Each type corresponds to a specific mathematical form.
+/// as defined in Table I of the NeaTS paper. Each type corresponds to a specific mathematical form:
+/// - Linear: slope * x + intercept.
+/// - Quadratic: slope * x ^ 2 + intercept.
+/// - Exponential: intercept * e ^ (slope * x).
+/// - Sqrt: slope * sqrt(x) + intercept.
+/// - Power: intercept * x ^ slope.
+/// - Undefined: Used as a fallback when the function type cannot be determined or does not match
+///   any of the predefined mathematical forms. It also serves as coherent intialization value
+///   instead of `Null`, avoiding the overhead of optionals.
 const FunctionType = enum(u8) {
-    Linear = 1, // slope * x + intercept.
-    Quadratic = 2, // slope * x ^ 2 + intercept.
-    Exponential = 3, // intercept * e ^ (slope * x).
-    Sqrt = 4, // slope * sqrt(x) + intercept.
-    Power = 5, // intercept * x ^ slope.
-    Undefined = 6, // Undefined fall back.
+    Linear = 1,
+    Quadratic = 2,
+    Exponential = 3,
+    Sqrt = 4,
+    Power = 5,
+    Undefined = 6,
 };
 
 /// Set of function types available for approximating time series segments.
 /// TODO: Make this configurable at running time.
 const function_types = [5]FunctionType{ .Linear, .Quadratic, .Exponential, .Power, .Sqrt };
 
-/// Compresses `uncompressed_data` using NeaTS algorithm by partitioning the time series into
+/// Compresses `uncompressed_data` using the NeaTS algorithm by partitioning the time series into
 /// optimal segments with different nonlinear function types and error-bounded approximations.
 /// The algorithm uses dynamic programming to find the optimal segmentation that minimizes the
 /// total compressed size while maintaining approximation error within `error_bound`. The
@@ -94,7 +101,9 @@ pub fn compress(
         }
         break :blk mutable_data;
     };
-    defer if (shift_amount != 0.0) allocator.free(working_data); // Releases allocated memory if used.
+    // Releases allocated memory if used. The `defer` statement is placed outside the
+    // allocation block to ensure correct scope.
+    defer if (shift_amount != 0.0) allocator.free(working_data);
 
     // Stores the preprocessing information - shift amount is always written (0.0 indicates no shift).
     try shared_functions.appendValue(f64, shift_amount, compressed_values);
@@ -102,7 +111,6 @@ pub fn compress(
     var optimal_approximation = ArrayList(FunctionalApproximation).init(allocator);
     defer optimal_approximation.deinit();
 
-    // Defines the error bounds to consider during optimization (currently uses the provided bound).
     // Partitions the time series using dynamic programming to find the optimal segmentation.
     try findOptimalFunctionalApproximation(
         allocator,
@@ -118,21 +126,26 @@ pub fn compress(
     // All function types are stored using 4 bits each, so we can pack 2 per byte.
     // This saves space in the compressed representation.
     // For it, we first calculate the number of bytes needed to store all function types.
-    const packed_len: usize = (segments_count + 1) / 2; // ceil(count/2).
+    const packed_len: usize = (segments_count + 1) / 2; // ceil(segments_count/2).
 
     // Allocates space for packed function types (2 per byte).
     var packed_function_types = try allocator.alloc(u8, packed_len);
     defer allocator.free(packed_function_types);
     @memset(packed_function_types, 0);
+
+    // Each byte in packed_function_types stores two function types:
+    // - The low nibble (bits 0-3) holds the function type for the approximation at odd index.
+    // - The high nibble (bits 4-7) holds the function type for the approximation at even index.
+    // Approximations are packed in order: [0,1], [2,3], ...
     for (optimal_approximation.items, 0..) |approximation, idx| {
         const code: u8 = @intCast(@intFromEnum(approximation.function_type));
         const byte_idx: usize = idx / 2;
         const is_high_nibble: bool = (idx % 2) == 0;
-        // The high nibble stores the function type of the first segment, and the low
-        // nibble stores the second approximation's type.
         if (is_high_nibble) {
+            // Store the function type in the high nibble (bits 4-7).
             packed_function_types[byte_idx] |= @as(u8, code) << 4;
         } else {
+            // Store the function type in the low nibble (bits 0-3).
             packed_function_types[byte_idx] |= @as(u8, code) & 0x0F;
         }
     }
@@ -141,6 +154,7 @@ pub fn compress(
 
     for (optimal_approximation.items) |segment| {
         // Writes the two main function parameters (slope and intercept) and the end point.
+        // The end point is exclusive, so it indicates where the next segment starts.
         try shared_functions.appendValue(f64, segment.definition.slope, compressed_values);
         try shared_functions.appendValue(f64, segment.definition.intercept, compressed_values);
         try shared_functions.appendValue(usize, segment.end_idx, compressed_values);
@@ -174,9 +188,9 @@ pub fn decompress(
     // Each segment stores: 2 * f64 (slope, intercept) + usize (end_idx).
     const bytes_per_segment = @sizeOf(f64) * 2 + @sizeOf(usize);
     const expected_total_bytes =
-        @sizeOf(f64) + // shift_amount
-        @sizeOf(u32) + // num_segments
-        type_bytes_len + // packed function types
+        @sizeOf(f64) + // shift_amount.
+        @sizeOf(u32) + // num_segments.
+        type_bytes_len + // packed function types.
         num_segments * bytes_per_segment;
 
     if (compressed_values.len != expected_total_bytes)
@@ -226,15 +240,19 @@ pub fn decompress(
     // Generates the reconstructed values using the function approximations.
     for (optimal_approximation.items) |functional_approximation| {
         for (functional_approximation.start_idx..functional_approximation.end_idx) |idx| {
-            // Uses 1-based indexing for evaluation.
+            // 1-based indexing is used for evaluation because the algorithm constructs
+            // constraints in parameter space using x=1, 2, 3, ... for each segment. This ensures
+            // that the function parameters align with the mathematical formulation used during
+            // compression and constraint generation.
             const value = try functional_approximation.evaluate(@as(f64, @floatFromInt(idx + 1)));
             try decompressed_values.append(value);
         }
     }
 
+    // If no shift was applied during compression, no revert of the shift is needed.
     if (shift_amount == 0.0) return;
 
-    // Apply postprocessing to remove any preprocessing shifts.
+    // Revert the preprocessing shifts.
     for (0..decompressed_values.items.len) |idx| {
         decompressed_values.items[idx] -= shift_amount;
     }
@@ -261,18 +279,20 @@ const FunctionalApproximation = struct {
             .Exponential => self.definition.intercept * @exp(self.definition.slope * x_rel),
             .Power => self.definition.intercept * math.pow(f64, x_rel, self.definition.slope),
             .Sqrt => @mulAdd(f64, self.definition.slope, @sqrt(x_rel), self.definition.intercept),
-            .Undefined => return Error.UnsupportedInput, // Undefined function type cannot be evaluated.
+            .Undefined => return Error.UnsupportedInput,
         };
     }
 
     /// Returns the cost associated with the current functional approximation type in `self`.
     /// The cost is determined based on the `function_type` field of the `FunctionalApproximation`.
-    /// Currently, all defined function types have a uniform cost of 2, while the `.Undefined`
-    /// type is assigned a high cost to prevent its selection in the optimization process.
+    /// Currently, all defined function types have a uniform cost of 2 (slope and intercept),
+    /// while the `.Undefined` type is assigned a high cost to prevent its selection.
     pub fn getCost(self: *const FunctionalApproximation) usize {
         // `.Undefined` returns a big number to unsure that it is not selected.
         return switch (self.function_type) {
-            .Undefined => 10000,
+            .Undefined => math.maxInt(usize),
+            // All functional approximation implemented so far only need to store slope and intercept.
+            // Therefore, they all have a cost of 2. Future function types may have different costs.
             else => 2,
         };
     }
@@ -283,7 +303,7 @@ const FunctionalApproximation = struct {
 /// `uncompressed_data` and shifts all values by the minimum value plus the `error_bound`.
 /// If all values are already positive, no shift is applied (returns 0.0).
 fn calculateShiftAmount(uncompressed_data: []const f64, error_bound: f32) !f64 {
-    var min_val = std.math.inf(f64);
+    var min_val = math.inf(f64);
     for (uncompressed_data) |val| {
         if (!math.isFinite(val) or @abs(val) > tester.max_test_value) {
             return Error.UnsupportedInput;
@@ -291,21 +311,23 @@ fn calculateShiftAmount(uncompressed_data: []const f64, error_bound: f32) !f64 {
         min_val = @min(min_val, val);
     }
 
-    const eps = @as(f64, error_bound);
+    const error_bound_f64 = @as(f64, error_bound);
     // Determines if a shift is needed to keep all values positive within the error bound.
-    // The shift amount is calculated as (eps + 1.0 - min_val) to ensure positivity of the border
-    // line y = min_val - eps.
-    if (min_val - eps <= 0) {
-        return eps + 1.0 - min_val;
+    // The shift amount is calculated as (error_bound + 1.0 - min_val) to ensure positivity of the
+    // border line y = min_val - error_bound.
+    if (min_val - error_bound_f64 <= 0) {
+        return error_bound_f64 + 1.0 - min_val;
     }
 
     return 0.0;
 }
 
-/// Finds the optimal segmentation of `uncompressed_data` into segments approximated by
-/// different function types while maintaining the `error_bound`. Uses dynamic programming
-/// to minimize the total cost of the segmentation. The resulting optimal segments are
-/// appended to `optimal_approximation`. The `allocator` is used for dynamic memory allocation.
+/// Finds the optimal segmentation of `uncompressed_data` into segments approximated by different
+/// function types while maintaining the `error_bound`. Uses dynamic programming to minimize the
+/// total cost of the segmentation. The cost of the segmentation is measured as the number of
+/// parameters to store in the compressed representation. The resulting optimal segments are
+/// appended to `optimal_approximation`. The `allocator` is used for dynamic memory allocation of
+/// the convex polygon, dynamic programming arrays, and FunctionalApproximation arrays.
 /// If an error occurs, it is returned.
 fn findOptimalFunctionalApproximation(
     allocator: mem.Allocator,
@@ -327,13 +349,13 @@ fn findOptimalFunctionalApproximation(
     var previous_approximation = try allocator.alloc(?FunctionalApproximation, n + 1);
     defer allocator.free(previous_approximation);
 
-    // One frontier per function type: longest segment starting at the last queried start.
+    // One functional approximation per type supported in `function_types` to store current approximation.
     var current_approximation = try allocator.alloc(FunctionalApproximation, function_types.len);
     defer allocator.free(current_approximation);
 
-    // Initializes the dynamic programming arrays.
+    // Initializes array used by the dynamic programming algorithm.
     for (0..n + 1) |i| {
-        distances[i] = std.math.maxInt(usize); // Sets all distances to infinity initially.
+        distances[i] = math.maxInt(usize); // Sets all distances to infinity initially.
         previous_approximation[i] = null;
     }
 
@@ -346,7 +368,7 @@ fn findOptimalFunctionalApproximation(
                 .slope = 0.0,
                 .intercept = 0.0,
             },
-        }; // Initializes all model frontiers as undefined.
+        }; // Initializes all functional approximation as undefined.
     }
 
     distances[0] = 0; // Sets the cost of reaching the start position to zero.
@@ -378,7 +400,8 @@ fn findOptimalFunctionalApproximation(
             }
         }
 
-        // Relax edges from current_position to the end of each available frontier segment.
+        // Updates the best-known cost to reach the end of each available segment
+        // starting from current_position.
         for (0..function_types.len) |model_idx| {
             std.debug.assert(current_approximation[model_idx].function_type != .Undefined);
             const end_idx = current_approximation[model_idx].end_idx;
@@ -391,9 +414,7 @@ fn findOptimalFunctionalApproximation(
         }
     }
 
-    std.debug.assert(distances[n] != std.math.maxInt(usize));
-
-    // Reconstructs the optimal segmentation by backtracking through the DP solution.
+    // Reconstructs the optimal segmentation by backtracking through the dynamic programming.
     var current_position = n;
     while (current_position != 0) {
         const approximation = previous_approximation[current_position];
@@ -403,7 +424,7 @@ fn findOptimalFunctionalApproximation(
     }
 
     // Reverses the segment order since backtracking produces segments in reverse order.
-    std.mem.reverse(FunctionalApproximation, optimal_approximation.items);
+    mem.reverse(FunctionalApproximation, optimal_approximation.items);
 }
 
 /// Computes the longest segment starting from `start_idx` that can be approximated by
@@ -421,7 +442,7 @@ fn computeApproximation(
 ) !FunctionalApproximation {
     const n = uncompressed_data.len;
 
-    // If only one point left, fit a Linear Function with slope 0, intercept = point.
+    // If only one point left, fit a Linear Function with slope zero, i.e., intercept is the point.
     if (start_idx + 1 >= n) {
         const intercept = uncompressed_data[start_idx];
         return FunctionalApproximation{
@@ -435,10 +456,12 @@ fn computeApproximation(
         };
     }
 
-    // Tracks the end of the longest valid segment found.
-    var longest_valid_end: usize = start_idx + 2; // Always can fit 2 points.
+    // Tracks the end of the longest valid segment found. Always can fit two points
+    // (start_idx and start_idx+1) with a linear function.
+    var longest_valid_end: usize = start_idx + 2;
 
-    // Stores the best approximation for the longest segment.
+    // LinearFunction for storing the longest segment which is the best approximation since it
+    // needs less parameters to fit more points.
     var best_approximation: LinearFunction = .{ .slope = 0, .intercept = 0 };
 
     // Implements O'Rourke's algorithm: processes data points from left to right.
@@ -446,7 +469,10 @@ fn computeApproximation(
         const x_axis: usize = end_idx - start_idx + 1;
         const y_axis: f64 = uncompressed_data[end_idx];
 
-        // Gets constraints for this data point.
+        // Gets constraints for this data point. The constraints are used to update the feasible region.
+        // The feasible region is represented as a convex polygon in parameter space.
+        // As long the feasible region is non-empty, the segment can be approximated by the function_type.
+        // If the feasible region becomes empty, the longest valid segment for the function_type is found.
         const constraints = getConstraints(
             x_axis,
             y_axis,
@@ -456,12 +482,12 @@ fn computeApproximation(
 
         const new_upper_line: BorderLine = .{
             .definition = constraints.upper,
-            .x_axis_domain = .{ .start = -std.math.inf(f64), .end = std.math.inf(f64) },
+            .x_axis_domain = .{ .start = -math.inf(f64), .end = math.inf(f64) },
         };
 
         const new_lower_line: BorderLine = .{
             .definition = constraints.lower,
-            .x_axis_domain = .{ .start = -std.math.inf(f64), .end = std.math.inf(f64) },
+            .x_axis_domain = .{ .start = -math.inf(f64), .end = math.inf(f64) },
         };
 
         // Intersects the new constraints with the existing feasible region.
@@ -633,6 +659,11 @@ test "non linear approximator cannot compress inf values" {
 }
 
 test "non linear approximator cannot compress f64 with reduced precision" {
+    // Values with reduced precision (e.g., 1e17) can lead to numerical instability
+    // during the approximation process, especially when using functions like
+    // exponential and power that are sensitive to value ranges. This can result in
+    // inaccurate approximations or failure to find a valid segment under the given
+    // error bound, hence we proactively reject such inputs.
     const allocator = testing.allocator;
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, 1e17, 3.0 };
