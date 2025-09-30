@@ -81,32 +81,13 @@ pub fn compress(
     error_bound: f32,
 ) Error!void {
     // Validates that the input contains at least 2 data points for meaningful compression.
-    if (uncompressed_data.len < 2) return Error.UnsupportedInput;
-
     if (error_bound <= 0.0) return Error.UnsupportedErrorBound;
 
-    // Calculates the preprocessing shift amount needed for functions that require positive values
-    // (exponential and power functions need all y-values to be positive for mathematical validity).
-    const shift_amount = try calculateShiftAmount(uncompressed_data, error_bound);
-
-    // Creates a working copy of the data only if preprocessing shift is needed (optimization).
-    const working_data = if (shift_amount == 0.0)
-        uncompressed_data // Uses original data directly when no shift is required.
-    else blk: {
-        // Allocates memory for a shifted copy of the input data.
-        const mutable_data = try allocator.alloc(f64, uncompressed_data.len);
-        @memcpy(mutable_data, uncompressed_data); // Copies the original data values.
-        for (mutable_data) |*val| {
-            val.* += shift_amount; // Applies the shift to each data point.
-        }
-        break :blk mutable_data;
-    };
-    // Releases allocated memory if used. The `defer` statement is placed outside the
-    // allocation block to ensure correct scope.
-    defer if (shift_amount != 0.0) allocator.free(working_data);
+    const preprocessing = try shiftValues(allocator, uncompressed_data, error_bound);
+    defer if (preprocessing.shift_amount != 0.0) allocator.free(preprocessing.shifted_data);
 
     // Stores the preprocessing information - shift amount is always written (0.0 indicates no shift).
-    try shared_functions.appendValue(f64, shift_amount, compressed_values);
+    try shared_functions.appendValue(f64, preprocessing.shift_amount, compressed_values);
 
     var optimal_approximation = ArrayList(FunctionalApproximation).init(allocator);
     defer optimal_approximation.deinit();
@@ -114,7 +95,7 @@ pub fn compress(
     // Partitions the time series using dynamic programming to find the optimal segmentation.
     try findOptimalFunctionalApproximation(
         allocator,
-        working_data,
+        preprocessing.shifted_data,
         error_bound,
         &optimal_approximation,
     );
@@ -249,13 +230,7 @@ pub fn decompress(
         }
     }
 
-    // If no shift was applied during compression, no revert of the shift is needed.
-    if (shift_amount == 0.0) return;
-
-    // Revert the preprocessing shifts.
-    for (0..decompressed_values.items.len) |idx| {
-        decompressed_values.items[idx] -= shift_amount;
-    }
+    unshiftValues(decompressed_values, shift_amount);
 }
 
 /// Represents a segment of a time series that is approximated by a mathematical function.
@@ -297,6 +272,36 @@ const FunctionalApproximation = struct {
         };
     }
 };
+
+/// Applies a preprocessing shift to ensure all values in `values` are positive considering the
+/// `error_bound`. This is required for exponential and power functions. The function calculates
+/// the shift amount and returns a new array with shifted values. If no shift is needed, it returns
+/// the original `values`. The `allocator` is used for dynamic memory allocation if a shift is applied.
+/// The function returns a tuple containing `shifted_data` and `shift_amount`. shifted_data is the
+/// shifted data array (or the original array if no shift is needed).`shift_amount` is the
+/// calculated shift amount (0.0 if no shift is needed).
+fn shiftValues(
+    allocator: mem.Allocator,
+    values: []const f64,
+    error_bound: f32,
+) !struct {
+    shifted_data: []const f64,
+    shift_amount: f64,
+} {
+    const shift_amount = try calculateShiftAmount(values, error_bound);
+
+    if (shift_amount == 0.0) {
+        return .{ .shifted_data = values, .shift_amount = 0.0 };
+    }
+
+    const mutable_data = try allocator.alloc(f64, values.len);
+    @memcpy(mutable_data, values);
+    for (mutable_data) |*val| {
+        val.* += shift_amount;
+    }
+
+    return .{ .shifted_data = mutable_data, .shift_amount = shift_amount };
+}
 
 /// Calculates the preprocessing shift amount needed to ensure all data values are positive.
 /// This is required for exponential and power functions. The function first inspects the
@@ -593,6 +598,16 @@ fn transformParameters(
             .intercept = math.inf(f64),
         },
     };
+}
+
+/// Reverts the preprocessing shift applied to `values`. This function subtracts the `shift_amount`
+/// from each value in the array.
+fn unshiftValues(values: *ArrayList(f64), shift_amount: f64) void {
+    if (shift_amount == 0.0) return;
+
+    for (values.items) |*val| {
+        val.* -= shift_amount;
+    }
 }
 
 test "non linear approximator can compress and decompress various function types with positive error bounds" {
