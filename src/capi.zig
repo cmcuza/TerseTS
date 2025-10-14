@@ -132,11 +132,12 @@ fn errorToInt(err: Error) i32 {
         Error.UnknownMethod => return 1,
         Error.UnsupportedInput => return 2,
         Error.UnsupportedErrorBound => return 3,
-        Error.OutOfMemory => return 4,
-        Error.ItemNotFound => return 5,
-        Error.EmptyConvexHull => return 6,
-        Error.EmptyQueue => return 7,
-        Error.ByteStreamError => return 8,
+        Error.CorruptedCompressedData => return 4,
+        Error.OutOfMemory => return 5,
+        Error.ItemNotFound => return 6,
+        Error.EmptyConvexHull => return 7,
+        Error.EmptyQueue => return 8,
+        Error.ByteStreamError => return 9,
     }
 }
 
@@ -193,7 +194,8 @@ test "error for empty input when compressing" {
         configuration,
     );
 
-    try testing.expectEqual(2, return_code);
+    try testing.expectEqual(0, return_code);
+    try testing.expectEqual(0, compressed_values.len);
 }
 
 test "error for negative error bound when compressing" {
@@ -228,7 +230,7 @@ test "error for empty input when decompressing" {
 
     const return_code = decompress(compressed_values, &decompressed_values);
 
-    try testing.expectEqual(2, return_code);
+    try testing.expectEqual(4, return_code);
 }
 
 test "can compress and decompress" {

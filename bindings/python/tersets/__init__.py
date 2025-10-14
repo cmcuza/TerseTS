@@ -102,6 +102,7 @@ class Method(Enum):
     MixPiece = 12
     BitPackedQuantization = 13
     RunLengthEncoding = 14
+    NonLinearApproximation = 15
 
 # Public API. 
 def compress(values, method, error_bound: float) -> bytes:
