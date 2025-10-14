@@ -56,15 +56,21 @@ export fn compress(
 
     const method: Method = @enumFromInt(configuration.method);
 
-    const compressed_values = tersets.compress(
+    var compressed_values = tersets.compress(
         allocator,
         uncompressed_values,
         method,
         configuration.error_bound,
     ) catch |err| return errorToInt(err);
 
-    compressed_values_array.data = compressed_values.items.ptr;
-    compressed_values_array.len = compressed_values.items.len;
+    // Convert the ArrayList into an owned slice with exact length.
+    // This call allocates a new buffer sized precisely to `len` and transfers ownership
+    // of the data from the ArrayList to the caller.
+    // Without this step, freeing later with `len` instead of `capacity` would corrupt the allocator.
+    const data_slice = compressed_values.toOwnedSlice() catch |err| return errorToInt(err);
+
+    compressed_values_array.data = data_slice.ptr;
+    compressed_values_array.len = data_slice.len;
 
     return 0;
 }
@@ -81,15 +87,38 @@ export fn decompress(
 ) i32 {
     const compressed_values = compressed_values_array.data[0..compressed_values_array.len];
 
-    const decompressed_values = tersets.decompress(
+    var decompressed_values = tersets.decompress(
         allocator,
         compressed_values,
     ) catch |err| return errorToInt(err);
 
-    decompressed_values_array.data = decompressed_values.items.ptr;
-    decompressed_values_array.len = decompressed_values.items.len;
+    // Convert the ArrayList into an owned slice with exact length.
+    // This call allocates a new buffer sized precisely to `len` and transfers ownership
+    // of the data from the ArrayList to the caller.
+    // Without this step, freeing later with `len` instead of `capacity` would corrupt the allocator.
+    const data_slice = decompressed_values.toOwnedSlice() catch |err| return errorToInt(err);
+
+    decompressed_values_array.data = data_slice.ptr;
+    decompressed_values_array.len = data_slice.len;
 
     return 0;
+}
+
+/// Frees a `compressed_values` buffer previously produced by `compress`.
+export fn freeCompressedValues(compressed_values: *CompressedValues) void {
+    if (compressed_values.len != 0) {
+        allocator.free(compressed_values.data[0..compressed_values.len]);
+        compressed_values.len = 0;
+    }
+}
+
+/// Frees a `uncompressed_values` buffer previously produced by `decompress`.
+export fn freeUncompressedValues(uncompressed_values: *UncompressedValues) void {
+    if (uncompressed_values.len != 0) {
+        // const ptr_mut: [*]u8 = @constCast(compressed_values.data);
+        allocator.free(uncompressed_values.data[0..uncompressed_values.len]);
+        uncompressed_values.len = 0;
+    }
 }
 
 /// `Array` is a pointer to values of type `data_type` and the number of values.
@@ -234,4 +263,43 @@ test "can compress and decompress" {
     while (i < decompressed_values.len) : (i += 1) {
         try testing.expectEqual(uncompressed_values.data[i], decompressed_values.data[i]);
     }
+}
+
+test "free allocated compressed values" {
+    // Allocate a dummy compressed values array.
+    const array = try allocator.alloc(u8, 16);
+
+    // Fill to make it less trivial.
+    for (array, 0..) |*value, i|
+        value.* = @as(u8, @intCast(i));
+
+    var compressed_values = CompressedValues{
+        .data = array.ptr,
+        .len = array.len,
+    };
+
+    // First free should release the array and zero the length.
+    freeCompressedValues(&compressed_values);
+    try testing.expectEqual(@as(usize, 0), compressed_values.len);
+
+    // Second free should no try to deallocate again.
+    freeCompressedValues(&compressed_values);
+    try testing.expectEqual(@as(usize, 0), compressed_values.len);
+}
+
+test "free allocated uncompressed values" {
+    const array = try allocator.alloc(f64, 4);
+    for (array, 0..) |*value, i|
+        value.* = @as(f64, @floatFromInt(i));
+
+    var compressed_values = UncompressedValues{
+        .data = array.ptr,
+        .len = array.len,
+    };
+
+    freeUncompressedValues(&compressed_values);
+    try testing.expectEqual(@as(usize, 0), compressed_values.len);
+
+    freeUncompressedValues(&compressed_values);
+    try testing.expectEqual(@as(usize, 0), compressed_values.len);
 }
