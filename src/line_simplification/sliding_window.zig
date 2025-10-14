@@ -235,6 +235,7 @@ test "sliding-window cannot compress and decompress unbounded values" {
 
 test "sliding-window compress and decompress random lines and random error bound" {
     const allocator = testing.allocator;
+    const random = tester.getDefaultRandomGenerator();
 
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
@@ -245,11 +246,7 @@ test "sliding-window compress and decompress random lines and random error bound
 
     const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0.01, 1e6, undefined);
 
-    const max_lines: usize = tester.generateBoundRandomInteger(usize, 4, 25, undefined);
-    for (0..max_lines) |_| {
-        // Generate a random linear function and add it to the uncompressed values.
-        try tester.generateRandomLinearFunction(&uncompressed_values, undefined);
-    }
+    try tester.generateRandomLinearFunctions(&uncompressed_values, random);
 
     try compress(
         uncompressed_values.items,

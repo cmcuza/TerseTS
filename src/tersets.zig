@@ -29,12 +29,14 @@ const sliding_window = @import("line_simplification/sliding_window.zig");
 const bottom_up = @import("line_simplification/bottom_up.zig");
 const rle_enconding = @import("lossless_encoding/run_length_encoding.zig");
 const bitpacked_quantization = @import("quantization/bitpacked_quantization.zig");
+const non_linear_approximation = @import("functional_approximation/non_linear_approximation.zig");
 
 /// The errors that can occur in TerseTS.
 pub const Error = error{
     UnknownMethod,
     UnsupportedInput,
     UnsupportedErrorBound,
+    CorruptedCompressedData,
     ItemNotFound,
     OutOfMemory,
     EmptyConvexHull,
@@ -59,6 +61,7 @@ pub const Method = enum {
     MixPiece,
     BitPackedQuantization,
     RunLengthEncoding,
+    NonLinearApproximation,
 };
 
 /// Compress `uncompressed_values` within `error_bound` using `method` and returns the results
@@ -71,10 +74,18 @@ pub fn compress(
     method: Method,
     error_bound: f32,
 ) Error!ArrayList(u8) {
-    if (uncompressed_values.len == 0) return Error.UnsupportedInput;
     if (error_bound < 0) return Error.UnsupportedErrorBound;
 
     var compressed_values = ArrayList(u8).init(allocator);
+
+    // If the input is one or zero elements, just store them uncompressed.
+    if (uncompressed_values.len < 2) {
+        if (uncompressed_values.len == 1) {
+            const value_as_bytes: [8]u8 = @bitCast(uncompressed_values[0]);
+            try compressed_values.appendSlice(value_as_bytes[0..]);
+        }
+        return compressed_values;
+    }
 
     switch (method) {
         .PoorMansCompressionMidrange => {
@@ -187,6 +198,14 @@ pub fn compress(
                 error_bound,
             );
         },
+        .NonLinearApproximation => {
+            try non_linear_approximation.compress(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                error_bound,
+            );
+        },
     }
     try compressed_values.append(@intFromEnum(method));
     return compressed_values;
@@ -199,7 +218,7 @@ pub fn decompress(
     allocator: Allocator,
     compressed_values: []const u8,
 ) Error!ArrayList(f64) {
-    if (compressed_values.len == 0) return Error.UnsupportedInput;
+    if (compressed_values.len == 0) return Error.CorruptedCompressedData;
 
     const method_index: u8 = compressed_values[compressed_values.len - 1];
     if (method_index > getMaxMethodIndex()) return Error.UnknownMethod;
@@ -208,6 +227,15 @@ pub fn decompress(
     const compressed_values_slice = compressed_values[0 .. compressed_values.len - 1];
 
     var decompressed_values = ArrayList(f64).init(allocator);
+
+    // Handle the trivial case of one or zero elements.
+    if (compressed_values.len < 9) {
+        if (compressed_values.len == 8) {
+            const value: f64 = @bitCast(compressed_values_slice[0..8].*);
+            try decompressed_values.append(value);
+        }
+        return decompressed_values;
+    }
 
     switch (method) {
         .PoorMansCompressionMidrange, .PoorMansCompressionMean => {
@@ -248,6 +276,9 @@ pub fn decompress(
         },
         .BitPackedQuantization => {
             try bitpacked_quantization.decompress(compressed_values_slice, &decompressed_values);
+        },
+        .NonLinearApproximation => {
+            try non_linear_approximation.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
     }
 
