@@ -697,7 +697,7 @@ pub fn generateRandomSinusoidalFunction(
     const amplitude = math.pow(f64, 10.0, random.float(f64) * 16.0 - 2.0);
     // Frequency sampled in [1e-4, 1e1) covers slowly to moderately fast variation.
     const frequency = math.pow(f64, 10.0, random.float(f64) * 5.0 - 4.0);
-    // Phase sampled in [0, 2\pi) ensures random starting point in the cycle.
+    // Phase sampled in [0, 2 * pi) ensures random starting point in the cycle.
     const phase = random.float(f64) * 2.0 * math.pi;
 
     const n = generateNumberOfValues(random);
