@@ -105,18 +105,26 @@ export fn decompress(
 }
 
 /// Frees a `compressed_values` buffer previously produced by `compress`.
+/// This function is primarily used by the Python and C bindings.
+/// If used independently, ensure that the actual allocated size of
+/// `compressed_values.data` matches the value stored in `compressed_values.len`.
+/// A mismatch between these two values will corrupt the memory allocator state.
 export fn freeCompressedValues(compressed_values: *CompressedValues) void {
     if (compressed_values.len != 0) {
         allocator.free(compressed_values.data[0..compressed_values.len]);
-        compressed_values.len = 0;
+        compressed_values.len = 0; // mark as freed
     }
 }
 
-/// Frees a `uncompressed_values` buffer previously produced by `decompress`.
+/// Frees an `uncompressed_values` buffer previously produced by `decompress`.
+/// This function is primarily used by the Python and C bindings.
+/// If used independently, ensure that the actual allocated size of
+/// `uncompressed_values.data` matches the value stored in `uncompressed_values.len`.
+/// A mismatch between these two values will corrupt the memory allocator state.
 export fn freeUncompressedValues(uncompressed_values: *UncompressedValues) void {
     if (uncompressed_values.len != 0) {
         allocator.free(uncompressed_values.data[0..uncompressed_values.len]);
-        uncompressed_values.len = 0;
+        uncompressed_values.len = 0; // mark as freed
     }
 }
 
