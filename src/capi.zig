@@ -115,7 +115,6 @@ export fn freeCompressedValues(compressed_values: *CompressedValues) void {
 /// Frees a `uncompressed_values` buffer previously produced by `decompress`.
 export fn freeUncompressedValues(uncompressed_values: *UncompressedValues) void {
     if (uncompressed_values.len != 0) {
-        // const ptr_mut: [*]u8 = @constCast(compressed_values.data);
         allocator.free(uncompressed_values.data[0..uncompressed_values.len]);
         uncompressed_values.len = 0;
     }
