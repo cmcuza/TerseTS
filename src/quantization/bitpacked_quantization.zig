@@ -54,7 +54,7 @@ pub fn compress(
     // Find the minimum value.
     var min_val = uncompressed_values[0];
     for (uncompressed_values) |value| {
-        if (!math.isFinite(value) or value > tester.max_test_value) return Error.UnsupportedInput;
+        if (!math.isFinite(value) or @abs(value) > tester.max_test_value) return Error.UnsupportedInput;
         if (value < min_val) min_val = value;
     }
 

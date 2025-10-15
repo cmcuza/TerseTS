@@ -17,6 +17,7 @@ enum Method {
   MixPiece = 12,
   BitPackedQuantization = 13,
   RunLengthEncoding = 14,
+  NonLinearApproximation = 15,
 };
 
 // A pointer to uncompressed values and the number of values.
