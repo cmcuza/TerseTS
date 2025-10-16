@@ -19,10 +19,17 @@ import pathlib
 import sysconfig
 from typing import List
 from enum import Enum, unique
-from ctypes import cdll, Structure, c_byte, c_float, c_double, c_size_t, POINTER, byref
+from ctypes import cdll, Structure, c_ubyte, c_float, c_int, \
+    c_double, c_size_t, POINTER, byref, string_at, cast
 
+try:
+    import numpy as np
+    _INSTALLED_NUMPY = True
+except Exception:
+    np = None
+    _INSTALLED_NUMPY = False
 
-# Private Functions.
+# Private function to load the library.
 def __load_library():
     """Locates the correct library for this system and loads it."""
 
@@ -50,28 +57,32 @@ def __load_library():
         # SHLIB_SUFFIX is set to .so but macOS uses .dylib.
         library_name = "tersets.dylib"
 
-    library_path = next(library_folder.glob("*" + library_name))
-    if library_path.exists():
-        return cdll.LoadLibrary(str(library_path))
+    try:
+        library_path = next(library_folder.glob("*" + library_name))
+    except StopIteration:
+        raise RuntimeError(f"Could not find TerseTS: looked '*{library_name}' in {library_folder}")
+    return cdll.LoadLibrary(str(library_path))
 
 
 # A global variable is used for the library so it is only initialized once and
 # can be easily used by the public functions without users having to pass it.
 __library = __load_library()
 
-
 # Private Types.
 class __UncompressedValues(Structure):
     _fields_ = [("data", POINTER(c_double)), ("len", c_size_t)]
 
-
 class __CompressedValues(Structure):
-    _fields_ = [("data", POINTER(c_byte)), ("len", c_size_t)]
-
+    _fields_ = [("data", POINTER(c_ubyte)), ("len", c_size_t)]
 
 class __Configuration(Structure):
-    _fields_ = [("method", c_byte), ("error_bound", c_float)]
+    _fields_ = [("method", c_ubyte), ("error_bound", c_float)]
 
+# Declare function signatures (safer; avoids silent arg mismatch).
+__library.compress.argtypes = [__UncompressedValues, POINTER(__CompressedValues), __Configuration]
+__library.compress.restype  = c_int
+__library.decompress.argtypes = [__CompressedValues, POINTER(__UncompressedValues)]
+__library.decompress.restype  = c_int
 
 # Mirror TerseTS Method Enum.
 @unique
@@ -93,48 +104,168 @@ class Method(Enum):
     RunLengthEncoding = 14
     NonLinearApproximation = 15
 
+# Public API. 
+def compress(values, method, error_bound: float) -> bytes:
+    """Compress a sequence of float64 values with a selected TerseTS method.
 
-# Public Functions.
-def compress(values: List[float], method: Method, error_bound: float) -> bytes:
-    """Compresses values."""
+    This function uses a zero-copy fast path when `values` is a NumPy
+    `ndarray` of dtype `float64` and C-contiguous. Otherwise, it falls back to
+    a ctypes copy for Python lists/tuples of floats.
 
+    Args:
+      values: Either a `numpy.ndarray` of dtype `float64` (C-contiguous) or a
+        `list`/`tuple` of floats.
+      method: A `Method` enum value selecting the compressor.
+      error_bound: Error bound parameter passed to the method (semantics depend
+        on `method`).
+
+    Returns:
+      Compressed payload as `bytes` (payload only; the trailing method byte is
+      handled by the native library).
+
+    Raises:
+      TypeError: If `method` is not a `Method` or `values` has an unsupported type.
+      RuntimeError: If the native `compress` call returns a non-zero error code.
+
+    Notes:
+      - **Zero-copy path**: when `values` is a `numpy.ndarray(float64, C-contig)`,
+        its data pointer is passed directly to the native layer (faster, less memory).
+      - **Copy path**: Python sequences are copied into a contiguous `double[]`
+        before compression.
+
+    Examples:
+      >>> import numpy as np
+      >>> arr = np.random.random(10).astype(np.float64)
+      >>> blob = compress(arr, Method.SwingFilter, 0.01)
+      >>> isinstance(blob, bytes)
+      True
+    """
+    # Validate compressor method type.
+    if not isinstance(method, Method):
+        available = ", ".join(m.name for m in Method)
+        raise TypeError(f"{method!r} is not a valid TerseTS Method. Available: {available}")
+
+    # Prepare an __UncompressedValues view and keep a Python reference alive during the call.
+    # The reference to the source buffer (NumPy array or ctypes array) must stay alive so the
+    # garbage collector does not free the underlying memory while the native code reads from it.
     uncompressed_values = __UncompressedValues()
-    uncompressed_values.data = (c_double * len(values))(*values)
-    uncompressed_values.len = len(values)
 
-    compressed_values = __CompressedValues()
-
-    if type(method) != Method:
-        # Method does not exists, raise error, and show available options.
-        available_methods = ", ".join([member.name for member in Method])
+    if _INSTALLED_NUMPY and isinstance(values, np.ndarray):
+        # Ensure dtype and memory layout are correct for zero-copy access.
+        # If `values` is already float64 and C-contiguous, no copy is made.
+        # Otherwise, np.ascontiguousarray() converts it (potentially copying)
+        # so we can safely pass its data pointer directly to the native layer.
+        if values.dtype != np.float64 or not values.flags["C_CONTIGUOUS"]:
+            values = np.ascontiguousarray(values, dtype=np.float64)
+        uncompressed_values.data = values.ctypes.data_as(POINTER(c_double))
+        uncompressed_values.len = values.size
+    elif isinstance(values, (list, tuple)):
+        # Build a contiguous C array of f64 values from the Python sequence.
+        # Python lists/tuples store references to float objects, not the raw
+        # float64 values themselves, so the data is not contiguous in memory.
+        # We copy each element into a new C double[] buffer to ensure the
+        # native layer can read a continuous block of numeric values.
+        buf = (c_double * len(values))(*values)
+        uncompressed_values.data = buf
+        uncompressed_values.len = len(values)
+    else:
+        # Invalid input type.
         raise TypeError(
-            f"'{method}' is not a valid TerseTS Method. Available method names are: {available_methods}"
+            "values must be a numpy.ndarray[float64] that is C-contiguous, or a list/tuple of floats."
         )
-
+    
+    # Prepare compressed values buffer.
+    compressed_values = __CompressedValues()
+    # Build the configuration struct for the native call.
     configuration = __Configuration(method.value, error_bound)
 
-    error = __library.compress(
-        uncompressed_values, byref(compressed_values), configuration
-    )
-
-    if error == 1:
-        raise ValueError("Unknown error.")
-
-    return compressed_values.data[: compressed_values.len]
+    try:
+        # Call native library.
+        tersets_error = __library.compress(uncompressed_values, byref(compressed_values), configuration)
+        if tersets_error != 0:
+            raise RuntimeError(f"compress failed: {tersets_error}")
+        
+        # Copy the compressed bytes into Python-owned memory (safe to return).
+        return string_at(compressed_values.data, compressed_values.len)
+    finally:
+        # This block ensures we free the Zig-allocated memory.
+        if compressed_values.data:
+            __library.freeCompressedValues(byref(compressed_values))
 
 
 def decompress(values: bytes) -> List[float]:
-    """Decompresses values."""
+    """Decompress a TerseTS-compressed buffer into a list of floats.
 
+    This function restores the original float64 sequence from a compressed
+    TerseTS payload. When NumPy is installed, it uses a zero-copy view of
+    the input buffer and an efficient conversion to Python list.
+
+    Args:
+      values: Compressed buffer as `bytes`, `bytearray`, or `memoryview`.
+        Passing `bytes` yields the best performance.
+
+    Returns:
+      Decompressed data as a `list[float]`.
+
+    Raises:
+      TypeError: If `values` is not a `bytes`, `bytearray`, or `memoryview`.
+      RuntimeError: If the native `decompress` call fails (non-zero error code).
+
+    Notes:
+      - **Zero-copy path**: when NumPy is installed, `np.frombuffer` maps
+        the compressed payload directly without copying.
+      - **Copy path**: without NumPy, a temporary contiguous `c_ubyte[]`
+        buffer is built before calling the native decompressor.
+
+    Examples:
+      >>> blob = compress([1.0, 2.0, 3.0], Method.SwingFilter, 0.01)
+      >>> decompress(blob)
+      [1.0, 2.0, 3.0]
+    """
+    # Validate input type.
+    if not isinstance(values, (bytes, bytearray, memoryview)):
+        raise TypeError("decompress(values): values must be bytes, bytearray, or memoryview")
+
+    # Prepare a __CompressedValues view and keep a Python reference alive during the call.
+    # The reference to the underlying buffer (NumPy view or ctypes array) must stay alive
+    # so that the garbage collector does not release it while the native code reads from it.
     compressed_values = __CompressedValues()
-    compressed_values.data = (c_byte * len(values))(*values)
-    compressed_values.len = len(values)
 
-    decompressed_values = __UncompressedValues()
+    if _INSTALLED_NUMPY:
+        # Zero-copy view of the compressed input; avoids building a c_ubyte[] buffer.
+        view = np.frombuffer(values, dtype=np.uint8)
+        compressed_values.data = view.ctypes.data_as(POINTER(c_ubyte))
+        compressed_values.len = view.size
+    else:
+        # No NumPy: make a temporary c_ubyte[] copy to pass into the native layer.
+        buf = (c_ubyte * len(values)).from_buffer_copy(values)
+        compressed_values.data = cast(buf, POINTER(c_ubyte))
+        compressed_values.len = len(values)
 
-    error = __library.decompress(compressed_values, byref(decompressed_values))
+    # Prepare destination struct for decompressed values.
+    uncompressed_values = __UncompressedValues()
+    try:
+        # Call native library.
+        tersets_error = __library.decompress(compressed_values, byref(uncompressed_values))
+        if tersets_error != 0:
+            raise RuntimeError(f"decompress failed: {tersets_error}")
 
-    if error == 1:
-        raise ValueError("Unknown decompression method.")
+        if _INSTALLED_NUMPY:
+            # Create a NumPy view over the returned f64s.
+            # IMPORTANT ON OWNERSHIP/LIFETIME:
+            # - `as_array(ptr, shape=...)` makes a *view* onto Zig-owned memory; it does not copy.
+            # - Returning this array would expose a dangling pointer once Zig frees/repurposes the buffer.
+            # - We therefore materialize a Python-owned object via `.tolist()`, which *copies* the data
+            #   and fully detaches from the Zig buffer. This keeps the API safe and GC-friendly.
+            return np.ctypeslib.as_array(
+                uncompressed_values.data,
+                shape=(uncompressed_values.len,)
+            ).tolist()
 
-    return decompressed_values.data[: decompressed_values.len]
+        # ctypes-only: slice the POINTER range into a Python list.
+        # `uncompressed_values.data[:len]` copies the values into a new Python list,
+        # so the result is owned by Python and independent from the Zig buffer.
+        return uncompressed_values.data[: uncompressed_values.len]
+    finally:
+        # This block ensures we free the Zig-allocated memory.
+        __library.freeUncompressedValues(byref(uncompressed_values))
