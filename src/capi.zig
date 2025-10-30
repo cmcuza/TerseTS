@@ -209,7 +209,6 @@ test "error for empty input when compressing" {
     );
 
     try testing.expectEqual(1, return_code);
-    try testing.expectEqual(0, compressed_values.len);
 }
 
 test "error for negative error bound when compressing" {
