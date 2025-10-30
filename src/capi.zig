@@ -56,15 +56,21 @@ export fn compress(
 
     const method: Method = @enumFromInt(configuration.method);
 
-    const compressed_values = tersets.compress(
+    var compressed_values = tersets.compress(
         allocator,
         uncompressed_values,
         method,
         configuration.error_bound,
     ) catch |err| return errorToInt(err);
 
-    compressed_values_array.data = compressed_values.items.ptr;
-    compressed_values_array.len = compressed_values.items.len;
+    // Convert the ArrayList into an owned slice with exact length.
+    // This call allocates a new buffer sized precisely to `len` and transfers ownership
+    // of the data from the ArrayList to the caller.
+    // Without this step, freeing later with `len` instead of `capacity` would corrupt the allocator.
+    const data_slice = compressed_values.toOwnedSlice() catch |err| return errorToInt(err);
+
+    compressed_values_array.data = data_slice.ptr;
+    compressed_values_array.len = data_slice.len;
 
     return 0;
 }
@@ -81,15 +87,45 @@ export fn decompress(
 ) i32 {
     const compressed_values = compressed_values_array.data[0..compressed_values_array.len];
 
-    const decompressed_values = tersets.decompress(
+    var decompressed_values = tersets.decompress(
         allocator,
         compressed_values,
     ) catch |err| return errorToInt(err);
 
-    decompressed_values_array.data = decompressed_values.items.ptr;
-    decompressed_values_array.len = decompressed_values.items.len;
+    // Convert the ArrayList into an owned slice with exact length.
+    // This call allocates a new buffer sized precisely to `len` and transfers ownership
+    // of the data from the ArrayList to the caller.
+    // Without this step, freeing later with `len` instead of `capacity` would corrupt the allocator.
+    const data_slice = decompressed_values.toOwnedSlice() catch |err| return errorToInt(err);
+
+    decompressed_values_array.data = data_slice.ptr;
+    decompressed_values_array.len = data_slice.len;
 
     return 0;
+}
+
+/// Frees a `compressed_values` buffer previously produced by `compress`.
+/// This function is primarily used by the Python and C bindings.
+/// If used independently, ensure that the actual allocated size of
+/// `compressed_values.data` matches the value stored in `compressed_values.len`.
+/// A mismatch between these two values will corrupt the memory allocator state.
+export fn freeCompressedValues(compressed_values: *CompressedValues) void {
+    if (compressed_values.len != 0) {
+        allocator.free(compressed_values.data[0..compressed_values.len]);
+        compressed_values.len = 0; // mark as freed
+    }
+}
+
+/// Frees an `uncompressed_values` buffer previously produced by `decompress`.
+/// This function is primarily used by the Python and C bindings.
+/// If used independently, ensure that the actual allocated size of
+/// `uncompressed_values.data` matches the value stored in `uncompressed_values.len`.
+/// A mismatch between these two values will corrupt the memory allocator state.
+export fn freeUncompressedValues(uncompressed_values: *UncompressedValues) void {
+    if (uncompressed_values.len != 0) {
+        allocator.free(uncompressed_values.data[0..uncompressed_values.len]);
+        uncompressed_values.len = 0; // mark as freed
+    }
 }
 
 /// `Array` is a pointer to values of type `data_type` and the number of values.
@@ -103,11 +139,12 @@ fn errorToInt(err: Error) i32 {
         Error.UnknownMethod => return 1,
         Error.UnsupportedInput => return 2,
         Error.UnsupportedErrorBound => return 3,
-        Error.OutOfMemory => return 4,
-        Error.ItemNotFound => return 5,
-        Error.EmptyConvexHull => return 6,
-        Error.EmptyQueue => return 7,
-        Error.ByteStreamError => return 8,
+        Error.CorruptedCompressedData => return 4,
+        Error.OutOfMemory => return 5,
+        Error.ItemNotFound => return 6,
+        Error.EmptyConvexHull => return 7,
+        Error.EmptyQueue => return 8,
+        Error.ByteStreamError => return 9,
     }
 }
 
@@ -164,7 +201,8 @@ test "error for empty input when compressing" {
         configuration,
     );
 
-    try testing.expectEqual(2, return_code);
+    try testing.expectEqual(0, return_code);
+    try testing.expectEqual(0, compressed_values.len);
 }
 
 test "error for negative error bound when compressing" {
@@ -199,7 +237,7 @@ test "error for empty input when decompressing" {
 
     const return_code = decompress(compressed_values, &decompressed_values);
 
-    try testing.expectEqual(2, return_code);
+    try testing.expectEqual(4, return_code);
 }
 
 test "can compress and decompress" {
@@ -234,4 +272,43 @@ test "can compress and decompress" {
     while (i < decompressed_values.len) : (i += 1) {
         try testing.expectEqual(uncompressed_values.data[i], decompressed_values.data[i]);
     }
+}
+
+test "free allocated compressed values" {
+    // Allocate a dummy compressed values array.
+    const array = try allocator.alloc(u8, 16);
+
+    // Fill to make it less trivial.
+    for (array, 0..) |*value, i|
+        value.* = @as(u8, @intCast(i));
+
+    var compressed_values = CompressedValues{
+        .data = array.ptr,
+        .len = array.len,
+    };
+
+    // First free should release the array and zero the length.
+    freeCompressedValues(&compressed_values);
+    try testing.expectEqual(@as(usize, 0), compressed_values.len);
+
+    // Second free should no try to deallocate again.
+    freeCompressedValues(&compressed_values);
+    try testing.expectEqual(@as(usize, 0), compressed_values.len);
+}
+
+test "free allocated uncompressed values" {
+    const array = try allocator.alloc(f64, 4);
+    for (array, 0..) |*value, i|
+        value.* = @as(f64, @floatFromInt(i));
+
+    var compressed_values = UncompressedValues{
+        .data = array.ptr,
+        .len = array.len,
+    };
+
+    freeUncompressedValues(&compressed_values);
+    try testing.expectEqual(@as(usize, 0), compressed_values.len);
+
+    freeUncompressedValues(&compressed_values);
+    try testing.expectEqual(@as(usize, 0), compressed_values.len);
 }

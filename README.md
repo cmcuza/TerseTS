@@ -78,47 +78,46 @@ TerseTS provides `./src/tersets.zig` as the single access point and two main fun
 #include "tersets.h"
 #include <stdio.h>
 
-int main() {
-   double uncompressed_values[] = {1.0, 2.0, 3.0, 4.0, 5.0};
-   struct UncompressedValues uncompressed_values = {data, 5};
+int main(void) {
+    // Input data
+    double data[] = {1.0, 2.0, 3.0, 4.0, 5.0};
+    struct UncompressedValues uncompressed_values = { data, 5 };
 
-   printf("Uncompressed data length: %lu\n", uncompressed_values.len);
+    printf("Uncompressed data length: %zu\n", uncompressed_values.len);
 
-   // Configuration for compression.
-   // The C-API mirrors the Method enum from tersets.zig.
-   // Use the SwingFilter method with an error bound of 0.1.
-   struct Configuration config = {SwingFilter, 0.1};
+    // Configuration for compression.
+    // The C API mirrors the `Method` enum from TerseTS.
+    struct Configuration config = { SwingFilter, 0.1f };
 
-   // Prepare for compressed data.
-   // The compressed values point to dynamically allocated data that should be deallocated.
-   struct CompressedValues compressed_values;
+    // Output buffers for compressed/decompressed data.
+    struct CompressedValues   compressed_values = {0};
+    struct UncompressedValues decompressed_values = {0};
 
-   // Compress the data.
-   int32_t result = compress(uncompressed_values, &compressed_values, config);
-   if (result != 0) {
-      printf("Compression failed with error code %d\n", result);
-      return -1;
-   }
+    // Compression.
+    int32_t result = compress(uncompressed_values, &compressed_values, config);
+    if (result != 0) {
+        printf("Compression failed with error code %d\n", result);
+        return -1;
+    }
 
-   printf("Compression successful. Decompressed data length: %lu\n", compressed_values.len);
+    printf("Compression successful. Compressed length: %zu bytes\n",
+           compressed_values.len);
 
-   // Prepare for decompressed data.
-   // The decompressed values point to dynamically allocated data that should be deallocated.
-   struct UncompressedValues decompressed_values;
+    // Decompression.
+    result = decompress(compressed_values, &decompressed_values, config);
+    if (result != 0) {
+        printf("Decompression failed with error code %d\n", result);
+        freeCompressedValues(&compressed_values);
+        return -1;
+    }
 
-   // Decompress the data.
-   int32_t result = decompress(compressed_values, &decompressed_values);
-   if (result != 0) {
-      printf("Decompression failed with error code %d\n", result);
-      return -1;
-   }
+    printf("Decompression successful. Decompressed length: %zu values\n",
+           decompressed_values.len);
 
-   printf("Decompression successful. Decompressed data length: %lu\n", decompressed_values.len);
-
-   // Free the compressed and decompressed values.
-   free(decompressed_values.data);
-   free(compressed_values.data);
-   return 0;
+    // Cleanup.
+    freeUncompressedValues(&decompressed_values);
+    freeCompressedValues(&compressed_values);
+    return 0;
 }
 ```
 

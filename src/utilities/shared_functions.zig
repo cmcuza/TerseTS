@@ -22,6 +22,8 @@ const tester = @import("../tester.zig");
 const Error = tersets.Error;
 const testing = std.testing;
 
+const shared_structs = @import("shared_structs.zig");
+
 /// Computes the Root-Mean-Squared-Errors (RMSE) for a segment of the `uncompressed_values`.
 /// This function calculates the error between the actual values and the predicted values
 /// based on a linear regression model fitted to the segment defined by `seg_start` and `seg_end`.
@@ -58,11 +60,11 @@ pub fn computeRMSE(uncompressed_values: []const f64, seg_start: usize, seg_end: 
 pub fn appendValue(comptime T: type, value: T, compressed_values: *ArrayList(u8)) !void {
     // Compile-time type check
     switch (@TypeOf(value)) {
-        i64, f64, usize => {
+        u64, i64, f64, usize => {
             const value_as_bytes: [8]u8 = @bitCast(value);
             try compressed_values.appendSlice(value_as_bytes[0..]);
         },
-        i32, f32 => {
+        u32, i32, f32 => {
             const value_as_bytes: [4]u8 = @bitCast(value);
             try compressed_values.appendSlice(value_as_bytes[0..]);
         },
@@ -80,6 +82,20 @@ pub fn appendValueAndIndexToArrayList(
     try compressed_values.appendSlice(valueAsBytes[0..]);
     const indexAsBytes: [8]u8 = @bitCast(index); // No -1 due to 0 indexing.
     try compressed_values.appendSlice(indexAsBytes[0..]);
+}
+
+/// Read a value of type `T` from `values` starting at `*offset`, advancing `*offset` by `@sizeOf(T)`.
+pub fn readOffsetValue(comptime T: type, values: []const u8, offset: *usize) Error!T {
+    const offset_delta = @sizeOf(T);
+    if (values.len - offset.* < offset_delta) return Error.UnsupportedInput;
+
+    // Read into a fixed-size byte array, then bit-cast.
+    var bytes: [@sizeOf(T)]u8 = undefined;
+    std.mem.copyForwards(u8, bytes[0..], values[offset.* .. offset.* + offset_delta]);
+
+    offset.* += offset_delta;
+    const value: T = @bitCast(bytes);
+    return value;
 }
 
 /// Test if the RMSE of the linear regression line that fits the points in the segment in `values`
@@ -138,4 +154,31 @@ pub fn isWithinErrorBound(
         if (@abs(uncompressed_value - decompressed_value) > error_bound) return false;
     }
     return true;
+}
+
+/// Reads a value of compile-time known type `T` from the beginning of the `compressed_values` byte
+/// slice. Returns the value if the `compressed_values` contains at least `@sizeOf(T)` bytes. Return
+/// an error otherwise.
+pub fn readValue(comptime T: type, compressed_values: []const u8) Error!T {
+    const size = @sizeOf(T);
+    if (size > compressed_values.len) {
+        return Error.UnsupportedInput; // Not enough bytes to read the value.
+    }
+    return @bitCast(compressed_values[0..size].*);
+}
+
+/// Returns `true` if two floating-point `value_a` and `value_b` numbers are approximately equal,
+/// using both absolute and relative tolerances to account for rounding errors. This function is
+/// necessary because direct comparison of floating-point values can fail due to rounding errors
+/// and representation limitations inherent in floating-point arithmetic. Absolute tolerance is used
+/// for values close to zero, while relative tolerance is used for larger magnitude values to ensure
+/// a meaningful comparison. The values are fixed to 1e-12 and 1e-15 for absolute and relative
+/// tolerances, respectively, which are suitable for f64 values.
+pub fn isApproximatelyEqual(value_a: f64, value_b: f64) bool {
+    if (value_a == value_b) return true;
+    if (!math.isFinite(value_a) or !math.isFinite(value_b))
+        return value_a == value_b; // Handle NaN and infinities.
+    const abs_diff = @abs(value_a - value_b);
+    const max_abs = @max(@abs(value_a), @abs(value_b));
+    return abs_diff <= shared_structs.ABS_EPS or abs_diff <= max_abs * shared_structs.REL_EPS;
 }

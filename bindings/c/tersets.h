@@ -1,51 +1,64 @@
-#include <stdint.h>
+#pragma once
+#include <stddef.h>   
+#include <stdint.h>  
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 // Mirror the compression methods provided by TerseTS.
 enum Method {
-  PoorMansCompressionMidrange = 0,
-  PoorMansCompressionMean = 1,
-  SwingFilter = 2,
-  SwingFilterDisconnected = 3,
-  SlideFilter = 4,
-  SimPiece = 5,
-  PiecewiseConstantHistogram = 6,
-  PiecewiseLinearHistogram = 7,
-  ABCLinearApproximation = 8,
-  VisvalingamWhyatt = 9,
-  SlidingWindow = 10,
-  BottomUp = 11,
-  MixPiece = 12,
-  BitPackedQuantization = 13,
-  RunLengthEncoding = 14,
+  PoorMansCompressionMidrange   = 0,
+  PoorMansCompressionMean       = 1,
+  SwingFilter                   = 2,
+  SwingFilterDisconnected       = 3,
+  SlideFilter                   = 4,
+  SimPiece                      = 5,
+  PiecewiseConstantHistogram    = 6,
+  PiecewiseLinearHistogram      = 7,
+  ABCLinearApproximation        = 8,
+  VisvalingamWhyatt             = 9,
+  SlidingWindow                 = 10,
+  BottomUp                      = 11,
+  MixPiece                      = 12,
+  BitPackedQuantization         = 13,
+  RunLengthEncoding             = 14,
+  NonLinearApproximation        = 15,
 };
 
-// A pointer to uncompressed values and the number of values.
+// Read-only view of input data (the library will not modify it).
 struct UncompressedValues {
-  double const * const data;
-  uintptr_t const len;
+  const double *data;
+  size_t        len;
 };
 
-// A pointer to compressed values and the number of bytes.
+// Output buffer for compressed bytes (the library writes these fields).
 struct CompressedValues {
-  uint8_t const * const data;
-  uintptr_t const len;
+  uint8_t *data;   
+  size_t   len;    
 };
 
-// Configuration to use for compression and/or decompression.
+// Compression configuration.
 struct Configuration {
-  uint8_t const method;
-  float const error_bound;
+  uint8_t method;
+  float   error_bound;
 };
 
-// Compress uncompressed_values to compressed_values according to
-// configuration. The following non-zero values are returned on errors:
-// - 1) Unsupported compression method.
-int32_t compress(struct UncompressedValues const uncompressed_values,
-                 struct CompressedValues *const compressed_values,
-                 struct Configuration const configuration);
+// Compress uncompressed_values to compressed_values according to configuration.
+// Returns 0 on success, non-zero on error (e.g., 1 = unsupported method).
+int32_t compress(struct UncompressedValues uncompressed_values,
+                 struct CompressedValues *compressed_values,
+                 struct Configuration configuration);
 
-// Decompress compressed_values to uncompressed_values according to
-// configuration. The following non-zero values are returned on errors:
-// - 1) Unsupported decompression method.
-int32_t decompress(struct CompressedValues const compressed_values,
-                   struct UncompressedValues const * const uncompressed_values);
+// Decompress compressed_values to uncompressed_values according to configuration.
+// Returns 0 on success, non-zero on error (e.g., 1 = unsupported method).
+int32_t decompress(struct CompressedValues compressed_values,
+                   struct UncompressedValues *uncompressed_values);
+
+// Free functions.
+void freeCompressedValues(struct CompressedValues *compressed_values);
+void freeUncompressedValues(struct UncompressedValues *uncompressed_values);
+
+#ifdef __cplusplus
+}
+#endif
