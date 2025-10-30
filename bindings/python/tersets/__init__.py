@@ -103,6 +103,8 @@ class Method(Enum):
     BitPackedQuantization = 13
     RunLengthEncoding = 14
     NonLinearApproximation = 15
+    SerfQt = 16
+    SerfXor = 17
 
 # Public API. 
 def compress(values, method, error_bound: float) -> bytes:

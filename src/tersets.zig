@@ -30,6 +30,8 @@ const bottom_up = @import("line_simplification/bottom_up.zig");
 const rle_enconding = @import("lossless_encoding/run_length_encoding.zig");
 const bitpacked_quantization = @import("quantization/bitpacked_quantization.zig");
 const non_linear_approximation = @import("functional_approximation/non_linear_approximation.zig");
+const serf_qt = @import("serf/serf_qt.zig");
+const serf_xor = @import("serf/serf_xor.zig");
 
 /// The errors that can occur in TerseTS.
 pub const Error = error{
@@ -62,6 +64,8 @@ pub const Method = enum {
     BitPackedQuantization,
     RunLengthEncoding,
     NonLinearApproximation,
+    SerfQt,
+    SerfXor,
 };
 
 /// Compress `uncompressed_values` within `error_bound` using `method` and returns the results
@@ -206,6 +210,20 @@ pub fn compress(
                 error_bound,
             );
         },
+        .SerfQt => {
+            try serf_qt.compress(
+                uncompressed_values,
+                &compressed_values,
+                error_bound,
+            );
+        },
+        .SerfXor => {
+            try serf_xor.compress(
+                uncompressed_values,
+                &compressed_values,
+                error_bound,
+            );
+        },
     }
     try compressed_values.append(@intFromEnum(method));
     return compressed_values;
@@ -279,6 +297,12 @@ pub fn decompress(
         },
         .NonLinearApproximation => {
             try non_linear_approximation.decompress(allocator, compressed_values_slice, &decompressed_values);
+        },
+        .SerfQt => {
+            try serf_qt.decompress(compressed_values_slice, &decompressed_values);
+        },
+        .SerfXor => {
+            try serf_xor.decompress(compressed_values_slice, &decompressed_values);
         },
     }
 

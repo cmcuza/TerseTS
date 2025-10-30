@@ -15,6 +15,10 @@
 //! Contains all shared variables and structures used across TerseTS.
 
 const std = @import("std");
+const mem = std.mem;
+const testing = std.testing;
+
+const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const HashMap = std.HashMap;
 
 /// Margin to adjust the error bound for numerical stability. Reducing the error bound by this
@@ -51,6 +55,123 @@ pub const LinearFunction = struct {
     intercept: f64,
 };
 
+pub const BitStream = struct {
+    buffer: ArrayListUnmanaged(u8),
+    allocator: mem.Allocator,
+    fill: u64,
+
+    pub fn make(allocator: mem.Allocator) !BitStream {
+        return BitStream {
+            .buffer = try ArrayListUnmanaged(u8).initCapacity(allocator, 1),
+            .allocator = allocator,
+            .fill = 0,
+        };
+    }
+
+    // "takes ownership" of the array list
+    pub fn makeFromArrayList(al: *std.ArrayList(u8), fill: u64) BitStream {
+        return BitStream {
+            .buffer = al.moveToUnmanaged(),
+            .allocator = al.allocator,
+            .fill = fill,
+        };
+    }
+
+    pub fn makeFromArrayUnmanaged(arr: []u8) BitStream {
+        return BitStream {
+            .buffer = ArrayListUnmanaged(u8).initBuffer(arr),
+            // NOTE (sio): Zig does not have a panic allocator, and does not allow easy construction of an allocator that fails. So this is the only viable way to actually _maybe_ fail.
+            .allocator = std.mem.Allocator { .ptr = &arr[0], .vtable = std.heap.page_allocator.vtable },
+            .fill = 0,
+        };
+    }
+
+    pub fn deinit(self: *BitStream) void {
+        self.buffer.deinit(self.allocator);
+    }
+
+    pub fn empty(self: *const BitStream) bool {
+        return self.fill == 0;
+    }
+
+    // for usage as an output stream:
+    // initialize with an arraylist to be overwritten
+    // set fill to 0
+    // fill will be advanced and arraylist size will be increased with zeroes as necessary to fit contents
+
+    // write up to 64 bits, incrementing fill
+    pub fn write(self: *BitStream, content: u64, len: u32) !void {
+        var j: usize = len;
+        while (j > 0) {
+            const i = j - 1;
+            const v = content >> @truncate(i);
+            try self.writeBit(@truncate(v));
+            j -= 1;
+        }
+    }
+
+    pub fn writeBit(self: *BitStream, content: u1) !void {
+        if (self.buffer.items.len <= ((self.fill + 1) * 8)) {
+            try self.buffer.append(self.allocator, 0);
+        }
+        self.set(self.fill, content);
+        self.fill += 1;
+    }
+
+    // for usage as an input stream:
+    // initialize with an arraylist to be read from
+    // set fill to 0
+    // fill will be advanced for every bit read until end-of-array is hit
+
+    // read up to 64 bits, incrementing fill
+    pub fn read(self: *BitStream, len: u32) u64 {
+        var res: u64 = 0;
+        var j: usize = len;
+        while (j > 0) {
+            const i = j - 1;
+            res |= (@as(u64, @intCast(self.readBit())) << @truncate(i));
+            j -= 1;
+        }
+        return res;
+    }
+
+    pub fn canRead(self: *BitStream, len: u32) bool {
+        return self.fill + len < self.buffer.items.len;
+    }
+
+    pub fn readBit(self: *BitStream) u1 {
+        const t = self.get(self.fill);
+        self.fill += 1;
+        return t;
+    }
+
+    // read len bits off the end and decrement fill
+    pub fn pop(self: *BitStream, len: u32) u64 {
+        std.debug.assert(self.fill >= len);
+        self.fill -= len;
+        const res = self.read(len);
+        self.fill -= len;
+        return res;
+    }
+
+
+    // for usage as a plain bit array
+
+    pub fn get(self: *BitStream, index: u64) u1 {
+        return @truncate((self.buffer.items[index >> 3] >> @truncate(index & 0x7)) & 1);
+    }
+
+    pub fn set(self: *BitStream, index: u64, value: u1) void {
+        const byte_idx = index >> 3;
+        const bit_idx = index & 0x7;
+
+        const tmp = self.buffer.items[byte_idx];
+        const clear = tmp & ~(@as(u8, 1) << @truncate(bit_idx));
+        const set_bit = clear | (@as(u8, @intCast(value)) << @truncate(bit_idx));
+        self.buffer.items[byte_idx] = set_bit;
+    }
+};
+
 /// `Point` is a point represented by `time` and `value`. `time` is of datatype `time_type`.
 fn Point(comptime time_type: type) type {
     return struct { time: time_type, value: f64 };
@@ -84,4 +205,59 @@ pub const HashF64Context = struct {
 /// Returns a HashMap with key type f64 and `value_type` given by the user.
 pub fn HashMapf64(comptime value_type: type) type {
     return HashMap(f64, value_type, HashF64Context, std.hash_map.default_max_load_percentage);
+}
+test "empty BitStream is recognized as empty" {
+    var d = [1]u8 { 0 };
+    var bs = BitStream.makeFromArrayUnmanaged(&d);
+    bs.fill = 0;
+    try testing.expect(bs.empty());
+}
+
+test "can read and write integers of various sizes to/from bitstream" {
+    var bs = try BitStream.make(testing.allocator);
+    defer bs.deinit();
+    var prng = std.Random.DefaultPrng.init(@bitCast(std.time.milliTimestamp()));
+    const random = prng.random();
+    for (1..65) |v1size| {
+        var v1sz: u64 = std.math.maxInt(u64);
+        if (v1size < 64) {
+            v1sz = 1;
+            v1sz <<= @truncate(v1size);
+            v1sz -= 1;
+        }
+        const v1 = random.uintAtMost(u64, v1sz);
+        try bs.write(v1, @truncate(v1size));
+        const v1r = bs.pop(@truncate(v1size));
+        try testing.expectEqual(v1, v1r);
+    }
+}
+
+
+test "can read and write 2 successive integers of various sizes to/from bitstream" {
+    var bs = try BitStream.make(testing.allocator);
+    defer bs.deinit();
+    var prng = std.Random.DefaultPrng.init(@bitCast(std.time.milliTimestamp()));
+    const random = prng.random();
+    for (1..65) |v1size| {
+        var v1sz: u64 = std.math.maxInt(u64);
+        if (v1size < 64) {
+            v1sz = 1;
+            v1sz <<= @truncate(v1size);
+            v1sz -= 1;
+        }
+        const v1 = random.uintAtMost(u64, v1sz);
+        try bs.write(v1, @truncate(v1size));
+        for (1..65) |v2size| {
+            var v2sz: u64 = std.math.maxInt(u64);
+            if (v2size < 64) {
+                v2sz = 1;
+                v2sz <<= @truncate(v2size);
+                v2sz -= 1;
+            }
+            const v2 = random.uintAtMost(u64, v2sz);
+            try bs.write(v2, @truncate(v2size));
+            try testing.expectEqual(bs.pop(@truncate(v2size)), v2);
+        }
+        try testing.expectEqual(bs.pop(@truncate(v1size)), v1);
+    }
 }
