@@ -18,6 +18,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
+const config = @import("config.zig");
+
 const poor_mans_compression = @import("functional_approximation/poor_mans_compression.zig");
 const swing_slide_filter = @import("functional_approximation/swing_slide_filter.zig");
 const sim_piece = @import("functional_approximation/sim_piece.zig");
@@ -42,6 +44,7 @@ pub const Error = error{
     EmptyConvexHull,
     EmptyQueue,
     ByteStreamError,
+    InvalidConfiguration,
 };
 
 /// The compression methods in TerseTS.
@@ -72,19 +75,64 @@ pub fn compress(
     allocator: Allocator,
     uncompressed_values: []const f64,
     method: Method,
-    error_bound: f32,
+    configuration: []const u8,
 ) Error!ArrayList(u8) {
+    // Parse the configuration for the selected compression method.
+    // This will validate the configuration and return the appropriate struct or an error.
+    const parsed_cfg = config.parse(allocator, method, configuration);
+
+    // If the configuration is invalid, return an error.
+    // Printing the expected configuration can be improved.
+    if (parsed_cfg == config.Configuration.InvalidConfiguration) {
+        std.debug.print("Invalid Configuration: expected {s}\n", .{
+            parsed_cfg.InvalidConfiguration.expected_configuration,
+        });
+        return Error.InvalidConfiguration;
+    }
+
+    // Extract the error bound from the parsed configuration, if required by the method.
+    const error_bound: f32 = switch (parsed_cfg) {
+        .AbsoluteErrorBound => |value| value.abs_error_bound,
+        .AggregateError => |value| value.aggregate_error_bound,
+        .AreaUnderCurveError => |value| value.area_under_curve_error,
+        .RelativeErrorBound => |value| value.rel_error_bound,
+        else => std.math.inf(f32),
+    };
+
+    // Extract the number of bins from the parsed configuration, if required by the method.
+    const number_histogram_bins: ?u32 = switch (parsed_cfg) {
+        .HistogramBinsNumber => |value| value.histogram_bins_number,
+        else => null,
+    };
+
+    // Extract the error type from the parsed configuration, if required by the method.
+    const error_type: []const u8 = switch (parsed_cfg) {
+        .AggregateError => |value| value.aggregate_error_type,
+        else => "rmse", // default error_type.
+    };
+
     if (error_bound < 0) return Error.UnsupportedErrorBound;
+
+    // Check if the number of bins is not null.
+    // If not, that means that the input method requires the number of bins,
+    // so we need to check if that number is valid.
+    if (number_histogram_bins) |num_hist_bin| {
+        if (num_hist_bin <= 1)
+            return Error.UnsupportedErrorBound;
+    }
 
     var compressed_values = ArrayList(u8).init(allocator);
 
-    // If the input is one or zero elements, just store them uncompressed.
+    // If the input is one or zero elements, just store them uncompressed disregarding
+    // the compression method.
     if (uncompressed_values.len < 2) {
         if (uncompressed_values.len == 1) {
             const value_as_bytes: [8]u8 = @bitCast(uncompressed_values[0]);
             try compressed_values.appendSlice(value_as_bytes[0..]);
+            return compressed_values;
         }
-        return compressed_values;
+        // The uncompressed_values is empty.
+        return Error.UnsupportedInput;
     }
 
     switch (method) {
@@ -141,19 +189,23 @@ pub fn compress(
             );
         },
         .PiecewiseConstantHistogram => {
+            // Again, we need to extract the actual value from the optional `number_histogram_bins`.
+            const max_buckets = number_histogram_bins orelse return Error.InvalidConfiguration;
             try piecewise_histogram.compressPWCH(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                max_buckets,
             );
         },
         .PiecewiseLinearHistogram => {
+            // Again, we need to extract the actual value from the optional `number_histogram_bins`.
+            const max_buckets = number_histogram_bins orelse return Error.InvalidConfiguration;
             try piecewise_histogram.compressPWLH(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                max_buckets,
             );
         },
         .ABCLinearApproximation => {
@@ -173,22 +225,33 @@ pub fn compress(
             );
         },
         .SlidingWindow => {
-            try sliding_window.compress(
-                uncompressed_values,
-                &compressed_values,
-                error_bound,
-            );
+            if (std.mem.eql(u8, error_type, "rmse")) {
+                try sliding_window.compress(
+                    uncompressed_values,
+                    &compressed_values,
+                    error_bound,
+                );
+            } else {
+                return Error.InvalidConfiguration;
+            }
         },
         .BottomUp => {
-            try bottom_up.compress(
-                allocator,
-                uncompressed_values,
-                &compressed_values,
-                error_bound,
-            );
+            if (std.mem.eql(u8, error_type, "rmse")) {
+                try bottom_up.compress(
+                    allocator,
+                    uncompressed_values,
+                    &compressed_values,
+                    error_bound,
+                );
+            } else {
+                return Error.InvalidConfiguration;
+            }
         },
         .RunLengthEncoding => {
-            try rle_enconding.compress(uncompressed_values, &compressed_values);
+            try rle_enconding.compress(
+                uncompressed_values,
+                &compressed_values,
+            );
         },
         .BitPackedQuantization => {
             try bitpacked_quantization.compress(
@@ -220,22 +283,21 @@ pub fn decompress(
 ) Error!ArrayList(f64) {
     if (compressed_values.len == 0) return Error.CorruptedCompressedData;
 
+    var decompressed_values = ArrayList(f64).init(allocator);
+
+    // Handle the trivial case of one element.
+    if (compressed_values.len == 8) {
+        const value: f64 = @bitCast(compressed_values[0..8].*);
+        try decompressed_values.append(value);
+        return decompressed_values;
+    }
+
     const method_index: u8 = compressed_values[compressed_values.len - 1];
+
     if (method_index > getMaxMethodIndex()) return Error.UnknownMethod;
 
     const method: Method = @enumFromInt(method_index);
     const compressed_values_slice = compressed_values[0 .. compressed_values.len - 1];
-
-    var decompressed_values = ArrayList(f64).init(allocator);
-
-    // Handle the trivial case of one or zero elements.
-    if (compressed_values.len < 9) {
-        if (compressed_values.len == 8) {
-            const value: f64 = @bitCast(compressed_values_slice[0..8].*);
-            try decompressed_values.append(value);
-        }
-        return decompressed_values;
-    }
 
     switch (method) {
         .PoorMansCompressionMidrange, .PoorMansCompressionMean => {

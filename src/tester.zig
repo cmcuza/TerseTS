@@ -260,15 +260,26 @@ pub fn testGeneratedCompression(
     // Ensure that the error bound is a percentage of the range of the uncompressed values.
     // To avoid scanning for the minimum and maximum values, the first and last values are used
     // as a proxy for the range. This is a simplification, but it is sufficient for testing purposes.
-    const ranged_error_bound: f32 = @as(f32, @floatCast(@abs(
+    const data_range: f32 = @as(f32, @floatCast(@abs(
         uncompressed_values.items[0] - uncompressed_values.items[uncompressed_values.items.len - 1],
-    ) * error_bound)) + 0.5; // Add 0.5 to avoid zero error bound.
+    )));
+    // Check if the error bound is finite and add 0.5 to avoid zero error bound.
+    const ranged_error_bound: f32 = (if (math.isFinite(data_range)) data_range else 1.0) * error_bound + 0.5;
+
+    // Create the configuration json string. This function only checks for methods
+    // that support an absolute error bound.
+    const config_json = try std.fmt.allocPrint(
+        allocator,
+        "{{\"abs_error_bound\": {d}}}",
+        .{ranged_error_bound},
+    );
+    defer allocator.free(config_json);
 
     const compressed = try tersets.compress(
         allocator,
         uncompressed_values.items,
         method,
-        ranged_error_bound,
+        config_json,
     );
     defer compressed.deinit();
 
@@ -405,11 +416,18 @@ pub fn testCompressAndDecompress(
         error_bound: f32,
     ) bool,
 ) !void {
+    const config_json = try std.fmt.allocPrint(
+        allocator,
+        "{{\"abs_error_bound\": {d}}}",
+        .{error_bound},
+    );
+    defer allocator.free(config_json);
+
     const compressed_values = try tersets.compress(
         allocator,
         uncompressed_values,
         method,
-        error_bound,
+        config_json,
     );
     defer compressed_values.deinit();
 

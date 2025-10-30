@@ -355,7 +355,7 @@ fn mergeCost(uncompressed_values: []const f64, seg_one: SegmentMergeCost, seg_tw
 
 test "bottom-up can compress and decompress with zero error bound" {
     const allocator = testing.allocator;
-    const error_bound = 0.0;
+    const error_bound: f32 = 0.0;
 
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
@@ -367,13 +367,29 @@ test "bottom-up can compress and decompress with zero error bound" {
         undefined,
     );
 
-    try tester.testCompressAndDecompress(
+    const config_json = try std.fmt.allocPrint(
+        allocator,
+        "{{\"aggregate_error_type\": \"rmse\", \"aggregate_error_bound\": {d}}}",
+        .{error_bound},
+    );
+    defer allocator.free(config_json);
+
+    const compressed_values = try tersets.compress(
         allocator,
         uncompressed_values.items,
-        Method.BottomUp,
-        error_bound,
-        shared_functions.isWithinErrorBound,
+        tersets.Method.BottomUp,
+        config_json,
     );
+    defer compressed_values.deinit();
+
+    const decompressed_values = try tersets.decompress(allocator, compressed_values.items);
+    defer decompressed_values.deinit();
+
+    try testing.expect(shared_functions.isWithinErrorBound(
+        uncompressed_values.items,
+        decompressed_values.items,
+        error_bound,
+    ));
 }
 
 test "bottom-up cannot compress and decompress nan values" {

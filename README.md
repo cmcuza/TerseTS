@@ -35,11 +35,12 @@ pub fn main() void {
 
    // Configuration for compression.
    // The supported compression methods are specified in tersets.zig.
+   // The supported configuration are specified in config.zig.
    const method = tersets.Method.SwingFilter;
-   const error_bound: f32 = 0.1;
+   const configuration = "{ \"abs_error_bound\": 0.1 }";
 
    // Compress the data.
-   var compressed_values = try tersets.compress(uncompressed_values, allocator, method, error_bound);
+   var compressed_values = try tersets.compress(uncompressed_values, allocator, method, configuration);
    // The compressed values point to dynamically allocated data that should be deallocated.
    defer compressed_values.deinit();
 
@@ -86,15 +87,14 @@ int main(void) {
     printf("Uncompressed data length: %zu\n", uncompressed_values.len);
 
     // Configuration for compression.
-    // The C API mirrors the `Method` enum from TerseTS.
-    struct Configuration config = { SwingFilter, 0.1f };
+     const char *cfg = "{\"abs_error_bound\": 0.01}";
 
     // Output buffers for compressed/decompressed data.
     struct CompressedValues   compressed_values = {0};
     struct UncompressedValues decompressed_values = {0};
 
-    // Compression.
-    int32_t result = compress(uncompressed_values, &compressed_values, config);
+    // Compression. The C API mirrors the `Method` enum from TerseTS.
+    int32_t result = compress(uncompressed_values, &compressed_values, SwingFilter, cfg);
     if (result != 0) {
         printf("Compression failed with error code %d\n", result);
         return -1;
@@ -152,14 +152,14 @@ uncompressed_values = [1.0, 2.0, 3.0, 4.0, 5.0]
 # Configuration for compression.
 # The supported compression methods are specified in tersets.zig.
 method = Method.SwingFilter
-error_bound = 0.1
+configuration = {"abs_error_bound": 0.1}
 
 print("Uncompressed data length: ", len(uncompressed_values))
 
 # The supported compression methods are specified in tersets.zig.
 # The Python-API provides a `Method` enum to access the available methods.
 # Compress the data.
-compressed_values = compress(uncompressed_values, method, error_bound)
+compressed_values = compress(uncompressed_values, method, configuration)
 
 print("Compression successful. Compressed data length: ", len(compressed_values))
 
