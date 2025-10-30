@@ -17,10 +17,11 @@
 import sys
 import pathlib
 import sysconfig
+import json
 from typing import List
 from enum import Enum, unique
-from ctypes import cdll, Structure, c_ubyte, c_float, c_int, \
-    c_double, c_size_t, POINTER, byref, string_at, cast
+from ctypes import cdll, Structure, c_ubyte, c_float, c_int, c_char_p, \
+    c_double, c_size_t, c_uint8, POINTER, byref, string_at, cast
 
 try:
     import numpy as np
@@ -79,7 +80,7 @@ class __Configuration(Structure):
     _fields_ = [("method", c_ubyte), ("error_bound", c_float)]
 
 # Declare function signatures (safer; avoids silent arg mismatch).
-__library.compress.argtypes = [__UncompressedValues, POINTER(__CompressedValues), __Configuration]
+__library.compress.argtypes = [__UncompressedValues, POINTER(__CompressedValues), c_uint8, c_char_p]
 __library.compress.restype  = c_int
 __library.decompress.argtypes = [__CompressedValues, POINTER(__UncompressedValues)]
 __library.decompress.restype  = c_int
@@ -105,7 +106,7 @@ class Method(Enum):
     NonLinearApproximation = 15
 
 # Public API. 
-def compress(values, method, error_bound: float) -> bytes:
+def compress(values, method, configuration: dict) -> bytes:
     """Compress a sequence of float64 values with a selected TerseTS method.
 
     This function uses a zero-copy fast path when `values` is a NumPy
@@ -116,8 +117,7 @@ def compress(values, method, error_bound: float) -> bytes:
       values: Either a `numpy.ndarray` of dtype `float64` (C-contiguous) or a
         `list`/`tuple` of floats.
       method: A `Method` enum value selecting the compressor.
-      error_bound: Error bound parameter passed to the method (semantics depend
-        on `method`).
+      configuration: A dictionary containing the configuration for the input method.
 
     Returns:
       Compressed payload as `bytes` (payload only; the trailing method byte is
@@ -136,7 +136,7 @@ def compress(values, method, error_bound: float) -> bytes:
     Examples:
       >>> import numpy as np
       >>> arr = np.random.random(10).astype(np.float64)
-      >>> blob = compress(arr, Method.SwingFilter, 0.01)
+      >>> blob = compress(arr, Method.SwingFilter, {"abs_error_bound": 0.01})
       >>> isinstance(blob, bytes)
       True
     """
@@ -177,11 +177,14 @@ def compress(values, method, error_bound: float) -> bytes:
     # Prepare compressed values buffer.
     compressed_values = __CompressedValues()
     # Build the configuration struct for the native call.
-    configuration = __Configuration(method.value, error_bound)
+    json_config = json.dumps(configuration).encode("utf-8")
 
     try:
         # Call native library.
-        tersets_error = __library.compress(uncompressed_values, byref(compressed_values), configuration)
+        tersets_error = __library.compress(uncompressed_values, 
+                                           byref(compressed_values), 
+                                           c_uint8(method.value), 
+                                           c_char_p(json_config))
         if tersets_error != 0:
             raise RuntimeError(f"compress failed: {tersets_error}")
         

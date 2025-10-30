@@ -57,7 +57,9 @@ class TerseTSPythonTest(unittest.TestCase):
                                 Method.SwingFilterDisconnected,
                                 Method.SlideFilter])
         
-        compressed = compress(uncompressed, method, 0.0)
+        configuration = {"abs_error_bound": 0.0}
+        
+        compressed = compress(uncompressed, method, configuration)
         decompressed = decompress(compressed)
         self.assertEqual(uncompressed, decompressed)
 
