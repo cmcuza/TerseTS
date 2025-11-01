@@ -28,8 +28,8 @@ jobs:
     runs-on: ${{ matrix.operating-system }}
     strategy:
       matrix:
-        # macos-13 is used instead of macos-latest as Zig compiles to x86_64 on mac
-        operating-system: [ubuntu-latest, macos-13, windows-latest]
+        # macos-14 is used instead of macos-latest as Zig compiles to x86_64 on mac
+        operating-system: [ubuntu-latest, macos-14, windows-latest]
 
     steps:
     - uses: actions/checkout@v4
