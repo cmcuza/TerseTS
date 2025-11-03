@@ -28,14 +28,14 @@ jobs:
     runs-on: ${{ matrix.operating-system }}
     strategy:
       matrix:
-        # macos-13 is used instead of macos-latest as Zig compiles to x86_64 on mac
-        operating-system: [ubuntu-latest, macos-13, windows-latest]
+        # macos-15-intel is used instead of macos-latest as Zig compiles to x86_64 on mac.
+        operating-system: [ubuntu-latest, macos-15-intel, windows-latest]
 
     steps:
     - uses: actions/checkout@v4
     - uses: mlugg/setup-zig@v2
       with:
-        version: 0.14.0  # Use a stable Zig version
+        version: 0.14.0  # Use a stable Zig version.
     - name: Clear Zig Cache 
       run: Remove-Item -Recurse -Force "$env:LOCALAPPDATA\zig" -ErrorAction SilentlyContinue
       shell: pwsh
