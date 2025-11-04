@@ -60,22 +60,6 @@ pub const AreaUnderCurveError = struct {
 /// Empty configuration for methods that do not require any parameters.
 pub const EmptyConfiguration = struct {};
 
-/// Used to indicate that the provided configuration is invalid or missing required fields.
-/// The expected configuration is described in the error.
-pub const InvalidConfiguration = struct {
-    expected_configuration: []const u8,
-};
-
-const Configuration = enum {
-    AbsoluteErrorBound,
-    RelativeErrorBound,
-    HistogramBinsNumber,
-    AggregateError,
-    AreaUnderCurveError,
-    EmptyConfiguration,
-    InvalidConfiguration,
-};
-
 /// This is a small convenience wrapper around json.parseFromSlice that accepts a
 /// `ConfigurationType` and parses the the JSON text `configuration`. The function
 /// returns the parsed value on success, or `null` on failure. The `allocator` is
@@ -95,8 +79,20 @@ pub fn parse(
     return parsed.value;
 }
 
+/// Enum used internally for testing that the parser is working well.
+const Configuration = enum {
+    AbsoluteErrorBound,
+    RelativeErrorBound,
+    HistogramBinsNumber,
+    AggregateError,
+    AreaUnderCurveError,
+    EmptyConfiguration,
+    InvalidConfiguration,
+};
+
 /// Get valid configuration given a `method`. If the method does not exist in TerseTS,
-/// the function retuns the `InvalidConfiguration`.
+/// the function retuns the `InvalidConfiguration`. This function is only used during
+/// testing to validate that the parser works well.
 fn getConfiguration(method: tersets.Method) type {
     return switch (method) {
         .PoorMansCompressionMean,
