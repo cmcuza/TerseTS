@@ -76,9 +76,6 @@ class __UncompressedValues(Structure):
 class __CompressedValues(Structure):
     _fields_ = [("data", POINTER(c_ubyte)), ("len", c_size_t)]
 
-class __Configuration(Structure):
-    _fields_ = [("method", c_ubyte), ("error_bound", c_float)]
-
 # Declare function signatures (safer; avoids silent arg mismatch).
 __library.compress.argtypes = [__UncompressedValues, POINTER(__CompressedValues), c_uint8, c_char_p]
 __library.compress.restype  = c_int
@@ -106,7 +103,7 @@ class Method(Enum):
     NonLinearApproximation = 15
 
 # Public API. 
-def compress(values, method, configuration: dict | str) -> bytes:
+def compress(values, method, configuration) -> bytes:
     """Compress a sequence of float64 values with a selected TerseTS method.
 
     This function uses a zero-copy fast path when `values` is a NumPy
