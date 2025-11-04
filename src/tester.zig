@@ -142,91 +142,91 @@ pub fn testErrorBoundedCompressionMethod(
     for (data_distributions) |dist| {
         const error_bound: f32 = random.float(f32) + 1e-4; // Ensure a non-zero error bound.
         switch (dist) {
-            .LinearFunctions => try testGeneratedCompression(
+            .LinearFunctions => try testGeneratedErrorBoundedCompression(
                 allocator,
                 generateRandomLinearFunctions,
                 method,
                 error_bound,
                 "Linear Functions",
             ),
-            .QuadradicFunctions => try testGeneratedCompression(
+            .QuadradicFunctions => try testGeneratedErrorBoundedCompression(
                 allocator,
                 generateRandomQuadraticFunctions,
                 method,
                 error_bound,
                 "Quadratic Functions",
             ),
-            .PowerFunctions => try testGeneratedCompression(
+            .PowerFunctions => try testGeneratedErrorBoundedCompression(
                 allocator,
                 generateRandomPowerFunctions,
                 method,
                 error_bound,
                 "Power Functions",
             ),
-            .ExponentialFunctions => try testGeneratedCompression(
+            .ExponentialFunctions => try testGeneratedErrorBoundedCompression(
                 allocator,
                 generateRandomExponentialFunctions,
                 method,
                 error_bound,
                 "Exponential Functions",
             ),
-            .SqrtFunctions => try testGeneratedCompression(
+            .SqrtFunctions => try testGeneratedErrorBoundedCompression(
                 allocator,
                 generateRandomSqrtFunctions,
                 method,
                 error_bound,
                 "Square Root Functions",
             ),
-            .BoundedRandomValues => try testGeneratedCompression(
+            .BoundedRandomValues => try testGeneratedErrorBoundedCompression(
                 allocator,
                 generateDefaultBoundedValues,
                 method,
                 error_bound,
                 "Bounded Values",
             ),
-            .SinusoidalFunction => try testGeneratedCompression(
+            .SinusoidalFunction => try testGeneratedErrorBoundedCompression(
                 allocator,
                 generateRandomSinusoidalFunctions,
                 method,
                 error_bound,
                 "Sinusoidal Function",
             ),
-            .MixedBoundedValuesFunctions => try testGeneratedCompression(
+            .MixedBoundedValuesFunctions => try testGeneratedErrorBoundedCompression(
                 allocator,
                 generateMixedBoundedValuesFunctions,
                 method,
                 error_bound,
                 "Mixed Bounded Values Functions",
             ),
-            .FiniteRandomValues => try testGeneratedCompression(
+            .FiniteRandomValues => try testGeneratedErrorBoundedCompression(
                 allocator,
                 generateFiniteRandomValues,
                 method,
                 error_bound,
                 "Finite Values",
             ),
-            .RandomValuesWithNansAndInfinities => try testGeneratedCompression(
+            .RandomValuesWithNansAndInfinities => try testGeneratedErrorBoundedCompression(
                 allocator,
                 generateRandomValuesWithNaNs,
                 method,
                 error_bound,
                 "Random Values with NaNs and Infinities",
             ),
-            .LinearFunctionsWithNansAndInfinities => try testGeneratedCompression(
+            .LinearFunctionsWithNansAndInfinities => try testGeneratedErrorBoundedCompression(
                 allocator,
                 generateRandomLinearFunctionsWithNaNs,
                 method,
                 error_bound,
                 "Linear Functions with NaNs and Infinities",
             ),
-            .BoundedRandomValuesWithNansAndInfinities => try testGeneratedCompression(
+            .BoundedRandomValuesWithNansAndInfinities => try testGeneratedErrorBoundedCompression(
                 allocator,
                 generateDefaultBoundedValuesWithNaNs,
                 method,
                 error_bound,
                 "Bounded Random Values with NaNs and Infinities",
             ),
-            .SinusoidalFunctionWithNansAndInfinities => try testGeneratedCompression(
+            .SinusoidalFunctionWithNansAndInfinities => try testGeneratedErrorBoundedCompression(
                 allocator,
                 generateRandomSinusoidalFunctionWithNaNs,
                 method,
@@ -237,11 +237,171 @@ pub fn testErrorBoundedCompressionMethod(
     }
 }
 
+/// Run a suite of experiments using different data generators to verify a lossless compression
+/// `method` works for a wide range of inputs. The `allocator` is used for memory management, and
+/// `data_distributions` specifies which data distributions to test against the compression method.
+pub fn testLosslessMethod(
+    allocator: Allocator,
+    method: Method,
+    data_distributions: []const DataDistribution,
+) !void {
+    for (data_distributions) |dist| {
+        switch (dist) {
+            .LinearFunctions => try testGeneratedLosslessCompression(
+                allocator,
+                generateRandomLinearFunctions,
+                method,
+                "Linear Functions",
+            ),
+            .QuadradicFunctions => try testGeneratedLosslessCompression(
+                allocator,
+                generateRandomQuadraticFunctions,
+                method,
+                "Quadratic Functions",
+            ),
+            .PowerFunctions => try testGeneratedLosslessCompression(
+                allocator,
+                generateRandomPowerFunctions,
+                method,
+                "Power Functions",
+            ),
+            .ExponentialFunctions => try testGeneratedLosslessCompression(
+                allocator,
+                generateRandomExponentialFunctions,
+                method,
+                "Exponential Functions",
+            ),
+            .SqrtFunctions => try testGeneratedLosslessCompression(
+                allocator,
+                generateRandomSqrtFunctions,
+                method,
+                "Square Root Functions",
+            ),
+            .BoundedRandomValues => try testGeneratedLosslessCompression(
+                allocator,
+                generateDefaultBoundedValues,
+                method,
+                "Bounded Values",
+            ),
+            .SinusoidalFunction => try testGeneratedLosslessCompression(
+                allocator,
+                generateRandomSinusoidalFunctions,
+                method,
+                "Sinusoidal Function",
+            ),
+            .MixedBoundedValuesFunctions => try testGeneratedLosslessCompression(
+                allocator,
+                generateMixedBoundedValuesFunctions,
+                method,
+                "Mixed Bounded Values Functions",
+            ),
+            .FiniteRandomValues => try testGeneratedLosslessCompression(
+                allocator,
+                generateFiniteRandomValues,
+                method,
+                "Finite Values",
+            ),
+            .RandomValuesWithNansAndInfinities => try testGeneratedLosslessCompression(
+                allocator,
+                generateRandomValuesWithNaNs,
+                method,
+                "Random Values with NaNs and Infinities",
+            ),
+            .LinearFunctionsWithNansAndInfinities => try testGeneratedLosslessCompression(
+                allocator,
+                generateRandomLinearFunctionsWithNaNs,
+                method,
+                "Linear Functions with NaNs and Infinities",
+            ),
+            .BoundedRandomValuesWithNansAndInfinities => try testGeneratedLosslessCompression(
+                allocator,
+                generateDefaultBoundedValuesWithNaNs,
+                method,
+                "Bounded Random Values with NaNs and Infinities",
+            ),
+            .SinusoidalFunctionWithNansAndInfinities => try testGeneratedLosslessCompression(
+                allocator,
+                generateRandomSinusoidalFunctionWithNaNs,
+                method,
+                "Sinusoidal Function with NaNs and Infinities",
+            ),
+        }
+    }
+}
+
+/// Test that values generated by `uncompressedValuesGenerator` are lossless compressed after they
+/// have been compressed and decompressed using `method`. The libraries public interface is used to
+/// make it simpler refactor the libraries internals. The input `error_bound` is used to computed
+/// the an absolute error bound based on the range of the generated values.
+pub fn testGeneratedLosslessCompression(
+    allocator: Allocator,
+    uncompressedValuesGenerator: fn (
+        uncompressed_values: *ArrayList(f64),
+        random: Random,
+    ) Error!void,
+    method: Method,
+    data_distribution_name: []const u8,
+) !void {
+    const random = getDefaultRandomGenerator();
+
+    var uncompressed_values = ArrayList(f64).init(allocator);
+    defer uncompressed_values.deinit();
+    try uncompressedValuesGenerator(&uncompressed_values, random);
+
+    // Create the configuration json string. Since it is lossless we use (for now),
+    // a EmptyConfiguration.
+    const method_configuration = "{}";
+
+    const compressed = try tersets.compress(
+        allocator,
+        uncompressed_values.items,
+        method,
+        method_configuration,
+    );
+    defer compressed.deinit();
+
+    const decompressed = try tersets.decompress(allocator, compressed.items);
+    defer decompressed.deinit();
+
+    if (uncompressed_values.items.len != decompressed.items.len) {
+        try testing.expectFmt(
+            "",
+            "Seed: {}, expected_len {}, found_len {}",
+            .{ default_seed, uncompressed_values.items.len, decompressed.items.len },
+        );
+        return;
+    }
+
+    for (uncompressed_values.items, decompressed.items, 0..) |raw_value, decompressed_value, i| {
+        // Check if the decompressed value is within the error bound of the expected value.
+        // Cast the difference between raw and decompressed values to f32 before comparing
+        // to the `f32` error bound, to ignore insignificant differences below f32 precision.
+        // This prevents false test failures due to `f64` rounding noise.
+        const decompression_error: f32 = @floatCast(@abs(raw_value - decompressed_value));
+        if (decompression_error > 0.0) {
+            try testing.expectFmt(
+                "",
+                "Seed: {}, index {}, raw value {}, decompressed value {},\nwith data distribution: {s} \n previous raw value {}, next raw value {}\n",
+                .{
+                    default_seed,
+                    i,
+                    raw_value,
+                    decompressed_value,
+                    data_distribution_name,
+                    if (i > 0) uncompressed_values.items[i - 1] else 0.0,
+                    if (i + 1 < uncompressed_values.items.len) uncompressed_values.items[i + 1] else 0.0,
+                },
+            );
+            return;
+        }
+    }
+}
+
 /// Test that values generated by `uncompressedValuesGenerator` are within `error_bound` after they
 /// have been compressed and decompressed using `method`. The libraries public interface is used to
 /// make it simpler refactor the libraries internals. The input `error_bound` is used to computed
 /// the an absolute error bound based on the range of the generated values.
-pub fn testGeneratedCompression(
+pub fn testGeneratedErrorBoundedCompression(
     allocator: Allocator,
     uncompressedValuesGenerator: fn (
         uncompressed_values: *ArrayList(f64),
@@ -268,18 +428,18 @@ pub fn testGeneratedCompression(
 
     // Create the configuration json string. This function only checks for methods
     // that support an absolute error bound.
-    const config_json = try std.fmt.allocPrint(
+    const method_configuration = try std.fmt.allocPrint(
         allocator,
         "{{\"abs_error_bound\": {d}}}",
         .{ranged_error_bound},
     );
-    defer allocator.free(config_json);
+    defer allocator.free(method_configuration);
 
     const compressed = try tersets.compress(
         allocator,
         uncompressed_values.items,
         method,
-        config_json,
+        method_configuration,
     );
     defer compressed.deinit();
 
@@ -416,18 +576,18 @@ pub fn testCompressAndDecompress(
         error_bound: f32,
     ) bool,
 ) !void {
-    const config_json = try std.fmt.allocPrint(
+    const method_configuration = try std.fmt.allocPrint(
         allocator,
         "{{\"abs_error_bound\": {d}}}",
         .{error_bound},
     );
-    defer allocator.free(config_json);
+    defer allocator.free(method_configuration);
 
     const compressed_values = try tersets.compress(
         allocator,
         uncompressed_values,
         method,
-        config_json,
+        method_configuration,
     );
     defer compressed_values.deinit();
 

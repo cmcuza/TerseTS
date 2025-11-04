@@ -35,8 +35,11 @@ const testing = std.testing;
 
 const tersets = @import("../tersets.zig");
 const tester = @import("../tester.zig");
+const configuration = @import("../configuration.zig");
+
 const Error = tersets.Error;
 const Method = tersets.Method;
+const Allocator = mem.Allocator;
 
 const shared_structs = @import("../utilities/shared_structs.zig");
 const convex_polygon = @import("../utilities/convex_polygon.zig");
@@ -72,14 +75,26 @@ const function_types = [5]FunctionType{ .Linear, .Quadratic, .Exponential, .Powe
 /// optimal segments with different nonlinear function types and error-bounded approximations.
 /// The algorithm uses dynamic programming to find the optimal segmentation that minimizes the
 /// total compressed size while maintaining approximation error within `error_bound`. The
-/// `allocator` is used for dynamic memory allocation during the compression process. If an error
-/// occurs, the function returns an error.
+/// `allocator` is used for dynamic memory allocation during the compression process and the
+/// `method_configuration` parser. The `method_configuration` is expected to be of
+/// `AbsoluteErrorBound` type otherwise an `InvalidConfiguration` error is return.
+/// If any other error occurs during the execution of the method, it is returned.
 pub fn compress(
-    allocator: mem.Allocator,
+    allocator: Allocator,
     uncompressed_data: []const f64,
     compressed_values: *ArrayList(u8),
-    error_bound: f32,
+    method_configuration: []const u8,
 ) Error!void {
+    const parsed_configuration = configuration.parse(
+        allocator,
+        configuration.AbsoluteErrorBound,
+        method_configuration,
+    );
+
+    if (parsed_configuration == null) return Error.InvalidConfiguration;
+
+    const error_bound: f32 = parsed_configuration.?.abs_error_bound;
+
     // Validates that the input contains at least 2 data points for meaningful compression.
     if (error_bound <= 0.0) return Error.UnsupportedErrorBound;
 
@@ -408,7 +423,6 @@ fn findOptimalFunctionalApproximation(
         // Updates the best-known cost to reach the end of each available segment
         // starting from current_position.
         for (0..function_types.len) |model_idx| {
-            std.debug.assert(current_approximation[model_idx].function_type != .Undefined);
             const end_idx = current_approximation[model_idx].end_idx;
             const cost = current_approximation[model_idx].getCost();
             if (distances[end_idx] > distances[current_position] + cost) {
@@ -536,8 +550,6 @@ fn getConstraints(
     const eps = @as(f64, error_bound); // Convert f32 to f64 for calculations.
     const slope: f64 = @floatFromInt(x_axis);
 
-    std.debug.assert((slope > 0) and (y_axis - eps > 0) and (y_axis + eps > 0));
-
     return switch (function_type) {
         .Linear => .{
             .lower = LinearFunction{ .slope = -slope, .intercept = y_axis - eps },
@@ -631,11 +643,15 @@ test "non linear approximator cannot compress NaN values" {
     var compressed_values = ArrayList(u8).init(allocator);
     defer compressed_values.deinit();
 
+    const method_configuration =
+        \\ {"abs_error_bound": 0.1}
+    ;
+
     compress(
         allocator,
         uncompressed_values,
         &compressed_values,
-        0.1,
+        method_configuration,
     ) catch |err| {
         try testing.expectEqual(Error.UnsupportedInput, err);
         return;
@@ -656,11 +672,15 @@ test "non linear approximator cannot compress inf values" {
     var compressed_values = ArrayList(u8).init(allocator);
     defer compressed_values.deinit();
 
+    const method_configuration =
+        \\ {"abs_error_bound": 0.1}
+    ;
+
     compress(
         allocator,
         uncompressed_values,
         &compressed_values,
-        0.1,
+        method_configuration,
     ) catch |err| {
         try testing.expectEqual(Error.UnsupportedInput, err);
         return;
@@ -686,11 +706,15 @@ test "non linear approximator cannot compress f64 with reduced precision" {
     var compressed_values = ArrayList(u8).init(allocator);
     defer compressed_values.deinit();
 
+    const method_configuration =
+        \\ {"abs_error_bound": 0.1}
+    ;
+
     compress(
         allocator,
         uncompressed_values,
         &compressed_values,
-        0.1,
+        method_configuration,
     ) catch |err| {
         try testing.expectEqual(Error.UnsupportedInput, err);
         return;

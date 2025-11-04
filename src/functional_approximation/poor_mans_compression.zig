@@ -22,6 +22,7 @@ const ArrayList = std.ArrayList;
 const math = std.math;
 const mem = std.mem;
 const testing = std.testing;
+const Allocator = std.mem.Allocator;
 
 const tersets = @import("../tersets.zig");
 const Method = tersets.Method;
@@ -29,15 +30,34 @@ const Error = tersets.Error;
 const tester = @import("../tester.zig");
 
 const shared_functions = @import("../utilities/shared_functions.zig");
+const configuration = @import("../configuration.zig");
 
 /// Compress `uncompressed_values` within `error_bound` using "Poor Man’s Compression - Midrange".
-/// The function writes the result to `compressed_values`. If an error occurs it is returned.
+/// The function writes the result to `compressed_values`. The `allocator` is used to allocate
+/// memory for the `method_configuration` parser. The `method_configuration` is expected to
+/// be of `AbsoluteErrorBound` type otherwise an `InvalidConfiguration` error is return.
+/// If any other error occurs during the execution of the method, it is returned.
 pub fn compressMidrange(
+    allocator: Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
-    error_bound: f32,
+    method_configuration: []const u8,
 ) Error!void {
     var index: usize = 0; // n.
+
+    const parsed_configuration = configuration.parse(
+        allocator,
+        configuration.AbsoluteErrorBound,
+        method_configuration,
+    );
+
+    if (parsed_configuration == null) return Error.InvalidConfiguration;
+
+    const error_bound: f32 = parsed_configuration.?.abs_error_bound;
+
+    if (error_bound < 0)
+        return Error.UnsupportedErrorBound;
+
     var minimum: f80 = uncompressed_values[0]; // m.
     var maximum: f80 = uncompressed_values[0]; // M.
 
@@ -70,17 +90,34 @@ pub fn compressMidrange(
 }
 
 /// Compress `uncompressed_values` within `error_bound` using "Poor Man’s Compression - Mean".
-/// The function writes the result to `compressed_values`. If an error occurs it is returned.
+/// The function writes the result to `compressed_values`. he `allocator` is used to
+/// allocate memory for the `method_configuration` parser. The `method_configuration` is expected
+/// to be of `AbsoluteErrorBound` type otherwise an `InvalidConfiguration` error is return.
+/// If any other error occurs during the execution of the method, it is returned.
 pub fn compressMean(
+    allocator: Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
-    error_bound: f32,
+    method_configuration: []const u8,
 ) Error!void {
     var index: usize = 0; // n.
     var minimum = math.nan(f64); // m.
     var maximum = math.nan(f64); // M.
     var length: f64 = 0;
     var average: f80 = 0.0;
+
+    const parsed_configuration = configuration.parse(
+        allocator,
+        configuration.AbsoluteErrorBound,
+        method_configuration,
+    );
+
+    if (parsed_configuration == null) return Error.InvalidConfiguration;
+
+    const error_bound: f32 = parsed_configuration.?.abs_error_bound;
+
+    if (error_bound < 0)
+        return Error.UnsupportedErrorBound;
 
     for (uncompressed_values) |value| {
         const nextMinimum = @min(value, minimum);

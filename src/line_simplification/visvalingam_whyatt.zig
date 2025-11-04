@@ -24,6 +24,7 @@ const time = std.time;
 const ArrayList = std.ArrayList;
 
 const tersets = @import("../tersets.zig");
+const configuration = @import("../configuration.zig");
 const Method = tersets.Method;
 const Error = tersets.Error;
 
@@ -43,13 +44,24 @@ const tester = @import("../tester.zig");
 /// Compress `uncompressed_values` using "Visvalingam-Whyatt" simplification algorithm by keeping
 /// points whose effective area is greater than the `error_bound`. The function writes the result
 /// to `compressed_values`. The `allocator` is used to allocate memory for the HashedPriorityQueue
-/// used in the implementation. If an error occurs it is returned.
+/// used in the implementation and the `method_configuration` parser. The `method_configuration`
+/// is expected to be of `AreaUnderCurveError` type otherwise an `InvalidConfiguration` error is return.
+/// If any other error occurs during the execution of the method, it is returned.
 pub fn compress(
     allocator: mem.Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
-    error_bound: f32,
+    method_configuration: []const u8,
 ) Error!void {
+    const parsed_configuration = configuration.parse(
+        allocator,
+        configuration.AreaUnderCurveError,
+        method_configuration,
+    );
+
+    if (parsed_configuration == null) return Error.InvalidConfiguration;
+
+    const error_bound: f32 = parsed_configuration.?.area_under_curve_error;
     // If we have 2 or fewer points, store them without compression.
     if (uncompressed_values.len <= 2) {
         try shared_functions.appendValue(f64, uncompressed_values[0], compressed_values);
@@ -334,8 +346,17 @@ test "vw compress and decompress with zero error bound" {
 
     try tester.generateBoundedRandomValues(&uncompressed_values, 0, 1000000, random);
 
+    const method_configuration =
+        \\ {"area_under_curve_error": 0.0}
+    ;
+
     // Call the compress and decompress functions.
-    try compress(allocator, uncompressed_values.items, &compressed_values, error_bound);
+    try compress(
+        allocator,
+        uncompressed_values.items,
+        &compressed_values,
+        method_configuration,
+    );
     try decompress(compressed_values.items, &decompressed_values);
 
     try std.testing.expect(shared_functions.isWithinErrorBound(
@@ -350,7 +371,6 @@ test "vw compress and compress with known result" {
 
     // Input data.
     const uncompressed_values: []const f64 = &[_]f64{ 1.0, 1.5, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0 };
-    const error_bound: f32 = 2.5;
 
     // Output buffer.
     var compressed_values = ArrayList(u8).init(allocator);
@@ -358,8 +378,17 @@ test "vw compress and compress with known result" {
     var decompressed_values = ArrayList(f64).init(allocator);
     defer decompressed_values.deinit();
 
+    const method_configuration =
+        \\ {"area_under_curve_error": 2.5}
+    ;
+
     // Call the compress function.
-    try compress(allocator, uncompressed_values, &compressed_values, error_bound);
+    try compress(
+        allocator,
+        uncompressed_values,
+        &compressed_values,
+        method_configuration,
+    );
     try decompress(compressed_values.items, &decompressed_values);
 
     // Check if the decompressed values have the same lenght as the compressed ones.
@@ -369,7 +398,7 @@ test "vw compress and compress with known result" {
     // point cannot be removed. In this case, the error is 2.5,  and the area of the triangles is always less than
     // this value except when removing the element in position 5. Therefore, the area of the triangles formed by the
     // slices of the removed points from 0..5 should be less than 2.5.
-    try testAreaWithinErrorBound(uncompressed_values[0..6], error_bound);
+    try testAreaWithinErrorBound(uncompressed_values[0..6], 2.5);
 }
 
 test "vw compress and compress with random data" {
@@ -391,8 +420,20 @@ test "vw compress and compress with random data" {
 
     try tester.generateBoundedRandomValues(&uncompressed_values, 0, 1, random);
 
+    const method_configuration = try std.fmt.allocPrint(
+        allocator,
+        "{{\"area_under_curve_error\": {d}}}",
+        .{error_bound},
+    );
+    defer allocator.free(method_configuration);
+
     // Call the compress function.
-    try compress(allocator, uncompressed_values.items, &compressed_values, error_bound);
+    try compress(
+        allocator,
+        uncompressed_values.items,
+        &compressed_values,
+        method_configuration,
+    );
     try decompress(compressed_values.items, &decompressed_values);
 
     // Check if the decompressed values have the same lenght as the compressed ones.

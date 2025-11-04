@@ -87,14 +87,15 @@ int main(void) {
     printf("Uncompressed data length: %zu\n", uncompressed_values.len);
 
     // Configuration for compression.
-     const char *cfg = "{\"abs_error_bound\": 0.01}";
+     const char *configuration = "{\"abs_error_bound\": 0.01}";
+     enum Method method = SwingFilter;
 
     // Output buffers for compressed/decompressed data.
     struct CompressedValues   compressed_values = {0};
     struct UncompressedValues decompressed_values = {0};
 
     // Compression. The C API mirrors the `Method` enum from TerseTS.
-    int32_t result = compress(uncompressed_values, &compressed_values, SwingFilter, cfg);
+    int32_t result = compress(uncompressed_values, &compressed_values, method, configuration);
     if (result != 0) {
         printf("Compression failed with error code %d\n", result);
         return -1;

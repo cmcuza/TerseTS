@@ -58,7 +58,6 @@ class TerseTSPythonTest(unittest.TestCase):
                                 Method.SlideFilter])
         
         configuration = {"abs_error_bound": 0.0}
-        
         compressed = compress(uncompressed, method, configuration)
         decompressed = decompress(compressed)
         self.assertEqual(uncompressed, decompressed)

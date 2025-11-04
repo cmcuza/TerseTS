@@ -27,6 +27,7 @@ const time = std.time;
 const ArrayList = std.ArrayList;
 
 const tersets = @import("../tersets.zig");
+const configuration = @import("../configuration.zig");
 const Method = tersets.Method;
 const Error = tersets.Error;
 
@@ -43,17 +44,30 @@ const testing = std.testing;
 /// Compresses `uncompressed_values` using the "Sliding Window" simplification algorithm.
 /// This algorithm iteratively merges points to minimize the RMSE, ensuring that the resulting
 /// compressed sequence stays within the specified `error_bound`. The function writes the
-/// simplified sequence to the `compressed_values`. If an error occurs it is returned.
+/// simplified sequence to the `compressed_values`. The `allocator` is used to allocate memory
+/// for the `method_configuration` parser. The `method_configuration` is expected to be of
+/// `AggregateError` type otherwise an `InvalidConfiguration` error is return. If any other
+/// error occurs during the execution of the method, it is returned.
 pub fn compress(
+    allocator: mem.Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
-    error_bound: f32,
+    method_configuration: []const u8,
 ) Error!void {
-    var seg_start: usize = 0;
+    const parsed_configuration = configuration.parse(
+        allocator,
+        configuration.AggregateError,
+        method_configuration,
+    );
+
+    if (parsed_configuration == null) return Error.InvalidConfiguration;
+
+    const error_bound: f32 = parsed_configuration.?.aggregate_error_bound;
 
     // Return error if the error bound is negative.
     if (error_bound < 0) return Error.UnsupportedErrorBound;
 
+    var seg_start: usize = 0;
     // Iterate through the input values to segment them.
     while (seg_start < uncompressed_values.len - 1) {
         // We can skip the next point as it has 0 error.
@@ -219,7 +233,16 @@ test "sliding-window cannot compress and decompress nan values" {
     var compressed_values = std.ArrayList(u8).init(allocator);
     compressed_values.deinit();
 
-    compress(uncompressed_values[0..], &compressed_values, 0.1) catch |err| {
+    const method_configuration =
+        \\ { "aggregate_error_type": "rmse", "aggregate_error_bound": 0.1 }
+    ;
+
+    compress(
+        allocator,
+        uncompressed_values[0..],
+        &compressed_values,
+        method_configuration,
+    ) catch |err| {
         try testing.expectEqual(Error.UnsupportedInput, err);
         return;
     };
@@ -237,7 +260,16 @@ test "sliding-window cannot compress and decompress unbounded values" {
     var compressed_values = std.ArrayList(u8).init(allocator);
     compressed_values.deinit();
 
-    compress(uncompressed_values[0..], &compressed_values, 0.1) catch |err| {
+    const method_configuration =
+        \\ { "aggregate_error_type": "rmse", "aggregate_error_bound": 0.1 }
+    ;
+
+    compress(
+        allocator,
+        uncompressed_values[0..],
+        &compressed_values,
+        method_configuration,
+    ) catch |err| {
         try testing.expectEqual(Error.UnsupportedInput, err);
         return;
     };
@@ -264,10 +296,18 @@ test "sliding-window compress and decompress random lines and random error bound
 
     try tester.generateRandomLinearFunctions(&uncompressed_values, random);
 
+    const method_configuration = try std.fmt.allocPrint(
+        allocator,
+        "{{\"aggregate_error_type\": \"rmse\", \"aggregate_error_bound\": {d}}}",
+        .{error_bound},
+    );
+    defer allocator.free(method_configuration);
+
     try compress(
+        allocator,
         uncompressed_values.items,
         &compressed_values,
-        error_bound,
+        method_configuration,
     );
 
     try decompress(compressed_values.items, &decompressed_values);

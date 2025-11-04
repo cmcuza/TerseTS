@@ -41,8 +41,10 @@ const ArrayList = std.ArrayList;
 const tersets = @import("../tersets.zig");
 const Method = tersets.Method;
 const Error = tersets.Error;
+const Allocator = std.mem.Allocator;
 
 const tester = @import("../tester.zig");
+const configuration = @import("../configuration.zig");
 
 const shared_structs = @import("../utilities/shared_structs.zig");
 const shared_functions = @import("../utilities/shared_functions.zig");
@@ -53,13 +55,30 @@ const LinearFunction = shared_structs.LinearFunction;
 
 const ConvexHull = @import("../utilities/convex_hull.zig").ConvexHull;
 
-/// Compress `uncompressed_values` within `error_bound` using "Swing Filter". The function writes
-/// the result to `compressed_values`. If an error occurs it is returned.
+/// Compress `uncompressed_values` using "Swing Filter" and its `method_configuration`.
+/// The function writes the result to `compressed_values`. The `allocator` is used to
+/// allocate memory for the `method_configuration` parser. The `method_configuration` is
+/// expected to be of `AbsoluteErrorBound` type otherwise an `InvalidConfiguration` error
+/// is return. If any other error occurs during the execution of the method, it is returned.
 pub fn compressSwingFilter(
+    allocator: Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
-    error_bound: f32,
+    method_configuration: []const u8,
 ) Error!void {
+    const parsed_configuration = configuration.parse(
+        allocator,
+        configuration.AbsoluteErrorBound,
+        method_configuration,
+    );
+
+    if (parsed_configuration == null) return Error.InvalidConfiguration;
+
+    const error_bound: f32 = parsed_configuration.?.abs_error_bound;
+
+    if (error_bound < 0)
+        return Error.UnsupportedErrorBound;
+
     // Adjust the error bound to avoid exceeding it during decompression due to numerical
     // inestabilities. This can happen if the linear approximation is equal to one of the
     // upper or lower bounds.
@@ -240,15 +259,30 @@ pub fn compressSwingFilter(
     try shared_functions.appendValue(usize, current_timestamp, compressed_values);
 }
 
-/// Compress `uncompressed_values` within `error_bound` using "Slide Filter". The function writes
-/// the result to `compressed_values`. The `allocator` is used to allocate memory for the convex hull.
-/// If an error occurs it is returned.
+/// Compress `uncompressed_values` using "Slide Filter" and its `method_configuration`.
+/// The function writes the result to `compressed_values`. The `allocator` is used to
+/// allocate memory for the convex hull and the `method_configuration` parser.
+/// The `method_configuration` is expected to be of `AbsoluteErrorBound` type otherwise
+/// an `InvalidConfiguration` error is return. If any other error occurs during the
+/// execution of the method, it is returned.
 pub fn compressSlideFilter(
     allocator: mem.Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
-    error_bound: f32,
+    method_configuration: []const u8,
 ) Error!void {
+    const parsed_configuration = configuration.parse(
+        allocator,
+        configuration.AbsoluteErrorBound,
+        method_configuration,
+    );
+
+    if (parsed_configuration == null) return Error.InvalidConfiguration;
+
+    const error_bound: f32 = parsed_configuration.?.abs_error_bound;
+
+    if (error_bound < 0)
+        return Error.UnsupportedErrorBound;
 
     // Adjust the error bound to avoid exceeding it during decompression due to numerical
     // inestabilities. This can happen if the linear approximation is equal to one of the
@@ -461,15 +495,32 @@ pub fn compressSlideFilter(
     try shared_functions.appendValue(usize, current_timestamp, compressed_values);
 }
 
-/// Compress `uncompressed_values` within `error_bound` using "Swing Filter"'s filtering mechanism.
-/// Different from the proposed papper, this implementation allows a extra degree of freedom by
-/// disconnecting adjacent segments in the recording mechanism. The algorithm writes the result to
-/// `compressed_values`. If an error occurs it is returned.
+/// Compress `uncompressed_values` using "Swing Filter"'s filtering mechanism and its
+/// `method_configuration`. Different from the proposed papper, this implementation
+/// allows a extra degree of freedom by disconnecting adjacent segments in the recording
+/// mechanism. The algorithm writes the result to `compressed_values`. The `allocator`
+/// is used to allocate memory for the `method_configuration` parser. The `method_configuration`
+/// is expected to be of `AbsoluteErrorBound` type otherwise an `InvalidConfiguration` error is
+/// return. If any other error occurs during the execution of the method, it is returned.
 pub fn compressSwingFilterDisconnected(
+    allocator: Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
-    error_bound: f32,
+    method_configuration: []const u8,
 ) Error!void {
+    const parsed_configuration = configuration.parse(
+        allocator,
+        configuration.AbsoluteErrorBound,
+        method_configuration,
+    );
+
+    if (parsed_configuration == null) return Error.InvalidConfiguration;
+
+    const error_bound: f32 = parsed_configuration.?.abs_error_bound;
+
+    if (error_bound < 0)
+        return Error.UnsupportedErrorBound;
+
     // Adjust the error bound to avoid exceeding it during decompression due to numerical
     // inestabilities. This can happen if the linear approximation is equal to one of the
     // upper or lower bounds.

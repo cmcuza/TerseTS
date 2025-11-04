@@ -27,6 +27,7 @@ const time = std.time;
 const ArrayList = std.ArrayList;
 
 const tersets = @import("../tersets.zig");
+const configuration = @import("../configuration.zig");
 const Method = tersets.Method;
 const Error = tersets.Error;
 
@@ -48,14 +49,26 @@ const testing = std.testing;
 /// This algorithm iteratively merges points to minimize the sum of squared errors,
 /// ensuring that the resulting compressed sequence stays within the specified `error_bound`.
 /// The function writes the simplified sequence to the `compressed_values`. The `allocator`
-/// is used to allocate memory for the HashedPriorityQueue used in the implementation.
-/// If an error occurs it is returned.
+/// is used to allocate memory for the HashedPriorityQueue used in the implementation and
+/// the `method_configuration` parser. The `method_configuration` is expected to be of
+/// `AggregateError` type otherwise an `InvalidConfiguration` error is return. If any other
+/// error occurs during the execution of the method, it is returned.
 pub fn compress(
     allocator: mem.Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
-    error_bound: f32,
+    method_configuration: []const u8,
 ) Error!void {
+    const parsed_configuration = configuration.parse(
+        allocator,
+        configuration.AggregateError,
+        method_configuration,
+    );
+
+    if (parsed_configuration == null) return Error.InvalidConfiguration;
+
+    const error_bound: f32 = parsed_configuration.?.aggregate_error_bound;
+
     if (error_bound < 0) {
         return Error.UnsupportedErrorBound;
     }
@@ -367,18 +380,18 @@ test "bottom-up can compress and decompress with zero error bound" {
         undefined,
     );
 
-    const config_json = try std.fmt.allocPrint(
+    const method_configuration = try std.fmt.allocPrint(
         allocator,
         "{{\"aggregate_error_type\": \"rmse\", \"aggregate_error_bound\": {d}}}",
         .{error_bound},
     );
-    defer allocator.free(config_json);
+    defer allocator.free(method_configuration);
 
     const compressed_values = try tersets.compress(
         allocator,
         uncompressed_values.items,
         tersets.Method.BottomUp,
-        config_json,
+        method_configuration,
     );
     defer compressed_values.deinit();
 
@@ -395,10 +408,19 @@ test "bottom-up can compress and decompress with zero error bound" {
 test "bottom-up cannot compress and decompress nan values" {
     const allocator = testing.allocator;
     const uncompressed_values = [3]f64{ 343.0, math.nan(f64), 520.0 };
-    var compressed_values = std.ArrayList(u8).init(allocator);
+    var compressed_values = ArrayList(u8).init(allocator);
     compressed_values.deinit();
 
-    compress(allocator, uncompressed_values[0..], &compressed_values, 0.1) catch |err| {
+    const method_configuration =
+        \\ { "aggregate_error_type": "rmse", "aggregate_error_bound": 0.1 }
+    ;
+
+    compress(
+        allocator,
+        uncompressed_values[0..],
+        &compressed_values,
+        method_configuration,
+    ) catch |err| {
         try testing.expectEqual(Error.UnsupportedInput, err);
         return;
     };
@@ -413,10 +435,14 @@ test "bottom-up cannot compress and decompress nan values" {
 test "bottom-up cannot compress and decompress unbounded values" {
     const allocator = testing.allocator;
     const uncompressed_values = [3]f64{ 343.0, 1e20, 520.0 };
-    var compressed_values = std.ArrayList(u8).init(allocator);
+    var compressed_values = ArrayList(u8).init(allocator);
     compressed_values.deinit();
 
-    compress(allocator, uncompressed_values[0..], &compressed_values, 0.1) catch |err| {
+    const method_configuration =
+        \\ { "aggregate_error_type": "rmse", "aggregate_error_bound": 0.1 }
+    ;
+
+    compress(allocator, uncompressed_values[0..], &compressed_values, method_configuration) catch |err| {
         try testing.expectEqual(Error.UnsupportedInput, err);
         return;
     };
@@ -443,11 +469,18 @@ test "bottom-up random lines and random error bound compress and decompress" {
 
     try tester.generateRandomLinearFunctions(&uncompressed_values, random);
 
+    const method_configuration = try std.fmt.allocPrint(
+        allocator,
+        "{{\"aggregate_error_type\": \"rmse\", \"aggregate_error_bound\": {d}}}",
+        .{error_bound},
+    );
+    defer allocator.free(method_configuration);
+
     try compress(
         allocator,
         uncompressed_values.items,
         &compressed_values,
-        error_bound,
+        method_configuration,
     );
 
     try decompress(compressed_values.items, &decompressed_values);

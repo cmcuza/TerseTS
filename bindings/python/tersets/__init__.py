@@ -106,7 +106,7 @@ class Method(Enum):
     NonLinearApproximation = 15
 
 # Public API. 
-def compress(values, method, configuration: dict) -> bytes:
+def compress(values, method, configuration: dict | str) -> bytes:
     """Compress a sequence of float64 values with a selected TerseTS method.
 
     This function uses a zero-copy fast path when `values` is a NumPy
@@ -117,28 +117,16 @@ def compress(values, method, configuration: dict) -> bytes:
       values: Either a `numpy.ndarray` of dtype `float64` (C-contiguous) or a
         `list`/`tuple` of floats.
       method: A `Method` enum value selecting the compressor.
-      configuration: A dictionary containing the configuration for the input method.
+      configuration: Either a `dict` (will be JSON-encoded) or a JSON `str`.
 
     Returns:
       Compressed payload as `bytes` (payload only; the trailing method byte is
       handled by the native library).
 
     Raises:
-      TypeError: If `method` is not a `Method` or `values` has an unsupported type.
+      TypeError: If `method` is not a `Method` or `values`/`configuration` have
+        unsupported types.
       RuntimeError: If the native `compress` call returns a non-zero error code.
-
-    Notes:
-      - **Zero-copy path**: when `values` is a `numpy.ndarray(float64, C-contig)`,
-        its data pointer is passed directly to the native layer (faster, less memory).
-      - **Copy path**: Python sequences are copied into a contiguous `double[]`
-        before compression.
-
-    Examples:
-      >>> import numpy as np
-      >>> arr = np.random.random(10).astype(np.float64)
-      >>> blob = compress(arr, Method.SwingFilter, {"abs_error_bound": 0.01})
-      >>> isinstance(blob, bytes)
-      True
     """
     # Validate compressor method type.
     if not isinstance(method, Method):
@@ -176,15 +164,23 @@ def compress(values, method, configuration: dict) -> bytes:
     
     # Prepare compressed values buffer.
     compressed_values = __CompressedValues()
-    # Build the configuration struct for the native call.
-    json_config = json.dumps(configuration).encode("utf-8")
+
+    # Accept configuration as dict (JSON-encode) or as JSON string.
+    if isinstance(configuration, dict):
+        json_configuration = json.dumps(configuration).encode("utf-8")
+    elif isinstance(configuration, str):
+        json_configuration = configuration.encode("utf-8")
+    else:
+        raise TypeError("configuration must be a dict, str, or bytes (JSON)")
 
     try:
         # Call native library.
-        tersets_error = __library.compress(uncompressed_values, 
-                                           byref(compressed_values), 
-                                           c_uint8(method.value), 
-                                           c_char_p(json_config))
+        tersets_error = __library.compress(
+            uncompressed_values,
+            byref(compressed_values),
+            c_uint8(method.value),
+            c_char_p(json_configuration)
+        )
         if tersets_error != 0:
             raise RuntimeError(f"compress failed: {tersets_error}")
         

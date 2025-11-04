@@ -18,8 +18,6 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
-const config = @import("config.zig");
-
 const poor_mans_compression = @import("functional_approximation/poor_mans_compression.zig");
 const swing_slide_filter = @import("functional_approximation/swing_slide_filter.zig");
 const sim_piece = @import("functional_approximation/sim_piece.zig");
@@ -67,7 +65,7 @@ pub const Method = enum {
     NonLinearApproximation,
 };
 
-/// Compress `uncompressed_values` within `error_bound` using `method` and returns the results
+/// Compress `uncompressed_values` using `method` and its `configuration` and returns the results
 /// as a ArrayList of bytes returned by the compression methods. `allocator` is passed to the
 /// compression functions for memory management. If the compression is sucessful, the `method`
 /// is encoded in the compressed values last byte. If an error occurs it is returned.
@@ -77,50 +75,6 @@ pub fn compress(
     method: Method,
     configuration: []const u8,
 ) Error!ArrayList(u8) {
-    // Parse the configuration for the selected compression method.
-    // This will validate the configuration and return the appropriate struct or an error.
-    const parsed_cfg = config.parse(allocator, method, configuration);
-
-    // If the configuration is invalid, return an error.
-    // Printing the expected configuration can be improved.
-    if (parsed_cfg == config.Configuration.InvalidConfiguration) {
-        std.debug.print("Invalid Configuration: expected {s}\n", .{
-            parsed_cfg.InvalidConfiguration.expected_configuration,
-        });
-        return Error.InvalidConfiguration;
-    }
-
-    // Extract the error bound from the parsed configuration, if required by the method.
-    const error_bound: f32 = switch (parsed_cfg) {
-        .AbsoluteErrorBound => |value| value.abs_error_bound,
-        .AggregateError => |value| value.aggregate_error_bound,
-        .AreaUnderCurveError => |value| value.area_under_curve_error,
-        .RelativeErrorBound => |value| value.rel_error_bound,
-        else => std.math.inf(f32),
-    };
-
-    // Extract the number of bins from the parsed configuration, if required by the method.
-    const number_histogram_bins: ?u32 = switch (parsed_cfg) {
-        .HistogramBinsNumber => |value| value.histogram_bins_number,
-        else => null,
-    };
-
-    // Extract the error type from the parsed configuration, if required by the method.
-    const error_type: []const u8 = switch (parsed_cfg) {
-        .AggregateError => |value| value.aggregate_error_type,
-        else => "rmse", // default error_type.
-    };
-
-    if (error_bound < 0) return Error.UnsupportedErrorBound;
-
-    // Check if the number of bins is not null.
-    // If not, that means that the input method requires the number of bins,
-    // so we need to check if that number is valid.
-    if (number_histogram_bins) |num_hist_bin| {
-        if (num_hist_bin <= 1)
-            return Error.UnsupportedErrorBound;
-    }
-
     var compressed_values = ArrayList(u8).init(allocator);
 
     // If the input is one or zero elements, just store them uncompressed disregarding
@@ -138,30 +92,34 @@ pub fn compress(
     switch (method) {
         .PoorMansCompressionMidrange => {
             try poor_mans_compression.compressMidrange(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                configuration,
             );
         },
         .PoorMansCompressionMean => {
             try poor_mans_compression.compressMean(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                configuration,
             );
         },
         .SwingFilter => {
             try swing_slide_filter.compressSwingFilter(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                configuration,
             );
         },
         .SwingFilterDisconnected => {
             try swing_slide_filter.compressSwingFilterDisconnected(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                configuration,
             );
         },
         .SlideFilter => {
@@ -169,7 +127,7 @@ pub fn compress(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                configuration,
             );
         },
         .SimPiece => {
@@ -177,7 +135,7 @@ pub fn compress(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                configuration,
             );
         },
         .MixPiece => {
@@ -185,27 +143,25 @@ pub fn compress(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                configuration,
             );
         },
         .PiecewiseConstantHistogram => {
             // Again, we need to extract the actual value from the optional `number_histogram_bins`.
-            const max_buckets = number_histogram_bins orelse return Error.InvalidConfiguration;
             try piecewise_histogram.compressPWCH(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
-                max_buckets,
+                configuration,
             );
         },
         .PiecewiseLinearHistogram => {
             // Again, we need to extract the actual value from the optional `number_histogram_bins`.
-            const max_buckets = number_histogram_bins orelse return Error.InvalidConfiguration;
             try piecewise_histogram.compressPWLH(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
-                max_buckets,
+                configuration,
             );
         },
         .ABCLinearApproximation => {
@@ -213,7 +169,7 @@ pub fn compress(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                configuration,
             );
         },
         .VisvalingamWhyatt => {
@@ -221,36 +177,31 @@ pub fn compress(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                configuration,
             );
         },
         .SlidingWindow => {
-            if (std.mem.eql(u8, error_type, "rmse")) {
-                try sliding_window.compress(
-                    uncompressed_values,
-                    &compressed_values,
-                    error_bound,
-                );
-            } else {
-                return Error.InvalidConfiguration;
-            }
+            try sliding_window.compress(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                configuration,
+            );
         },
         .BottomUp => {
-            if (std.mem.eql(u8, error_type, "rmse")) {
-                try bottom_up.compress(
-                    allocator,
-                    uncompressed_values,
-                    &compressed_values,
-                    error_bound,
-                );
-            } else {
-                return Error.InvalidConfiguration;
-            }
+            try bottom_up.compress(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                configuration,
+            );
         },
         .RunLengthEncoding => {
             try rle_enconding.compress(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
+                configuration,
             );
         },
         .BitPackedQuantization => {
@@ -258,7 +209,7 @@ pub fn compress(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                configuration,
             );
         },
         .NonLinearApproximation => {
@@ -266,7 +217,7 @@ pub fn compress(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                configuration,
             );
         },
     }
