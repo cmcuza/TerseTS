@@ -14,7 +14,7 @@
 
 //! Implementation of the Visvalingam-Whyatt line simplification algorithm from the paper
 //! "Visvalingam, M.; Whyatt, J. D. Line generalisation by repeated elimination of points.
-//! The Cartographic Journal. 30 (1): 46–51, 1993
+//! The Cartographic Journal. 30 (1): 46–51, 1993.
 //! https://doi.org/10.1179/000870493786962263".
 
 const std = @import("std");
