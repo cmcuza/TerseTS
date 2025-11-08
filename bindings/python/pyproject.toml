@@ -30,7 +30,7 @@ classifiers = [
     "Intended Audience :: Information Technology",
     "Intended Audience :: Other Audience",
     "Intended Audience :: Science/Research",
-    "Programming Language :: Rust",
+    "Programming Language :: Zig",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
     "Topic :: Scientific/Engineering",
