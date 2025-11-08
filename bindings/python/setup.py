@@ -115,7 +115,7 @@ class ZigBuildExt(build_ext):
 
 
 setup(
-    packages=find_packages(),
+    packages=find_packages(exclude=("tests")),
     ext_modules=[Extension("tersets", sources=["src/capi.zig"])],
     cmdclass={"sdist": ZigSDist, "bdist_wheel": ZigBDistWheel, "build_ext": ZigBuildExt},
 )
