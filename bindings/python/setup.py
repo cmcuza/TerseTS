@@ -67,6 +67,12 @@ class ZigBDistWheel(bdist_wheel):
         super().run()
         delete_src_if_repository()
 
+    def get_tag(self):
+        python, abi, plat = super().get_tag()
+        # modelardb_embedded is a native library, not a Python extension.
+        python, abi = "py3", "none"
+        return python, abi, plat
+
 
 class ZigBuildExt(build_ext):
     def build_extension(self, ext):
