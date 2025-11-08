@@ -22,6 +22,7 @@ from setuptools.command.sdist import sdist
 from setuptools.command.build_ext import build_ext
 from setuptools.command.bdist_wheel import bdist_wheel
 
+
 def copy_src_if_repository():
     """Copies the Zig source code to the current directory if in the repository."""
     cwd = Path.cwd()
@@ -83,7 +84,7 @@ class ZigBuildExt(build_ext):
             os.makedirs(self.build_lib)
 
         self.spawn(
-           [
+            [
                 sys.executable,
                 "-m",
                 "ziglang",
@@ -95,8 +96,8 @@ class ZigBuildExt(build_ext):
                 "-dynamic",
                 "-O",
                 "ReleaseFast",
-             ],
-         )
+            ],
+        )
 
         # Zig generates files that are not needed and can be removed.
         if sys.platform == "darwin" or sys.platform == "linux":
@@ -117,5 +118,9 @@ class ZigBuildExt(build_ext):
 setup(
     packages=find_packages(exclude=("tests")),
     ext_modules=[Extension("tersets", sources=["src/capi.zig"])],
-    cmdclass={"sdist": ZigSDist, "bdist_wheel": ZigBDistWheel, "build_ext": ZigBuildExt},
+    cmdclass={
+        "sdist": ZigSDist,
+        "bdist_wheel": ZigBDistWheel,
+        "build_ext": ZigBuildExt,
+    },
 )
