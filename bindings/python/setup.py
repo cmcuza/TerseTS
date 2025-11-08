@@ -70,7 +70,7 @@ class ZigBDistWheel(bdist_wheel):
 
     def get_tag(self):
         python, abi, plat = super().get_tag()
-        # modelardb_embedded is a native library, not a Python extension.
+        # TerseTS is a native library, not a Python extension.
         python, abi = "py3", "none"
         return python, abi, plat
 
