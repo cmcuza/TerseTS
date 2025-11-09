@@ -202,18 +202,18 @@ test "sliding-window can compress and decompress bounded values with zero error 
         undefined,
     );
 
-    const config_json = try std.fmt.allocPrint(
+    const configuration_json = try std.fmt.allocPrint(
         allocator,
         "{{\"aggregate_error_type\": \"rmse\", \"aggregate_error_bound\": {d}}}",
         .{error_bound},
     );
-    defer allocator.free(config_json);
+    defer allocator.free(configuration_json);
 
     const compressed_values = try tersets.compress(
         allocator,
         uncompressed_values.items,
         tersets.Method.SlidingWindow,
-        config_json,
+        configuration_json,
     );
     defer compressed_values.deinit();
 
@@ -315,11 +315,12 @@ test "sliding-window compress and decompress random lines and random error bound
     // Check if the decompressed values have the same lenght as the compressed ones.
     try testing.expectEqual(uncompressed_values.items.len, decompressed_values.items.len);
 
-    // In theory, the linear interpolation of all segments formed by the slices of preserved points, should have a RMSE
-    // within the error bound otherwise there a mistake. Since the error bound and the poitns are unknown, we need to
-    // used the compressed representation to access each of the points preserved and their index `current_point_index`.
-    // Then, the RMSE of the linear regression of the segment formed by the slices from
-    // `previous_point_index`..`current_point_index` should be less than `error_bound`.
+    // In theory, the linear interpolation of all segments formed by the slices of preserved points,
+    // should have a RMSE within the error bound otherwise there a mistake. Since the error bound
+    // and the poitns are unknown, we need to used the compressed representation to access each of
+    // the points preserved and their index `current_point_index`. Then, the RMSE of the linear
+    // regression of the segment formed by the slices from `previous_point_index` to
+    // `current_point_index` should be less than `error_bound`.
     const compressed_representation = mem.bytesAsSlice(f64, compressed_values.items);
 
     var index: usize = 0;

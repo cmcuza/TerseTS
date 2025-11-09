@@ -43,7 +43,7 @@ struct CompressedValues {
 int32_t compress(struct UncompressedValues uncompressed_values,
                  struct CompressedValues *compressed_values,
                  uint8_t method, 
-                 const char * configuration);
+                 const char *configuration);
 
 // Decompress compressed_values to uncompressed_values according to configuration.
 // Returns 0 on success, non-zero on error (e.g., 1 = unsupported method).

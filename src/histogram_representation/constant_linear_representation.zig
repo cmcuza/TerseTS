@@ -319,7 +319,7 @@ fn compareMergeError(_: void, error_1: MergeError, error_2: MergeError) math.Ord
 /// A Histogram structure containing an `ArrayList` of `buckets` and a `HashedPriorityQueue`
 /// `merge_queue` that keeps track of the minimum merge error merging two adjacent buckets.
 /// This structure contains the Min-Merge algorithm from https://doi.org/10.1109/ICDE.2007.368961
-/// which maintain the histogram using only `max_buckets` buckets.
+/// which maintain the histogram using only `maximum_buckets` buckets.
 const Histogram = struct {
     const Self = @This();
 
@@ -328,7 +328,7 @@ const Histogram = struct {
     // Memory allocator for the convex hull in the buckets.
     allocator: mem.Allocator,
     // Target number of buckets.
-    max_buckets: u32,
+    maximum_buckets: u32,
     // List of current buckets.
     buckets: ArrayList(Bucket),
     // Priority queue of merge errors.
@@ -342,12 +342,12 @@ const Histogram = struct {
     /// Initialize the histogram with a given allocator and maximum number of buckets. This
     /// parameter can be thought of as fixing a minimum compression ratio that users wants to achieve.
     /// The `minMerge` function will then find the optimal histogram under this constraint.
-    /// For example, if `max_buckets=|N|/2`, then the compression ratio will be at least 2x.
-    pub fn init(allocator: mem.Allocator, max_buckets: u32, approximation: Approximation) !Histogram {
+    /// For example, if `maximum_buckets=|N|/2`, then the compression ratio will be at least 2x.
+    pub fn init(allocator: mem.Allocator, maximum_buckets: u32, approximation: Approximation) !Histogram {
         return Histogram{
             .approximation = approximation,
             .allocator = allocator,
-            .max_buckets = max_buckets,
+            .maximum_buckets = maximum_buckets,
             .buckets = ArrayList(Bucket).init(allocator),
             .merge_queue = try HashedPriorityQueue(
                 MergeError,
@@ -386,8 +386,8 @@ const Histogram = struct {
             };
             try self.merge_queue.add(MergeError{ .index = bucket_last_index - 1, .merge_error = merge_error });
         }
-        // If the number of buckets exceeds `max_buckets`, merge the least increasing pair.
-        if (self.buckets.items.len > self.max_buckets) {
+        // If the number of buckets exceeds `maximum_buckets`, merge the least increasing pair.
+        if (self.buckets.items.len > self.maximum_buckets) {
             try self.minMerge();
         }
     }
@@ -441,7 +441,7 @@ const Histogram = struct {
 
     /// Perform the minimum merge by finding the pair with the smallest merge error when a `constant`
     /// approximations is required. This function is only called when the number of buckets exceeds the
-    /// `max_buckets`, which is always higher than 1. Thus, this function is only called with 2 or more
+    /// `maximum_buckets`, which is always higher than 1. Thus, this function is only called with 2 or more
     /// elements in the `buckets` list.
     fn minMerge(self: *Self) !void {
         // Pop the smallest merge error (the least costly merge).
@@ -522,11 +522,11 @@ const Histogram = struct {
             if (i == index) {
                 // To effectively remove an index from the queue without physically deleting it,
                 // we perform a logical removal. This is done by setting its `index` to an
-                // unreachable value (`max_buckets + 10`), ensuring it falls outside the normal range.
+                // unreachable value (`maximum_buckets + 10`), ensuring it falls outside the normal range.
                 // Additionally, we set `merge_error` to a very high value (1e16).
                 // This combination guarantees that during the `update`, this entry will
                 // be pushed to the end of the list, simulating its removal.
-                new_merge_error.index = self.max_buckets + 10;
+                new_merge_error.index = self.maximum_buckets + 10;
                 new_merge_error.merge_error = 1e16;
             }
             try self.merge_queue.update(old_merge_error, new_merge_error);
@@ -570,8 +570,8 @@ test "Histogram insert, and merge test number buckets in PWCH" {
     const random = prng.random();
 
     const allocator = testing.allocator;
-    const max_buckets: u32 = 100;
-    var histogram = try Histogram.init(allocator, max_buckets, .constant);
+    const maximum_buckets: u32 = 100;
+    var histogram = try Histogram.init(allocator, maximum_buckets, .constant);
     defer histogram.deinit();
 
     // Insert 1000 random numbers into the histogram.
@@ -579,7 +579,7 @@ test "Histogram insert, and merge test number buckets in PWCH" {
         const rand_number = tester.generateBoundedRandomValue(f64, 0, 1000, random);
         try histogram.insert(i, rand_number);
     }
-    try expectEqual(max_buckets, histogram.buckets.items.len);
+    try expectEqual(maximum_buckets, histogram.buckets.items.len);
 }
 
 test "Simple fixed values test of PWCH" {
@@ -891,8 +891,8 @@ test "Insert random values in an Histogram with expected number of buckets" {
     const random = prng.random();
 
     const allocator = testing.allocator;
-    const max_buckets: usize = 100;
-    var histogram = try Histogram.init(allocator, max_buckets, .linear);
+    const maximum_buckets: usize = 100;
+    var histogram = try Histogram.init(allocator, maximum_buckets, .linear);
     defer histogram.deinit();
 
     // Insert 1000 random numbers into the histogram.
@@ -900,5 +900,5 @@ test "Insert random values in an Histogram with expected number of buckets" {
         const rand_number = tester.generateBoundedRandomValue(f64, 0, 1000, random);
         try histogram.insert(i, rand_number);
     }
-    try expectEqual(max_buckets, histogram.buckets.items.len);
+    try expectEqual(maximum_buckets, histogram.buckets.items.len);
 }
