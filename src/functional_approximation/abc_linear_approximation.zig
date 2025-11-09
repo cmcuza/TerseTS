@@ -54,18 +54,15 @@ pub fn compress(
     compressed_values: *ArrayList(u8),
     method_configuration: []const u8,
 ) Error!void {
-    const parsed_configuration = configuration.parse(
+    const parsed_configuration = try configuration.parse(
         allocator,
         configuration.AbsoluteErrorBound,
         method_configuration,
     );
 
-    if (parsed_configuration == null) return Error.InvalidConfiguration;
-
-    const error_bound: f32 = parsed_configuration.?.abs_error_bound;
+    const error_bound: f32 = parsed_configuration.abs_error_bound;
 
     if (uncompressed_values.len < 2) return Error.UnsupportedInput;
-    if (error_bound < 0.0) return Error.UnsupportedErrorBound;
 
     // The algorithm uses a convex hull to store a reduce set of significant points.
     var convex_hull = try ConvexHull.init(allocator);
@@ -442,4 +439,8 @@ test "abc compressor compresses and decompresses constant signal" {
         error_bound,
         shared_functions.isWithinErrorBound,
     );
+}
+
+test "check convex-abc configuration parsing" {
+    try configuration.checkAbsErrorBoundConfiguration();
 }

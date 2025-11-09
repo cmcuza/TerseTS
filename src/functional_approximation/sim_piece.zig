@@ -51,17 +51,15 @@ pub fn compress(
     compressed_values: *ArrayList(u8),
     method_configuration: []const u8,
 ) Error!void {
-    const parsed_configuration = configuration.parse(
+    const parsed_configuration = try configuration.parse(
         allocator,
         configuration.AbsoluteErrorBound,
         method_configuration,
     );
 
-    if (parsed_configuration == null) return Error.InvalidConfiguration;
+    const error_bound: f32 = parsed_configuration.abs_error_bound;
 
-    const error_bound: f32 = parsed_configuration.?.abs_error_bound;
-
-    if (error_bound <= 0.0) {
+    if (error_bound == 0.0) {
         return Error.UnsupportedErrorBound;
     }
     // Sim-Piece Phase 1: Compute `SegmentMetadata` for all segments that can be approximated
@@ -729,4 +727,8 @@ test "sim-piece cannot compress f64 with reduced precision" {
         "The Sim-Piece algorithm cannot compress reduced precision floating point values",
         .{},
     );
+}
+
+test "check simpiece configuration parsing" {
+    try configuration.checkAbsErrorBoundConfiguration();
 }

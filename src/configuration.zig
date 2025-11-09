@@ -22,6 +22,7 @@
 //! error type. All configuration types are documented below.
 
 const std = @import("std");
+const testing = std.testing;
 const json = std.json;
 const Allocator = std.mem.Allocator;
 const tersets = @import("tersets.zig");
@@ -63,246 +64,308 @@ pub const EmptyConfiguration = struct {};
 /// This is a small convenience wrapper around json.parseFromSlice that accepts a
 /// `ConfigurationType` and parses the the JSON text `configuration`. The function
 /// returns the parsed value on success, or `null` on failure. The `allocator` is
-/// used by the JSON parser.
+/// used by the JSON parser. The function also checks that all numerical error bounds
+/// or number of histogram bins are positive numbers.
 pub fn parse(
     allocator: Allocator,
     comptime ConfigurationType: type,
     configuration: []const u8,
-) ?ConfigurationType {
+) !ConfigurationType {
     const parsed = json.parseFromSlice(
         ConfigurationType,
         allocator,
         configuration,
         .{},
-    ) catch return null;
+    ) catch return error.InvalidConfiguration;
     defer parsed.deinit();
-    return parsed.value;
-}
-
-/// Enum used internally for testing that the parser is working well.
-const Configuration = enum {
-    AbsoluteErrorBound,
-    RelativeErrorBound,
-    HistogramBinsNumber,
-    AggregateError,
-    AreaUnderCurveError,
-    EmptyConfiguration,
-    InvalidConfiguration,
-};
-
-/// Get valid configuration given a `method`. If the method does not exist in TerseTS,
-/// the function retuns the `InvalidConfiguration`. This function is only used during
-/// testing to validate that the parser works well.
-fn getConfiguration(method: tersets.Method) type {
-    return switch (method) {
-        .PoorMansCompressionMean,
-        .PoorMansCompressionMidrange,
-        .BitPackedQuantization,
-        .MixPiece,
-        .SimPiece,
-        .SlideFilter,
-        .SwingFilterDisconnected,
-        .SwingFilter,
-        .ABCLinearApproximation,
-        .NonLinearApproximation,
-        => AbsoluteErrorBound,
-        .BottomUp,
-        .SlidingWindow,
-        => AggregateError,
-        .VisvalingamWhyatt => AreaUnderCurveError,
-        .PiecewiseConstantHistogram,
-        .PiecewiseLinearHistogram,
-        => HistogramBinsNumber,
-        .RunLengthEncoding => EmptyConfiguration,
-    };
-}
-
-test "check configuration parsing for all methods" {
-    const allocator = std.testing.allocator;
-
-    const Case = struct {
-        method: tersets.Method,
-        configuration: []const u8,
-        expected_tag: Configuration,
-    };
-
-    // List all methods and their valid/invalid configurations.
-    const cases = [_]Case{
-        // AbsoluteErrorBound methods (valid/invalid)
-        .{
-            .method = .PoorMansCompressionMean,
-            .configuration =
-            \\ { "abs_error_bound": 0.1 }
-            ,
-            .expected_tag = .AbsoluteErrorBound,
+    const parsed_value = parsed.value;
+    switch (@TypeOf(parsed_value)) {
+        AbsoluteErrorBound => {
+            if (parsed_value.abs_error_bound < 0)
+                return error.InvalidConfiguration;
         },
-        .{
-            .method = .PoorMansCompressionMean,
-            .configuration =
-            \\ { "rel_error_bound": 0.1 }
-            ,
-            .expected_tag = .InvalidConfiguration,
+        RelativeErrorBound => {
+            if (parsed_value.rel_error_bound < 0)
+                return error.InvalidConfiguration;
         },
-        .{
-            .method = .SwingFilter,
-            .configuration =
-            \\ { "abs_error_bound": 10.0 }
-            ,
-            .expected_tag = .AbsoluteErrorBound,
+        AreaUnderCurveError => {
+            if (parsed_value.area_under_curve_error < 0)
+                return error.InvalidConfiguration;
         },
-        .{
-            .method = .SwingFilter,
-            .configuration =
-            \\ { "abs_error_bound": "bad" }
-            ,
-            .expected_tag = .InvalidConfiguration,
+        HistogramBinsNumber => {
+            if (parsed_value.histogram_bins_number < 0)
+                return error.InvalidConfiguration;
         },
-        .{
-            .method = .NonLinearApproximation,
-            .configuration =
-            \\ { "abs_error_bound": 1.0 }
-            ,
-            .expected_tag = .AbsoluteErrorBound,
+        AggregateError => {
+            if (parsed_value.aggregate_error_bound < 0)
+                return error.InvalidConfiguration;
         },
-        .{
-            .method = .NonLinearApproximation,
-            .configuration =
-            \\ {}
-            ,
-            .expected_tag = .InvalidConfiguration,
-        },
-        .{
-            .method = .ABCLinearApproximation,
-            .configuration =
-            \\ {}
-            ,
-            .expected_tag = .InvalidConfiguration,
-        },
-
-        // AggregateError methods (valid/invalid)
-        .{
-            .method = .BottomUp,
-            .configuration =
-            \\ { "aggregate_error_type": "rmse", "aggregate_error_bound": 5.0 }
-            ,
-            .expected_tag = .AggregateError,
-        },
-        .{
-            .method = .BottomUp,
-            .configuration =
-            \\ { "aggregate_error_type": "rmse" }
-            ,
-            .expected_tag = .InvalidConfiguration,
-        },
-        .{
-            .method = .SlidingWindow,
-            .configuration =
-            \\ { "aggregate_error_type": "mae", "aggregate_error_bound": 3.0 }
-            ,
-            .expected_tag = .AggregateError,
-        },
-        .{
-            .method = .SlidingWindow,
-            .configuration =
-            \\ { "aggregate_error_bound": 3.0 }
-            ,
-            .expected_tag = .InvalidConfiguration,
-        },
-        .{
-            .method = .BottomUp,
-            .configuration =
-            \\ {}
-            ,
-            .expected_tag = .InvalidConfiguration,
-        },
-
-        // AreaUnderCurveError methods (valid/invalid)
-        .{
-            .method = .VisvalingamWhyatt,
-            .configuration =
-            \\ { "area_under_curve_error": 0.01 }
-            ,
-            .expected_tag = .AreaUnderCurveError,
-        },
-        .{
-            .method = .VisvalingamWhyatt,
-            .configuration =
-            \\ { "the_area_in_curve": 123 }
-            ,
-            .expected_tag = .InvalidConfiguration,
-        },
-        .{
-            .method = .VisvalingamWhyatt,
-            .configuration =
-            \\ {}
-            ,
-            .expected_tag = .InvalidConfiguration,
-        },
-
-        // HistogramBinsNumber methods (valid/invalid)
-        .{
-            .method = .PiecewiseConstantHistogram,
-            .configuration =
-            \\ { "histogram_bins_number": 32 }
-            ,
-            .expected_tag = .HistogramBinsNumber,
-        },
-        .{
-            .method = .PiecewiseConstantHistogram,
-            .configuration =
-            \\ { "wrong_parameter": 12 }
-            ,
-            .expected_tag = .InvalidConfiguration,
-        },
-        .{
-            .method = .PiecewiseLinearHistogram,
-            .configuration =
-            \\ { "histogram_bins_number": 16 }
-            ,
-            .expected_tag = .HistogramBinsNumber,
-        },
-        .{
-            .method = .PiecewiseLinearHistogram,
-            .configuration =
-            \\ {}
-            ,
-            .expected_tag = .InvalidConfiguration,
-        },
-
-        // EmptyConfiguration methods (valid/invalid)
-        .{
-            .method = .RunLengthEncoding,
-            .configuration =
-            \\ {}
-            ,
-            .expected_tag = .EmptyConfiguration,
-        },
-        .{
-            .method = .RunLengthEncoding,
-            .configuration =
-            \\ { "abs_error_bound": 1.0 }
-            ,
-            .expected_tag = .InvalidConfiguration,
-        },
-    };
-
-    inline for (cases) |case| { // <— inline makes each case comptime-known
-        const ConfigurationType = getConfiguration(case.method);
-        const parsed = parse(
-            allocator,
-            ConfigurationType,
-            case.configuration,
-        );
-        const tag: Configuration = if (parsed) |*val| switch (@TypeOf(val.*)) {
-            AbsoluteErrorBound => .AbsoluteErrorBound,
-            RelativeErrorBound => .RelativeErrorBound,
-            AggregateError => .AggregateError,
-            AreaUnderCurveError => .AreaUnderCurveError,
-            HistogramBinsNumber => .HistogramBinsNumber,
-            EmptyConfiguration => .EmptyConfiguration,
-            else => .InvalidConfiguration,
-        } else .InvalidConfiguration;
-
-        try std.testing.expectEqual(case.expected_tag, tag);
+        EmptyConfiguration => {},
+        else => return error.InvalidConfiguration,
     }
+    return parsed_value;
+}
+
+pub fn checkAbsErrorBoundConfiguration() !void {
+    const allocator = std.testing.allocator;
+    const valid_configuration = try parse(
+        allocator,
+        AbsoluteErrorBound,
+        \\ { "abs_error_bound": 0.1 }
+        ,
+    );
+    try testing.expectEqual(@TypeOf(valid_configuration), AbsoluteErrorBound);
+    try testing.expectEqual(valid_configuration.abs_error_bound, 0.1);
+
+    _ = parse(
+        allocator,
+        AbsoluteErrorBound,
+        \\ { "ab_eror_bund": 0.1 }
+        ,
+    ) catch |err| {
+        try testing.expectEqual(error.InvalidConfiguration, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The configuration is supposed to be invalid",
+        .{},
+    );
+
+    _ = parse(
+        allocator,
+        AbsoluteErrorBound,
+        \\ { "abs_error_bound": 0.1.2 }
+        ,
+    ) catch |err| {
+        try testing.expectEqual(error.InvalidConfiguration, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The configuration is supposed to be invalid",
+        .{},
+    );
+}
+
+pub fn checkRelErrorBoundConfiguration() !void {
+    const allocator = std.testing.allocator;
+    const valid_configuration = try parse(
+        allocator,
+        RelativeErrorBound,
+        \\ { "rel_error_bound": 0.1 }
+        ,
+    );
+    try testing.expectEqual(@TypeOf(valid_configuration), RelativeErrorBound);
+    try testing.expectEqual(valid_configuration.rel_error_bound, 0.1);
+
+    _ = parse(
+        allocator,
+        RelativeErrorBound,
+        \\ { "are_eror_bund": 0.1 }
+        ,
+    ) catch |err| {
+        try testing.expectEqual(error.InvalidConfiguration, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The configuration is supposed to be invalid",
+        .{},
+    );
+
+    _ = parse(
+        allocator,
+        RelativeErrorBound,
+        \\ { "rel_error_bound": 0.1.2 }
+        ,
+    ) catch |err| {
+        try testing.expectEqual(error.InvalidConfiguration, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The configuration is supposed to be invalid",
+        .{},
+    );
+}
+
+pub fn checkAUCErrorConfiguration() !void {
+    const allocator = std.testing.allocator;
+    const valid_configuration = try parse(
+        allocator,
+        AreaUnderCurveError,
+        \\ { "area_under_curve_error": 0.1 }
+        ,
+    );
+    try testing.expectEqual(@TypeOf(valid_configuration), AreaUnderCurveError);
+    try testing.expectEqual(valid_configuration.area_under_curve_error, 0.1);
+
+    _ = parse(
+        allocator,
+        AreaUnderCurveError,
+        \\ { "auc_error": 0.1 }
+        ,
+    ) catch |err| {
+        try testing.expectEqual(error.InvalidConfiguration, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The configuration is supposed to be invalid",
+        .{},
+    );
+
+    _ = parse(
+        allocator,
+        AreaUnderCurveError,
+        \\ { "area_under_curve_error": 0.1.2 }
+        ,
+    ) catch |err| {
+        try testing.expectEqual(error.InvalidConfiguration, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The configuration is supposed to be invalid",
+        .{},
+    );
+}
+
+pub fn checkHistogramErrorConfiguration() !void {
+    const allocator = std.testing.allocator;
+    const valid_configuration = try parse(
+        allocator,
+        HistogramBinsNumber,
+        \\ { "histogram_bins_number": 6 }
+        ,
+    );
+    try testing.expectEqual(@TypeOf(valid_configuration), HistogramBinsNumber);
+    try testing.expectEqual(valid_configuration.histogram_bins_number, 6);
+
+    _ = parse(
+        allocator,
+        HistogramBinsNumber,
+        \\ { "histogram_bins_numr": 6 }
+        ,
+    ) catch |err| {
+        try testing.expectEqual(error.InvalidConfiguration, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The configuration is supposed to be invalid",
+        .{},
+    );
+
+    _ = parse(
+        allocator,
+        HistogramBinsNumber,
+        \\ { "histogram_bins_numr": 6.1 }
+        ,
+    ) catch |err| {
+        try testing.expectEqual(error.InvalidConfiguration, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The configuration is supposed to be invalid",
+        .{},
+    );
+}
+
+pub fn checkAggregatedErrorConfiguration() !void {
+    const allocator = std.testing.allocator;
+    const valid_configuration = try parse(
+        allocator,
+        AggregateError,
+        \\ { "aggregate_error_type": "rmse", "aggregate_error_bound": 5.2 }
+        ,
+    );
+    try testing.expectEqual(@TypeOf(valid_configuration), AggregateError);
+    try testing.expectEqual(valid_configuration.aggregate_error_bound, 5.2);
+    try testing.expect(std.mem.eql(u8, valid_configuration.aggregate_error_type, "rmse"));
+
+    _ = parse(
+        allocator,
+        AggregateError,
+        \\ { "aggregate_errr_type": "rmse", "aggregate_eror_bound": 5.2 }
+        ,
+    ) catch |err| {
+        try testing.expectEqual(error.InvalidConfiguration, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The configuration is supposed to be invalid",
+        .{},
+    );
+
+    _ = parse(
+        allocator,
+        AggregateError,
+        \\ { "aggregate_error_type": "rmse", "aggregate_error_bound": 5.2.2 }
+        ,
+    ) catch |err| {
+        try testing.expectEqual(error.InvalidConfiguration, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The configuration is supposed to be invalid",
+        .{},
+    );
+
+    _ = parse(
+        allocator,
+        AggregateError,
+        \\ { "aggregate_error_type": "343", "aggregate_error_bound": 2.2 }
+        ,
+    ) catch |err| {
+        try testing.expectEqual(error.InvalidConfiguration, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The configuration is supposed to be invalid",
+        .{},
+    );
+}
+
+pub fn checkEmptyConfiguration() !void {
+    const allocator = std.testing.allocator;
+    const valid_configuration = try parse(
+        allocator,
+        EmptyConfiguration,
+        \\ {}
+        ,
+    );
+    try testing.expectEqual(@TypeOf(valid_configuration), EmptyConfiguration);
+
+    _ = parse(
+        allocator,
+        EmptyConfiguration,
+        \\ { "abs_error_bound": 5.2 }
+        ,
+    ) catch |err| {
+        try testing.expectEqual(error.InvalidConfiguration, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The configuration is supposed to be invalid",
+        .{},
+    );
 }

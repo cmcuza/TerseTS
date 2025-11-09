@@ -40,13 +40,11 @@ pub fn compress(
     compressed_values: *ArrayList(u8),
     method_configuration: []const u8,
 ) Error!void {
-    const parsed_configuration = configuration.parse(
+    _ = try configuration.parse(
         allocator,
         configuration.EmptyConfiguration,
         method_configuration,
     );
-
-    if (parsed_configuration == null) return Error.InvalidConfiguration;
 
     var counter: usize = 0;
     var current_value: f64 = uncompressed_values[0];
@@ -159,4 +157,8 @@ test "run length encoding compresses repeated values" {
         decompressed_values.items,
         0.0,
     ));
+}
+
+test "check empty configuration parsing" {
+    try configuration.checkEmptyConfiguration();
 }

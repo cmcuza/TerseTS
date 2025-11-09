@@ -54,18 +54,13 @@ pub fn compress(
     compressed_values: *ArrayList(u8),
     method_configuration: []const u8,
 ) Error!void {
-    const parsed_configuration = configuration.parse(
+    const parsed_configuration = try configuration.parse(
         allocator,
         configuration.AggregateError,
         method_configuration,
     );
 
-    if (parsed_configuration == null) return Error.InvalidConfiguration;
-
-    const error_bound: f32 = parsed_configuration.?.aggregate_error_bound;
-
-    // Return error if the error bound is negative.
-    if (error_bound < 0) return Error.UnsupportedErrorBound;
+    const error_bound: f32 = parsed_configuration.aggregate_error_bound;
 
     var seg_start: usize = 0;
     // Iterate through the input values to segment them.
@@ -338,4 +333,8 @@ test "sliding-window compress and decompress random lines and random error bound
         );
         previous_point_index = current_point_index + 1;
     }
+}
+
+test "check sliding-window configuration parsing" {
+    try configuration.checkAggregatedErrorConfiguration();
 }

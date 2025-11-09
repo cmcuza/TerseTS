@@ -53,25 +53,20 @@ pub fn compress(
     compressed_values: *ArrayList(u8),
     method_configuration: []const u8,
 ) Error!void {
-    const parsed_configuration = configuration.parse(
+    const parsed_configuration = try configuration.parse(
         allocator,
         configuration.AreaUnderCurveError,
         method_configuration,
     );
 
-    if (parsed_configuration == null) return Error.InvalidConfiguration;
+    const error_bound: f32 = parsed_configuration.area_under_curve_error;
 
-    const error_bound: f32 = parsed_configuration.?.area_under_curve_error;
     // If we have 2 or fewer points, store them without compression.
     if (uncompressed_values.len <= 2) {
         try shared_functions.appendValue(f64, uncompressed_values[0], compressed_values);
         try shared_functions.appendValue(f64, uncompressed_values[1], compressed_values);
         try shared_functions.appendValue(usize, 1, compressed_values);
         return;
-    }
-
-    if (error_bound < 0) {
-        return Error.UnsupportedInput;
     }
 
     // Initialize a hashed priority queue to store the effective area of triangles formed by every
@@ -455,4 +450,8 @@ test "vw compress and compress with random data" {
         try testAreaWithinErrorBound(uncompressed_values.items[previous_point_index .. current_point_index + 1], error_bound);
         previous_point_index = current_point_index;
     }
+}
+
+test "check visvalingam-whyatt configuration parsing" {
+    try configuration.checkAUCErrorConfiguration();
 }

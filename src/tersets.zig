@@ -36,13 +36,13 @@ pub const Error = error{
     UnknownMethod,
     UnsupportedInput,
     UnsupportedErrorBound,
+    InvalidConfiguration,
     CorruptedCompressedData,
     ItemNotFound,
     OutOfMemory,
     EmptyConvexHull,
     EmptyQueue,
     ByteStreamError,
-    InvalidConfiguration,
 };
 
 /// The compression methods in TerseTS.

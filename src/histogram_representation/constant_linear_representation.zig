@@ -64,15 +64,13 @@ pub fn compressPWCH(
     compressed_values: *ArrayList(u8),
     method_configuration: []const u8,
 ) Error!void {
-    const parsed_configuration = configuration.parse(
+    const parsed_configuration = try configuration.parse(
         allocator,
         configuration.HistogramBinsNumber,
         method_configuration,
     );
 
-    if (parsed_configuration == null) return Error.InvalidConfiguration;
-
-    const maximum_buckets: u32 = parsed_configuration.?.histogram_bins_number;
+    const maximum_buckets: u32 = parsed_configuration.histogram_bins_number;
 
     if (maximum_buckets <= 1)
         return Error.UnsupportedErrorBound;
@@ -113,15 +111,13 @@ pub fn compressPWLH(
     compressed_values: *ArrayList(u8),
     method_configuration: []const u8,
 ) Error!void {
-    const parsed_configuration = configuration.parse(
+    const parsed_configuration = try configuration.parse(
         allocator,
         configuration.HistogramBinsNumber,
         method_configuration,
     );
 
-    if (parsed_configuration == null) return Error.InvalidConfiguration;
-
-    const maximum_buckets: u32 = parsed_configuration.?.histogram_bins_number;
+    const maximum_buckets: u32 = parsed_configuration.histogram_bins_number;
 
     if (maximum_buckets <= 1.0) {
         return Error.UnsupportedErrorBound;
@@ -901,4 +897,8 @@ test "Insert random values in an Histogram with expected number of buckets" {
         try histogram.insert(i, rand_number);
     }
     try expectEqual(maximum_buckets, histogram.buckets.items.len);
+}
+
+test "check histogram configuration parsing" {
+    try configuration.checkHistogramErrorConfiguration();
 }

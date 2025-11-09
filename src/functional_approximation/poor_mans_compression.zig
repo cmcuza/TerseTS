@@ -45,18 +45,13 @@ pub fn compressMidrange(
 ) Error!void {
     var index: usize = 0; // n.
 
-    const parsed_configuration = configuration.parse(
+    const parsed_configuration = try configuration.parse(
         allocator,
         configuration.AbsoluteErrorBound,
         method_configuration,
     );
 
-    if (parsed_configuration == null) return Error.InvalidConfiguration;
-
-    const error_bound: f32 = parsed_configuration.?.abs_error_bound;
-
-    if (error_bound < 0)
-        return Error.UnsupportedErrorBound;
+    const error_bound: f32 = parsed_configuration.abs_error_bound;
 
     var minimum: f80 = uncompressed_values[0]; // m.
     var maximum: f80 = uncompressed_values[0]; // M.
@@ -106,15 +101,13 @@ pub fn compressMean(
     var length: f64 = 0;
     var average: f80 = 0.0;
 
-    const parsed_configuration = configuration.parse(
+    const parsed_configuration = try configuration.parse(
         allocator,
         configuration.AbsoluteErrorBound,
         method_configuration,
     );
 
-    if (parsed_configuration == null) return Error.InvalidConfiguration;
-
-    const error_bound: f32 = parsed_configuration.?.abs_error_bound;
+    const error_bound: f32 = parsed_configuration.abs_error_bound;
 
     if (error_bound < 0)
         return Error.UnsupportedErrorBound;
@@ -241,4 +234,8 @@ test "mean can always compress and decompress with positive error bound" {
         Method.PoorMansCompressionMean,
         data_distributions,
     );
+}
+
+test "check pmc configuration parsing" {
+    try configuration.checkAbsErrorBoundConfiguration();
 }

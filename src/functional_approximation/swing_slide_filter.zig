@@ -66,18 +66,13 @@ pub fn compressSwingFilter(
     compressed_values: *ArrayList(u8),
     method_configuration: []const u8,
 ) Error!void {
-    const parsed_configuration = configuration.parse(
+    const parsed_configuration = try configuration.parse(
         allocator,
         configuration.AbsoluteErrorBound,
         method_configuration,
     );
 
-    if (parsed_configuration == null) return Error.InvalidConfiguration;
-
-    const error_bound: f32 = parsed_configuration.?.abs_error_bound;
-
-    if (error_bound < 0)
-        return Error.UnsupportedErrorBound;
+    const error_bound: f32 = parsed_configuration.abs_error_bound;
 
     // Adjust the error bound to avoid exceeding it during decompression due to numerical
     // inestabilities. This can happen if the linear approximation is equal to one of the
@@ -271,18 +266,13 @@ pub fn compressSlideFilter(
     compressed_values: *ArrayList(u8),
     method_configuration: []const u8,
 ) Error!void {
-    const parsed_configuration = configuration.parse(
+    const parsed_configuration = try configuration.parse(
         allocator,
         configuration.AbsoluteErrorBound,
         method_configuration,
     );
 
-    if (parsed_configuration == null) return Error.InvalidConfiguration;
-
-    const error_bound: f32 = parsed_configuration.?.abs_error_bound;
-
-    if (error_bound < 0)
-        return Error.UnsupportedErrorBound;
+    const error_bound: f32 = parsed_configuration.abs_error_bound;
 
     // Adjust the error bound to avoid exceeding it during decompression due to numerical
     // inestabilities. This can happen if the linear approximation is equal to one of the
@@ -508,18 +498,13 @@ pub fn compressSwingFilterDisconnected(
     compressed_values: *ArrayList(u8),
     method_configuration: []const u8,
 ) Error!void {
-    const parsed_configuration = configuration.parse(
+    const parsed_configuration = try configuration.parse(
         allocator,
         configuration.AbsoluteErrorBound,
         method_configuration,
     );
 
-    if (parsed_configuration == null) return Error.InvalidConfiguration;
-
-    const error_bound: f32 = parsed_configuration.?.abs_error_bound;
-
-    if (error_bound < 0)
-        return Error.UnsupportedErrorBound;
+    const error_bound: f32 = parsed_configuration.abs_error_bound;
 
     // Adjust the error bound to avoid exceeding it during decompression due to numerical
     // inestabilities. This can happen if the linear approximation is equal to one of the
@@ -1010,4 +995,8 @@ test "slide filter can always compress and decompress with positive error bound"
         Method.SlideFilter,
         data_distributions,
     );
+}
+
+test "check sswing-slide configuration parsing" {
+    try configuration.checkAbsErrorBoundConfiguration();
 }
