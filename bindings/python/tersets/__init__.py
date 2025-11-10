@@ -20,15 +20,30 @@ import sysconfig
 import json
 from typing import List
 from enum import Enum, unique
-from ctypes import cdll, Structure, c_ubyte, c_float, c_int, c_char_p, \
-    c_double, c_size_t, c_uint8, POINTER, byref, string_at, cast
+from ctypes import (
+    cdll,
+    Structure,
+    c_ubyte,
+    c_int,
+    c_char_p,
+    c_uint8,
+    c_double,
+    c_size_t,
+    POINTER,
+    byref,
+    string_at,
+    cast,
+    
+)
 
 try:
     import numpy as np
+
     _INSTALLED_NUMPY = True
 except Exception:
     np = None
     _INSTALLED_NUMPY = False
+
 
 # Private function to load the library.
 def __load_library():
@@ -61,7 +76,9 @@ def __load_library():
     try:
         library_path = next(library_folder.glob("*" + library_name))
     except StopIteration:
-        raise RuntimeError(f"Could not find TerseTS: looked '*{library_name}' in {library_folder}")
+        raise RuntimeError(
+            f"Could not find TerseTS: looked '*{library_name}' in {library_folder}"
+        )
     return cdll.LoadLibrary(str(library_path))
 
 
@@ -69,18 +86,27 @@ def __load_library():
 # can be easily used by the public functions without users having to pass it.
 __library = __load_library()
 
+
 # Private Types.
 class __UncompressedValues(Structure):
     _fields_ = [("data", POINTER(c_double)), ("len", c_size_t)]
 
+
 class __CompressedValues(Structure):
     _fields_ = [("data", POINTER(c_ubyte)), ("len", c_size_t)]
 
+
 # Declare function signatures (safer; avoids silent arg mismatch).
-__library.compress.argtypes = [__UncompressedValues, POINTER(__CompressedValues), c_uint8, c_char_p]
-__library.compress.restype  = c_int
+__library.compress.argtypes = [
+    __UncompressedValues,
+    POINTER(__CompressedValues), 
+    c_uint8, 
+    c_char_p,
+]
+__library.compress.restype = c_int
 __library.decompress.argtypes = [__CompressedValues, POINTER(__UncompressedValues)]
-__library.decompress.restype  = c_int
+__library.decompress.restype = c_int
+
 
 # Mirror TerseTS Method Enum.
 @unique
@@ -101,6 +127,7 @@ class Method(Enum):
     BitPackedQuantization = 13
     RunLengthEncoding = 14
     NonLinearApproximation = 15
+
 
 # Public API. 
 def compress(values, method, configuration) -> bytes:
@@ -128,7 +155,9 @@ def compress(values, method, configuration) -> bytes:
     # Validate compressor method type.
     if not isinstance(method, Method):
         available = ", ".join(m.name for m in Method)
-        raise TypeError(f"{method!r} is not a valid TerseTS Method. Available: {available}")
+        raise TypeError(
+            f"{method!r} is not a valid TerseTS Method. Available: {available}"
+        )
 
     # Prepare an __UncompressedValues view and keep a Python reference alive during the call.
     # The reference to the source buffer (NumPy array or ctypes array) must stay alive so the
@@ -158,7 +187,7 @@ def compress(values, method, configuration) -> bytes:
         raise TypeError(
             "values must be a numpy.ndarray[float64] that is C-contiguous, or a list/tuple of floats."
         )
-    
+
     # Prepare compressed values buffer.
     compressed_values = __CompressedValues()
 
@@ -180,7 +209,7 @@ def compress(values, method, configuration) -> bytes:
         )
         if tersets_error != 0:
             raise RuntimeError(f"compress failed: {tersets_error}")
-        
+
         # Copy the compressed bytes into Python-owned memory (safe to return).
         return string_at(compressed_values.data, compressed_values.len)
     finally:
@@ -220,7 +249,9 @@ def decompress(values: bytes) -> List[float]:
     """
     # Validate input type.
     if not isinstance(values, (bytes, bytearray, memoryview)):
-        raise TypeError("decompress(values): values must be bytes, bytearray, or memoryview")
+        raise TypeError(
+            "decompress(values): values must be bytes, bytearray, or memoryview"
+        )
 
     # Prepare a __CompressedValues view and keep a Python reference alive during the call.
     # The reference to the underlying buffer (NumPy view or ctypes array) must stay alive
@@ -242,7 +273,9 @@ def decompress(values: bytes) -> List[float]:
     uncompressed_values = __UncompressedValues()
     try:
         # Call native library.
-        tersets_error = __library.decompress(compressed_values, byref(uncompressed_values))
+        tersets_error = __library.decompress(
+            compressed_values, byref(uncompressed_values)
+        )
         if tersets_error != 0:
             raise RuntimeError(f"decompress failed: {tersets_error}")
 
@@ -254,8 +287,7 @@ def decompress(values: bytes) -> List[float]:
             # - We therefore materialize a Python-owned object via `.tolist()`, which *copies* the data
             #   and fully detaches from the Zig buffer. This keeps the API safe and GC-friendly.
             return np.ctypeslib.as_array(
-                uncompressed_values.data,
-                shape=(uncompressed_values.len,)
+                uncompressed_values.data, shape=(uncompressed_values.len,)
             ).tolist()
 
         # ctypes-only: slice the POINTER range into a Python list.
