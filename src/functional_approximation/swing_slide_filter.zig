@@ -996,7 +996,3 @@ test "slide filter can always compress and decompress with positive error bound"
         data_distributions,
     );
 }
-
-test "check sswing-slide configuration parsing" {
-    try configuration.checkAbsErrorBoundConfiguration();
-}

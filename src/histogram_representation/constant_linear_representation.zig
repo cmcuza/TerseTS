@@ -898,7 +898,3 @@ test "Insert random values in an Histogram with expected number of buckets" {
     }
     try expectEqual(maximum_buckets, histogram.buckets.items.len);
 }
-
-test "check histogram configuration parsing" {
-    try configuration.checkHistogramErrorConfiguration();
-}

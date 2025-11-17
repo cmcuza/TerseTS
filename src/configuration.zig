@@ -106,7 +106,7 @@ pub fn parse(
     return parsed_value;
 }
 
-pub fn checkAbsErrorBoundConfiguration() !void {
+test "check abs error bound configuration" {
     const allocator = std.testing.allocator;
     const valid_configuration = try parse(
         allocator,
@@ -148,9 +148,25 @@ pub fn checkAbsErrorBoundConfiguration() !void {
         "The configuration is supposed to be invalid",
         .{},
     );
+
+    _ = parse(
+        allocator,
+        AbsoluteErrorBound,
+        \\ { "abs_error_bound": -0.1 }
+        ,
+    ) catch |err| {
+        try testing.expectEqual(error.InvalidConfiguration, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The error bound is supposed to be positive",
+        .{},
+    );
 }
 
-pub fn checkRelErrorBoundConfiguration() !void {
+test "check rel error bound configuration" {
     const allocator = std.testing.allocator;
     const valid_configuration = try parse(
         allocator,
@@ -192,9 +208,25 @@ pub fn checkRelErrorBoundConfiguration() !void {
         "The configuration is supposed to be invalid",
         .{},
     );
+
+    _ = parse(
+        allocator,
+        RelativeErrorBound,
+        \\ { "rel_error_bund": -0.1 }
+        ,
+    ) catch |err| {
+        try testing.expectEqual(error.InvalidConfiguration, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The error bound is supposed to be positive",
+        .{},
+    );
 }
 
-pub fn checkAUCErrorConfiguration() !void {
+test "check auc error bound configuration" {
     const allocator = std.testing.allocator;
     const valid_configuration = try parse(
         allocator,
@@ -236,9 +268,25 @@ pub fn checkAUCErrorConfiguration() !void {
         "The configuration is supposed to be invalid",
         .{},
     );
+
+    _ = parse(
+        allocator,
+        AreaUnderCurveError,
+        \\ { "area_under_curve_error": -0.1 }
+        ,
+    ) catch |err| {
+        try testing.expectEqual(error.InvalidConfiguration, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The error bound is supposed to be positive",
+        .{},
+    );
 }
 
-pub fn checkHistogramErrorConfiguration() !void {
+test "check histogram-based configuration" {
     const allocator = std.testing.allocator;
     const valid_configuration = try parse(
         allocator,
@@ -280,9 +328,25 @@ pub fn checkHistogramErrorConfiguration() !void {
         "The configuration is supposed to be invalid",
         .{},
     );
+
+    _ = parse(
+        allocator,
+        HistogramBinsNumber,
+        \\ { "histogram_bins_numr": -6 }
+        ,
+    ) catch |err| {
+        try testing.expectEqual(error.InvalidConfiguration, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The error bound is supposed to be positive",
+        .{},
+    );
 }
 
-pub fn checkAggregatedErrorConfiguration() !void {
+test "check aggregated error bound configuration" {
     const allocator = std.testing.allocator;
     const valid_configuration = try parse(
         allocator,
@@ -341,9 +405,25 @@ pub fn checkAggregatedErrorConfiguration() !void {
         "The configuration is supposed to be invalid",
         .{},
     );
+
+    _ = parse(
+        allocator,
+        AggregateError,
+        \\ { "aggregate_error_type": "rmse", "aggregate_error_bound": -2.2 }
+        ,
+    ) catch |err| {
+        try testing.expectEqual(error.InvalidConfiguration, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The error bound is supposed to be positive",
+        .{},
+    );
 }
 
-pub fn checkEmptyConfiguration() !void {
+test "check empty configuration" {
     const allocator = std.testing.allocator;
     const valid_configuration = try parse(
         allocator,

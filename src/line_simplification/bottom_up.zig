@@ -505,7 +505,3 @@ test "bottom-up random lines and random error bound compress and decompress" {
         previous_point_index = current_point_index + 1;
     }
 }
-
-test "check bottom-up configuration parsing" {
-    try configuration.checkAggregatedErrorConfiguration();
-}

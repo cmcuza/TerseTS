@@ -334,7 +334,3 @@ test "sliding-window compress and decompress random lines and random error bound
         previous_point_index = current_point_index + 1;
     }
 }
-
-test "check sliding-window configuration parsing" {
-    try configuration.checkAggregatedErrorConfiguration();
-}

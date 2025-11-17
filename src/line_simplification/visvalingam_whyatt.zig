@@ -451,7 +451,3 @@ test "vw compress and compress with random data" {
         previous_point_index = current_point_index;
     }
 }
-
-test "check visvalingam-whyatt configuration parsing" {
-    try configuration.checkAUCErrorConfiguration();
-}

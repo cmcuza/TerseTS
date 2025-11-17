@@ -728,7 +728,3 @@ test "sim-piece cannot compress f64 with reduced precision" {
         .{},
     );
 }
-
-test "check simpiece configuration parsing" {
-    try configuration.checkAbsErrorBoundConfiguration();
-}

@@ -158,7 +158,3 @@ test "run length encoding compresses repeated values" {
         0.0,
     ));
 }
-
-test "check empty configuration parsing" {
-    try configuration.checkEmptyConfiguration();
-}
