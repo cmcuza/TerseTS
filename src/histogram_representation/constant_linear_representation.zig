@@ -898,3 +898,51 @@ test "Insert random values in an Histogram with expected number of buckets" {
     }
     try expectEqual(maximum_buckets, histogram.buckets.items.len);
 }
+
+test "check PWCH configuration parsing" {
+    // Tests the configuration parsing and functionality of the `compressPWCH` function.
+    // The test verifies that the provided configuration is correctly interpreted and
+    // that the `configuration.HistogramBinsNumber` is expected in the function.
+    const allocator = testing.allocator;
+
+    const uncompressed_values = &[4]f64{ 19.0, 48.0, 28.0, 3.0 };
+
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+
+    const method_configuration =
+        \\ {"histogram_bins_number": 10}
+    ;
+
+    // The configuration is properly defined. No error expected.
+    try compressPWCH(
+        allocator,
+        uncompressed_values,
+        &compressed_values,
+        method_configuration,
+    );
+}
+
+test "check PWLH configuration parsing" {
+    // Tests the configuration parsing and functionality of the `compressPWLH` function.
+    // The test verifies that the provided configuration is correctly interpreted and
+    // that the `configuration.HistogramBinsNumber` is expected in the function.
+    const allocator = testing.allocator;
+
+    const uncompressed_values = &[4]f64{ 19.0, 48.0, 28.0, 3.0 };
+
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+
+    const method_configuration =
+        \\ {"histogram_bins_number": 10}
+    ;
+
+    // The configuration is properly defined. No error expected.
+    try compressPWLH(
+        allocator,
+        uncompressed_values,
+        &compressed_values,
+        method_configuration,
+    );
+}

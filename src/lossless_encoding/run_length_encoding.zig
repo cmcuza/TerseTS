@@ -158,3 +158,27 @@ test "run length encoding compresses repeated values" {
         0.0,
     ));
 }
+
+test "check rle configuration parsing" {
+    // Tests the configuration parsing and functionality of the `compressMidrange` function.
+    // The test verifies that the provided configuration is correctly interpreted and
+    // that the `configuration.EmptyConfiguration` is expected in the function.
+    const allocator = testing.allocator;
+
+    const uncompressed_values = &[4]f64{ 19.0, 48.0, 29.0, 3.0 };
+
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+
+    const method_configuration =
+        \\ {}
+    ;
+
+    // The configuration is properly defined. No error expected.
+    try compress(
+        allocator,
+        uncompressed_values,
+        &compressed_values,
+        method_configuration,
+    );
+}

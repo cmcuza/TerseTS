@@ -334,3 +334,27 @@ test "sliding-window compress and decompress random lines and random error bound
         previous_point_index = current_point_index + 1;
     }
 }
+
+test "check sliding window configuration parsing" {
+    // Tests the configuration parsing and functionality of the `compress` function.
+    // The test verifies that the provided configuration is correctly interpreted and
+    // that the `configuration.AggregateError` is expected in the function.
+    const allocator = testing.allocator;
+
+    const uncompressed_values = &[4]f64{ 19.0, 48.0, 28.0, 3.0 };
+
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+
+    const method_configuration =
+        \\ {"aggregate_error_type": "rmse", "aggregate_error_bound": 0.3}
+    ;
+
+    // The configuration is properly defined. No error expected.
+    try compress(
+        allocator,
+        uncompressed_values,
+        &compressed_values,
+        method_configuration,
+    );
+}

@@ -236,15 +236,18 @@ test "mean can always compress and decompress with positive error bound" {
     );
 }
 
-test "check pmc configuration parsing" {
+test "check pmc-mean configuration parsing" {
+    // Tests the configuration parsing and functionality of the `compressMean` function.
+    // The test verifies that the provided configuration is correctly interpreted and
+    // that the `configuration.AbsoluteErrorBound` is expected in the function.
     const allocator = testing.allocator;
 
-    const uncompressed_values = &[4]f64{ 19.0, 48.0, math.nan(f64), 3.0 };
+    const uncompressed_values = &[4]f64{ 19.0, 48.0, 29.0, 3.0 };
 
     var compressed_values = ArrayList(u8).init(allocator);
     defer compressed_values.deinit();
 
-    const right_method_configuration =
+    const method_configuration =
         \\ {"abs_error_bound": 0.1}
     ;
 
@@ -253,37 +256,30 @@ test "check pmc configuration parsing" {
         allocator,
         uncompressed_values,
         &compressed_values,
-        right_method_configuration,
+        method_configuration,
     );
+}
 
-    const wrong_method_configuration_one =
-        \\ {"as_error_bound": 0.1}
+test "check pmc-midrange configuration parsing" {
+    // Tests the configuration parsing and functionality of the `compressMidrange` function.
+    // The test verifies that the provided configuration is correctly interpreted and
+    // that the `configuration.AbsoluteErrorBound` is expected in the function.
+    const allocator = testing.allocator;
+
+    const uncompressed_values = &[4]f64{ 19.0, 48.0, 29.0, 3.0 };
+
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+
+    const method_configuration =
+        \\ {"abs_error_bound": 0.1}
     ;
 
-    // The configuration parameter is not properly defined.
-    // An error is expected.
-    compressMean(
+    // The configuration is properly defined. No error expected.
+    try compressMidrange(
         allocator,
         uncompressed_values,
         &compressed_values,
-        wrong_method_configuration_one,
-    ) catch |err| {
-        try testing.expectEqual(error.InvalidConfiguration, err);
-        return;
-    };
-
-    const wrong_method_configuration_two =
-        \\ {"abs_error_bound": -0.1}
-    ;
-
-    // The error bound is negative. An error is expected.
-    compressMean(
-        allocator,
-        uncompressed_values,
-        &compressed_values,
-        wrong_method_configuration_two,
-    ) catch |err| {
-        try testing.expectEqual(error.InvalidConfiguration, err);
-        return;
-    };
+        method_configuration,
+    );
 }

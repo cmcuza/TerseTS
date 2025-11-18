@@ -106,346 +106,298 @@ pub fn parse(
     return parsed_value;
 }
 
-test "check abs error bound configuration" {
+test "parse valid AbsoluteErrorBound" {
     const allocator = std.testing.allocator;
-    const valid_configuration = try parse(
+    const config = try parse(
         allocator,
         AbsoluteErrorBound,
-        \\ { "abs_error_bound": 0.1 }
+        \\{ "abs_error_bound": 0.1 }
         ,
     );
-    try testing.expectEqual(@TypeOf(valid_configuration), AbsoluteErrorBound);
-    try testing.expectEqual(valid_configuration.abs_error_bound, 0.1);
+    try testing.expectEqual(@TypeOf(config), AbsoluteErrorBound);
+    try testing.expectEqual(config.abs_error_bound, 0.1);
+}
 
-    _ = parse(
-        allocator,
-        AbsoluteErrorBound,
-        \\ { "ab_eror_bund": 0.1 }
-        ,
-    ) catch |err| {
-        try testing.expectEqual(error.InvalidConfiguration, err);
-        return;
-    };
-
-    try testing.expectFmt(
-        "",
-        "The configuration is supposed to be invalid",
-        .{},
-    );
-
+test "parse AbsoluteErrorBound with wrong field name" {
+    const allocator = std.testing.allocator;
     _ = parse(
         allocator,
         AbsoluteErrorBound,
-        \\ { "abs_error_bound": 0.1.2 }
+        \\{ "ab_eror_bund": 0.1 }
         ,
     ) catch |err| {
         try testing.expectEqual(error.InvalidConfiguration, err);
         return;
     };
+    unreachable;
+}
 
-    try testing.expectFmt(
-        "",
-        "The configuration is supposed to be invalid",
-        .{},
-    );
-
+test "parse AbsoluteErrorBound with invalid float" {
+    const allocator = std.testing.allocator;
     _ = parse(
         allocator,
         AbsoluteErrorBound,
-        \\ { "abs_error_bound": -0.1 }
+        \\{ "abs_error_bound": 0.1.2 }
         ,
     ) catch |err| {
         try testing.expectEqual(error.InvalidConfiguration, err);
         return;
     };
-
-    try testing.expectFmt(
-        "",
-        "The error bound is supposed to be positive",
-        .{},
-    );
+    unreachable;
 }
 
-test "check rel error bound configuration" {
+test "parse AbsoluteErrorBound with negative value" {
     const allocator = std.testing.allocator;
-    const valid_configuration = try parse(
-        allocator,
-        RelativeErrorBound,
-        \\ { "rel_error_bound": 0.1 }
-        ,
-    );
-    try testing.expectEqual(@TypeOf(valid_configuration), RelativeErrorBound);
-    try testing.expectEqual(valid_configuration.rel_error_bound, 0.1);
-
     _ = parse(
         allocator,
-        RelativeErrorBound,
-        \\ { "are_eror_bund": 0.1 }
+        AbsoluteErrorBound,
+        \\{ "abs_error_bound": -0.1 }
         ,
     ) catch |err| {
         try testing.expectEqual(error.InvalidConfiguration, err);
         return;
     };
+    unreachable;
+}
 
-    try testing.expectFmt(
-        "",
-        "The configuration is supposed to be invalid",
-        .{},
+test "parse valid RelativeErrorBound" {
+    const allocator = std.testing.allocator;
+    const config = try parse(
+        allocator,
+        RelativeErrorBound,
+        \\{ "rel_error_bound": 0.1 }
+        ,
     );
+    try testing.expectEqual(@TypeOf(config), RelativeErrorBound);
+    try testing.expectEqual(config.rel_error_bound, 0.1);
+}
 
+test "parse RelativeErrorBound with wrong field name" {
+    const allocator = std.testing.allocator;
     _ = parse(
         allocator,
         RelativeErrorBound,
-        \\ { "rel_error_bound": 0.1.2 }
+        \\{ "are_eror_bund": 0.1 }
         ,
     ) catch |err| {
         try testing.expectEqual(error.InvalidConfiguration, err);
         return;
     };
+    unreachable;
+}
 
-    try testing.expectFmt(
-        "",
-        "The configuration is supposed to be invalid",
-        .{},
-    );
-
+test "parse RelativeErrorBound with invalid float" {
+    const allocator = std.testing.allocator;
     _ = parse(
         allocator,
         RelativeErrorBound,
-        \\ { "rel_error_bund": -0.1 }
+        \\{ "rel_error_bound": 0.1.2 }
         ,
     ) catch |err| {
         try testing.expectEqual(error.InvalidConfiguration, err);
         return;
     };
-
-    try testing.expectFmt(
-        "",
-        "The error bound is supposed to be positive",
-        .{},
-    );
+    unreachable;
 }
 
-test "check auc error bound configuration" {
+test "parse RelativeErrorBound with negative value" {
     const allocator = std.testing.allocator;
-    const valid_configuration = try parse(
-        allocator,
-        AreaUnderCurveError,
-        \\ { "area_under_curve_error": 0.1 }
-        ,
-    );
-    try testing.expectEqual(@TypeOf(valid_configuration), AreaUnderCurveError);
-    try testing.expectEqual(valid_configuration.area_under_curve_error, 0.1);
-
     _ = parse(
         allocator,
-        AreaUnderCurveError,
-        \\ { "auc_error": 0.1 }
+        RelativeErrorBound,
+        \\{ "rel_error_bund": -0.1 }
         ,
     ) catch |err| {
         try testing.expectEqual(error.InvalidConfiguration, err);
         return;
     };
+    unreachable;
+}
 
-    try testing.expectFmt(
-        "",
-        "The configuration is supposed to be invalid",
-        .{},
+test "parse valid AreaUnderCurveError" {
+    const allocator = std.testing.allocator;
+    const config = try parse(
+        allocator,
+        AreaUnderCurveError,
+        \\{ "area_under_curve_error": 0.1 }
+        ,
     );
+    try testing.expectEqual(@TypeOf(config), AreaUnderCurveError);
+    try testing.expectEqual(config.area_under_curve_error, 0.1);
+}
 
+test "parse AreaUnderCurveError with wrong field name" {
+    const allocator = std.testing.allocator;
     _ = parse(
         allocator,
         AreaUnderCurveError,
-        \\ { "area_under_curve_error": 0.1.2 }
+        \\{ "auc_error": 0.1 }
         ,
     ) catch |err| {
         try testing.expectEqual(error.InvalidConfiguration, err);
         return;
     };
+    unreachable;
+}
 
-    try testing.expectFmt(
-        "",
-        "The configuration is supposed to be invalid",
-        .{},
-    );
-
+test "parse AreaUnderCurveError with invalid float" {
+    const allocator = std.testing.allocator;
     _ = parse(
         allocator,
         AreaUnderCurveError,
-        \\ { "area_under_curve_error": -0.1 }
+        \\{ "area_under_curve_error": 0.1.2 }
         ,
     ) catch |err| {
         try testing.expectEqual(error.InvalidConfiguration, err);
         return;
     };
-
-    try testing.expectFmt(
-        "",
-        "The error bound is supposed to be positive",
-        .{},
-    );
+    unreachable;
 }
 
-test "check histogram-based configuration" {
+test "parse AreaUnderCurveError with negative value" {
     const allocator = std.testing.allocator;
-    const valid_configuration = try parse(
-        allocator,
-        HistogramBinsNumber,
-        \\ { "histogram_bins_number": 6 }
-        ,
-    );
-    try testing.expectEqual(@TypeOf(valid_configuration), HistogramBinsNumber);
-    try testing.expectEqual(valid_configuration.histogram_bins_number, 6);
-
     _ = parse(
         allocator,
-        HistogramBinsNumber,
-        \\ { "histogram_bins_numr": 6 }
+        AreaUnderCurveError,
+        \\{ "area_under_curve_error": -0.1 }
         ,
     ) catch |err| {
         try testing.expectEqual(error.InvalidConfiguration, err);
         return;
     };
-
-    try testing.expectFmt(
-        "",
-        "The configuration is supposed to be invalid",
-        .{},
-    );
-
-    _ = parse(
-        allocator,
-        HistogramBinsNumber,
-        \\ { "histogram_bins_numr": 6.1 }
-        ,
-    ) catch |err| {
-        try testing.expectEqual(error.InvalidConfiguration, err);
-        return;
-    };
-
-    try testing.expectFmt(
-        "",
-        "The configuration is supposed to be invalid",
-        .{},
-    );
-
-    _ = parse(
-        allocator,
-        HistogramBinsNumber,
-        \\ { "histogram_bins_numr": -6 }
-        ,
-    ) catch |err| {
-        try testing.expectEqual(error.InvalidConfiguration, err);
-        return;
-    };
-
-    try testing.expectFmt(
-        "",
-        "The error bound is supposed to be positive",
-        .{},
-    );
+    unreachable;
 }
 
-test "check aggregated error bound configuration" {
+test "parse valid HistogramBinsNumber" {
     const allocator = std.testing.allocator;
-    const valid_configuration = try parse(
+    const config = try parse(
         allocator,
-        AggregateError,
-        \\ { "aggregate_error_type": "rmse", "aggregate_error_bound": 5.2 }
+        HistogramBinsNumber,
+        \\{ "histogram_bins_number": 6 }
         ,
     );
-    try testing.expectEqual(@TypeOf(valid_configuration), AggregateError);
-    try testing.expectEqual(valid_configuration.aggregate_error_bound, 5.2);
-    try testing.expect(std.mem.eql(u8, valid_configuration.aggregate_error_type, "rmse"));
-
-    _ = parse(
-        allocator,
-        AggregateError,
-        \\ { "aggregate_errr_type": "rmse", "aggregate_eror_bound": 5.2 }
-        ,
-    ) catch |err| {
-        try testing.expectEqual(error.InvalidConfiguration, err);
-        return;
-    };
-
-    try testing.expectFmt(
-        "",
-        "The configuration is supposed to be invalid",
-        .{},
-    );
-
-    _ = parse(
-        allocator,
-        AggregateError,
-        \\ { "aggregate_error_type": "rmse", "aggregate_error_bound": 5.2.2 }
-        ,
-    ) catch |err| {
-        try testing.expectEqual(error.InvalidConfiguration, err);
-        return;
-    };
-
-    try testing.expectFmt(
-        "",
-        "The configuration is supposed to be invalid",
-        .{},
-    );
-
-    _ = parse(
-        allocator,
-        AggregateError,
-        \\ { "aggregate_error_type": "343", "aggregate_error_bound": 2.2 }
-        ,
-    ) catch |err| {
-        try testing.expectEqual(error.InvalidConfiguration, err);
-        return;
-    };
-
-    try testing.expectFmt(
-        "",
-        "The configuration is supposed to be invalid",
-        .{},
-    );
-
-    _ = parse(
-        allocator,
-        AggregateError,
-        \\ { "aggregate_error_type": "rmse", "aggregate_error_bound": -2.2 }
-        ,
-    ) catch |err| {
-        try testing.expectEqual(error.InvalidConfiguration, err);
-        return;
-    };
-
-    try testing.expectFmt(
-        "",
-        "The error bound is supposed to be positive",
-        .{},
-    );
+    try testing.expectEqual(@TypeOf(config), HistogramBinsNumber);
+    try testing.expectEqual(config.histogram_bins_number, 6);
 }
 
-test "check empty configuration" {
+test "parse HistogramBinsNumber with wrong field name" {
     const allocator = std.testing.allocator;
-    const valid_configuration = try parse(
+    _ = parse(
+        allocator,
+        HistogramBinsNumber,
+        \\{ "histogram_bins_numr": 6 }
+        ,
+    ) catch |err| {
+        try testing.expectEqual(error.InvalidConfiguration, err);
+        return;
+    };
+    unreachable;
+}
+
+test "parse HistogramBinsNumber with float value" {
+    const allocator = std.testing.allocator;
+    _ = parse(
+        allocator,
+        HistogramBinsNumber,
+        \\{ "histogram_bins_numr": 6.1 }
+        ,
+    ) catch |err| {
+        try testing.expectEqual(error.InvalidConfiguration, err);
+        return;
+    };
+    unreachable;
+}
+
+test "parse HistogramBinsNumber with negative value" {
+    const allocator = std.testing.allocator;
+    _ = parse(
+        allocator,
+        HistogramBinsNumber,
+        \\{ "histogram_bins_numr": -6 }
+        ,
+    ) catch |err| {
+        try testing.expectEqual(error.InvalidConfiguration, err);
+        return;
+    };
+    unreachable;
+}
+
+test "parse valid AggregateError" {
+    const allocator = std.testing.allocator;
+    const config = try parse(
+        allocator,
+        AggregateError,
+        \\{ "aggregate_error_type": "rmse", "aggregate_error_bound": 5.2 }
+        ,
+    );
+    try testing.expectEqual(@TypeOf(config), AggregateError);
+    try testing.expectEqual(config.aggregate_error_bound, 5.2);
+    try testing.expect(std.mem.eql(u8, config.aggregate_error_type, "rmse"));
+}
+
+test "parse AggregateError with wrong field names" {
+    const allocator = std.testing.allocator;
+    _ = parse(
+        allocator,
+        AggregateError,
+        \\{ "aggregate_errr_type": "rmse", "aggregate_eror_bound": 5.2 }
+        ,
+    ) catch |err| {
+        try testing.expectEqual(error.InvalidConfiguration, err);
+        return;
+    };
+    unreachable;
+}
+
+test "parse AggregateError with invalid float" {
+    const allocator = std.testing.allocator;
+    _ = parse(
+        allocator,
+        AggregateError,
+        \\{ "aggregate_error_type": "rmse", "aggregate_error_bound": 5.2.2 }
+        ,
+    ) catch |err| {
+        try testing.expectEqual(error.InvalidConfiguration, err);
+        return;
+    };
+    unreachable;
+}
+
+test "parse AggregateError with negative value" {
+    const allocator = std.testing.allocator;
+    _ = parse(
+        allocator,
+        AggregateError,
+        \\{ "aggregate_error_type": "rmse", "aggregate_error_bound": -2.2 }
+        ,
+    ) catch |err| {
+        try testing.expectEqual(error.InvalidConfiguration, err);
+        return;
+    };
+    unreachable;
+}
+
+test "parse valid EmptyConfiguration" {
+    const allocator = std.testing.allocator;
+    const config = try parse(
         allocator,
         EmptyConfiguration,
-        \\ {}
+        \\{}
         ,
     );
-    try testing.expectEqual(@TypeOf(valid_configuration), EmptyConfiguration);
+    try testing.expectEqual(@TypeOf(config), EmptyConfiguration);
+}
 
+test "parse EmptyConfiguration with extra field" {
+    const allocator = std.testing.allocator;
     _ = parse(
         allocator,
         EmptyConfiguration,
-        \\ { "abs_error_bound": 5.2 }
+        \\{ "abs_error_bound": 5.2 }
         ,
     ) catch |err| {
         try testing.expectEqual(error.InvalidConfiguration, err);
         return;
     };
-
-    try testing.expectFmt(
-        "",
-        "The configuration is supposed to be invalid",
-        .{},
-    );
+    unreachable;
 }

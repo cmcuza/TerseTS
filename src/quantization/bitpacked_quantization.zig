@@ -379,3 +379,27 @@ test "bitpacked quantization always reduces size of time series" {
     // Considering the range of the input data, the compressed values should always be smaller.
     try testing.expect(uncompressed_values.items.len * 8 > compressed_values.items.len);
 }
+
+test "check bit-quantization configuration parsing" {
+    // Tests the configuration parsing and functionality of the `compressMidrange` function.
+    // The test verifies that the provided configuration is correctly interpreted and
+    // that the `configuration.AbsoluteErrorBound` is expected in the function.
+    const allocator = testing.allocator;
+
+    const uncompressed_values = &[4]f64{ 19.0, 48.0, 29.0, 3.0 };
+
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+
+    const method_configuration =
+        \\ {"abs_error_bound": 0.1}
+    ;
+
+    // The configuration is properly defined. No error expected.
+    try compress(
+        allocator,
+        uncompressed_values,
+        &compressed_values,
+        method_configuration,
+    );
+}
