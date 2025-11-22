@@ -33,6 +33,12 @@ pub const UncompressedValues = Array(f64);
 /// A pointer to compressed values and the number of bytes.
 pub const CompressedValues = Array(u8);
 
+/// A pointer to timestamp values and the number of values.
+pub const TimestampValues = Array(usize);
+
+/// A pointer to coefficient values and the number of values.
+pub const CoefficientsValues = Array(f64);
+
 /// Configuration to use for compression and/or decompression.
 pub const Configuration = extern struct { method: u8, error_bound: f32 };
 
@@ -100,6 +106,79 @@ export fn decompress(
 
     decompressed_values_array.data = data_slice.ptr;
     decompressed_values_array.len = data_slice.len;
+
+    return 0;
+}
+
+/// Extracts timestamps and coefficients from a compressed buffer using the method encoded in the last byte.
+/// On success, fills `timestamps_values_array` and `coefficients_values_array` with extracted values.
+/// Returns 0 on success. Error codes:
+/// - 1: Unsupported method
+/// - 2: No compressed values
+/// - 4: Corrupted compressed data
+/// - 5: Out-of-memory
+/// Extraction layouts depend on the compression method; see `extractors.zig` for details.
+export fn extract(
+    compressed_values_array: CompressedValues,
+    timestamps_values_array: *TimestampValues,
+    coefficients_values_array: *CoefficientsValues,
+) i32 {
+    const compressed_values = compressed_values_array.data[0..compressed_values_array.len];
+    if (compressed_values.len == 0) return 2;
+
+    var timetamps = ArrayList(usize).init(allocator);
+    var coefficients = ArrayList(f64).init(allocator);
+
+    // Return time and coefficients together. We need to put the size of timestamps at front in a
+    // u32 to split the values.
+    tersets.extract(
+        compressed_values,
+        &timetamps,
+        &coefficients,
+    ) catch |e| return errorToInt(e);
+
+    const time_slice = timetamps.toOwnedSlice() catch |err| return errorToInt(err);
+
+    timestamps_values_array.data = time_slice.ptr;
+    timestamps_values_array.len = time_slice.len;
+
+    const coefficients_slice = coefficients.toOwnedSlice() catch |err| return errorToInt(err);
+
+    coefficients_values_array.data = coefficients_slice.ptr;
+    coefficients_values_array.len = coefficients_slice.len;
+
+    return 0;
+}
+
+/// Rebuilds a compressed buffer from provided timestamps and coefficients, using the specified method.
+/// On success, fills `compressed_values_array` with the rebuilt compressed stream (including method byte).
+/// Returns 0 on success. Error codes:
+/// - 1: Unsupported method
+/// - 2: No timestamps or coefficients
+/// - 5: Out-of-memory
+/// Input arrays must match the expected layout for the method; see `extractors.zig` for details.
+export fn rebuild(
+    timestamps_values_array: TimestampValues,
+    coefficients_values_array: CoefficientsValues,
+    compressed_values_array: *CompressedValues,
+    method_idx: u8,
+) i32 {
+    const method: Method = @enumFromInt(method_idx);
+
+    const timestamps = timestamps_values_array.data[0..timestamps_values_array.len];
+    const coefficients = coefficients_values_array.data[0..coefficients_values_array.len];
+
+    var components_values = tersets.rebuild(
+        allocator,
+        timestamps,
+        coefficients,
+        method,
+    ) catch |e| return errorToInt(e);
+
+    const components_slice = components_values.toOwnedSlice() catch |err| return errorToInt(err);
+
+    compressed_values_array.data = components_slice.ptr;
+    compressed_values_array.len = components_slice.len;
 
     return 0;
 }
