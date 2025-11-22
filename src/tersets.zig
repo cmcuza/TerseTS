@@ -30,6 +30,7 @@ const bottom_up = @import("line_simplification/bottom_up.zig");
 const rle_enconding = @import("lossless_encoding/run_length_encoding.zig");
 const bitpacked_quantization = @import("quantization/bitpacked_quantization.zig");
 const non_linear_approximation = @import("functional_approximation/non_linear_approximation.zig");
+const extractors = @import("utilities/extractors.zig");
 
 /// The errors that can occur in TerseTS.
 pub const Error = error{
@@ -283,6 +284,130 @@ pub fn decompress(
     }
 
     return decompressed_values;
+}
+
+/// Extracts `timestamps` and `coefficients` from a `compressed_values` using the method encoded in
+/// the last byte. The function dispatches to the appropriate extractor in
+/// `src/utilities/extractors.zig` based on the method. The function returns `Error.UnsupportedInput`
+/// for unknown or unsupported methods. Moreover, the propagated errors from the extractors
+/// are also returned.
+pub fn extract(
+    compressed_values: []const u8,
+    timestamps: *ArrayList(usize),
+    coefficients: *ArrayList(f64),
+) Error!void {
+    if (compressed_values.len == 0) return Error.UnsupportedInput;
+
+    const method_index: u8 = compressed_values[compressed_values.len - 1];
+    if (method_index > getMaxMethodIndex()) return Error.UnknownMethod;
+
+    const method: Method = @enumFromInt(method_index);
+    const compressed_values_slice = compressed_values[0 .. compressed_values.len - 1];
+
+    switch (method) {
+        // Both PMC methods use the same extractor.
+        .PoorMansCompressionMean, .PoorMansCompressionMidrange => {
+            try extractors.extractPMC(
+                compressed_values_slice,
+                timestamps,
+                coefficients,
+            );
+        },
+        .SwingFilter => {
+            try extractors.extractSwing(
+                compressed_values_slice,
+                timestamps,
+                coefficients,
+            );
+        },
+        // Both SlideFilter and SwingFilterDisconnected use the same extractor.
+        .SlideFilter, .SwingFilterDisconnected => {
+            try extractors.extractSlide(
+                compressed_values_slice,
+                timestamps,
+                coefficients,
+            );
+        },
+        .SimPiece => {
+            try extractors.extractSimPiece(
+                compressed_values_slice,
+                timestamps,
+                coefficients,
+            );
+        },
+        .MixPiece => {
+            try extractors.extractMixPiece(
+                compressed_values_slice,
+                timestamps,
+                coefficients,
+            );
+        },
+        // Unsupported methods for extraction.
+        // TODO: Implement extractors for the remaining methods.
+        else => return Error.UnsupportedInput,
+    }
+}
+
+/// Rebuilds `timestamps` and `coefficients` from a `compressed_values` using the `method` parameter.
+/// The function dispatches to the appropriate extractor in `src/utilities/extractors.zig` based on
+/// the method. The function appends the method byte to the rebuilt buffer for compatibility with
+/// TerseTS APIs. The function returns `Error.UnsupportedInput` for unknown or unsupported methods.
+/// Moreover, the propagated errors from the extractors are also returned.
+pub fn rebuild(
+    allocator: Allocator,
+    timestamps: []const usize,
+    coefficients: []const f64,
+    method: Method,
+) Error!ArrayList(u8) {
+    if (timestamps.len == 0) return Error.UnsupportedInput;
+    if (coefficients.len == 0) return Error.UnsupportedInput;
+
+    var compressed_values = ArrayList(u8).init(allocator);
+
+    switch (method) {
+        // Both PMC methods use the same rebuilder.
+        .PoorMansCompressionMean, .PoorMansCompressionMidrange => {
+            try extractors.rebuildPMC(
+                timestamps,
+                coefficients,
+                &compressed_values,
+            );
+        },
+        .SwingFilter => {
+            try extractors.rebuildSwing(
+                timestamps,
+                coefficients,
+                &compressed_values,
+            );
+        },
+        // Both SlideFilter and SwingFilterDisconnected use the same rebuilder.
+        .SlideFilter, .SwingFilterDisconnected => {
+            try extractors.rebuildSlide(
+                timestamps,
+                coefficients,
+                &compressed_values,
+            );
+        },
+        .SimPiece => {
+            try extractors.rebuildSimPiece(
+                timestamps,
+                coefficients,
+                &compressed_values,
+            );
+        },
+        .MixPiece => {
+            try extractors.rebuildMixPiece(
+                timestamps,
+                coefficients,
+                &compressed_values,
+            );
+        },
+        // Unsupported methods for rebuilding.
+        // TODO: Implement rebuilders for the remaining methods.
+        else => return Error.UnsupportedInput,
+    }
+    try compressed_values.append(@intFromEnum(method));
+    return compressed_values;
 }
 
 /// Get the maximum index of the available methods in TerseTS.
