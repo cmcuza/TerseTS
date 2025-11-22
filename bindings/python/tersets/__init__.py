@@ -115,6 +115,21 @@ __library.compress.restype = c_int
 __library.decompress.argtypes = [__CompressedValues, POINTER(__UncompressedValues)]
 __library.decompress.restype = c_int
 
+__library.extract.argtypes = [
+    __CompressedValues, 
+    POINTER(__TimestampsValues), 
+    POINTER(__CoefficientsValues),
+]
+__library.extract.restype  = c_int
+
+__library.rebuild.argtypes = [
+    __TimestampsValues, 
+    __CoefficientsValues, 
+    POINTER(__CompressedValues), 
+    c_ubyte,
+]
+__library.rebuild.restype  = c_int
+
 
 # Mirror TerseTS Method Enum.
 @unique

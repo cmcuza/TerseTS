@@ -207,6 +207,30 @@ export fn freeUncompressedValues(uncompressed_values: *UncompressedValues) void 
     }
 }
 
+/// Frees a `coefficients_values` buffer previously produced by `extract`.
+/// This function is primarily used by the Python and C bindings.
+/// If used independently, ensure that the actual allocated size of
+/// `coefficients_values.data` matches the value stored in `coefficients_values.len`.
+/// A mismatch between these two values will corrupt the memory allocator state.
+export fn freeCoefficientValues(coefficients_values: *CoefficientsValues) void {
+    if (coefficients_values.len != 0) {
+        allocator.free(coefficients_values.data[0..coefficients_values.len]);
+        coefficients_values.len = 0; // mark as freed
+    }
+}
+
+/// Frees a `timestamp_values` buffer previously produced by `extract`.
+/// This function is primarily used by the Python and C bindings.
+/// If used independently, ensure that the actual allocated size of
+/// `timestamp_values.data` matches the value stored in `timestamp_values.len`.
+/// A mismatch between these two values will corrupt the memory allocator state.
+export fn freeTimestampValues(timestamp_values: *TimestampValues) void {
+    if (timestamp_values.len != 0) {
+        allocator.free(timestamp_values.data[0..timestamp_values.len]);
+        timestamp_values.len = 0; // mark as freed
+    }
+}
+
 /// `Array` is a pointer to values of type `data_type` and the number of values.
 fn Array(comptime data_type: type) type {
     return extern struct { data: [*]const data_type, len: usize };
