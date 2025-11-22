@@ -17,7 +17,7 @@
 import sys
 import pathlib
 import sysconfig
-from typing import List
+from typing import List, Tuple
 from enum import Enum, unique
 from ctypes import (
     cdll,
@@ -95,6 +95,14 @@ class __CompressedValues(Structure):
 
 class __Configuration(Structure):
     _fields_ = [("method", c_ubyte), ("error_bound", c_float)]
+
+
+class __CoefficientsValues(Structure):
+    _fields_ = [("data", POINTER(c_double)), ("len", c_size_t)]
+
+
+class __TimestampsValues(Structure):
+    _fields_ = [("data", POINTER(c_size_t)), ("len", c_size_t)]
 
 
 # Declare function signatures (safer; avoids silent arg mismatch).
@@ -301,3 +309,152 @@ def decompress(values: bytes) -> List[float]:
     finally:
         # This block ensures we free the Zig-allocated memory.
         __library.freeUncompressedValues(byref(uncompressed_values))
+
+
+def extract(values: bytes) -> Tuple[List[int], List[float]]:
+    """Extract timestamps and coefficients from a compressed TerseTS buffer.
+
+    This function parses a compressed payload and returns its internal
+    representation as two Python lists: timestamps and coefficients.
+    - **Zero-copy path**: If NumPy is installed, the input buffer is mapped
+      directly and output arrays are efficiently converted to Python lists.
+    - **Copy path**: Without NumPy, ctypes arrays are used for input/output.
+
+    Args:
+      values: Compressed buffer as `bytes`, `bytearray`, or `memoryview`.
+
+    Returns:
+      Tuple of (`timestamps: list[int]`, `coefficients: list[float]`).
+
+    Raises:
+      TypeError: If `values` is not a supported buffer type.
+      RuntimeError: If the native `extract` call fails (non-zero error code).
+
+    Notes:
+      - Output layouts depend on the compression method used.
+      - See TerseTS documentation for details on timestamp/coefficients layouts.
+
+    Examples:
+      >>> blob = compress([1.0, 2.0, 3.0], Method.SwingFilter, 0.01)
+      >>> ts, coeffs = extract(blob)
+      >>> isinstance(ts, list) and isinstance(coeffs, list)
+      True
+    """
+    if not isinstance(values, (bytes, bytearray, memoryview)):
+        raise TypeError("extract(values): values must be bytes, bytearray, or memoryview")
+
+    compressed_values = __CompressedValues()
+
+    if _INSTALLED_NUMPY:
+        # Zero-copy view of compressed input
+        view = np.frombuffer(values, dtype=np.uint8)
+        compressed_values.data = view.ctypes.data_as(POINTER(c_ubyte))
+        compressed_values.len  = view.size
+    else:
+        # No NumPy: temporary c_ubyte[] copy
+        buf = (c_ubyte * len(values)).from_buffer_copy(values)
+        compressed_values.data = cast(buf, POINTER(c_ubyte))
+        compressed_values.len  = len(values)
+
+    timestamps_values = __TimestampsValues()
+    coefficients_values = __CoefficientsValues()
+
+    try:
+        err = __library.extract(compressed_values, byref(timestamps_values), byref(coefficients_values))
+        if err != 0:
+            # Map common codes if you like; keep generic for now
+            raise RuntimeError(f"extract failed: {err}")
+
+        if _INSTALLED_NUMPY:
+            # Build views then detach to Python lists
+            timestamps = np.ctypeslib.as_array(timestamps_values.data, shape=(timestamps_values.len,)).tolist()
+            coefficients = np.ctypeslib.as_array(coefficients_values.data, shape=(coefficients_values.len,)).tolist()
+            return timestamps, coefficients
+
+        # ctypes: slice pointers into Python lists
+        return (
+            list(timestamps_values.data[: timestamps_values.len]),
+            list(coefficients_values.data[: coefficients_values.len]),
+        )
+    finally:
+        __library.freeTimestampValues(byref(timestamps_values))
+        __library.freeCoefficientValues(byref(coefficients_values))
+        
+
+def rebuild(timestamps, coefficients, method: Method) -> bytes:
+    """Rebuild a compressed TerseTS buffer from timestamps and coefficients.
+
+    This function assembles a compressed payload from its internal
+    representation, using the specified compression method.
+    - **Zero-copy path**: If NumPy is installed, input arrays are mapped
+      directly for efficient native calls.
+    - **Copy path**: Python lists/tuples are copied into contiguous arrays.
+
+    Args:
+      timestamps: Sequence of ints (`numpy.ndarray[uintp]` or `list`/`tuple[int]`).
+      coefficients: Sequence of floats (`numpy.ndarray[float64]` or `list`/`tuple[float]`).
+      method: Compression method as a `Method` enum value.
+
+    Returns:
+      Compressed payload as `bytes`.
+
+    Raises:
+      TypeError: If inputs are not valid types or method is not a `Method`.
+      RuntimeError: If the native `rebuild` call fails (non-zero error code).
+
+    Notes:
+      - Input layouts must match the expectations for the selected method.
+      - See TerseTS documentation for details on timestamp/coefficients layouts.
+
+    Examples:
+      >>> blob = compress([1.0, 2.0, 3.0], Method.SwingFilter, 0.01)
+      >>> ts, coeffs = extract(blob)
+      >>> rebuilt = rebuild(ts, coeffs, Method.SwingFilter)
+      >>> isinstance(rebuilt, bytes)
+      True
+    """
+    if type(method) is not Method:
+        available = ", ".join(m.name for m in Method)
+        raise TypeError(f"'{method}' is not a valid TerseTS Method. Available: {available}")
+
+    compressed_values = __CompressedValues()
+
+    # Prepare timestamps (size_t*)
+    timestamps_values = __TimestampsValues()
+    if _INSTALLED_NUMPY and isinstance(timestamps, np.ndarray):
+        time_array = timestamps
+        if time_array.dtype != np.uintp or not time_array.flags["C_CONTIGUOUS"]:
+            time_array = np.ascontiguousarray(time_array, dtype=np.uintp)
+        timestamps_values.data = time_array.ctypes.data_as(POINTER(c_size_t))
+        timestamps_values.len  = time_array.size
+    elif isinstance(timestamps, (list, tuple)):
+        t_buf = (c_size_t * len(timestamps))(*timestamps)
+        timestamps_values.data = t_buf
+        timestamps_values.len  = len(timestamps)
+    else:
+        raise TypeError("rebuild(): 'timestamps' must be ndarray[uintp] or list/tuple[int]")
+
+    # Prepare coefficients (double*)
+    coefficients_values = __CoefficientsValues()
+    if _INSTALLED_NUMPY and isinstance(coefficients, np.ndarray):
+        coeff_array = coefficients
+        if coeff_array.dtype != np.float64 or not coeff_array.flags["C_CONTIGUOUS"]:
+            coeff_array = np.ascontiguousarray(coeff_array, dtype=np.float64)
+        coefficients_values.data = coeff_array.ctypes.data_as(POINTER(c_double))
+        coefficients_values.len  = coeff_array.size
+    elif isinstance(coefficients, (list, tuple)):
+        c_buf = (c_double * len(coefficients))(*coefficients)
+        coefficients_values.data = c_buf
+        coefficients_values.len  = len(coefficients)
+    else:
+        raise TypeError("rebuild(): 'coefficients' must be ndarray[float64] or list/tuple[float]")
+
+    try:
+        err = __library.rebuild(timestamps_values, coefficients_values, byref(compressed_values), method.value)
+        if err != 0:
+            raise RuntimeError(f"rebuild failed: {err}")
+
+        # Return Python-owned bytes (safe to keep)
+        return string_at(compressed_values.data, compressed_values.len)
+    finally:
+        __library.freeCompressedValues(byref(compressed_values))

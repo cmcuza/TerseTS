@@ -199,21 +199,21 @@ pub fn extractMixPiece(
     if (part1_count > 0) {
         for (0..part1_count) |_| {
             // Read and append the intercept value.
-            const intercept = try shared_functions.readValue(f64, compressed_values, &offset);
+            const intercept = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
             try coefficients.append(intercept);
 
             // Read and append the number of slopes in this group.
-            const slopes_count = try shared_functions.readValue(usize, compressed_values, &offset);
+            const slopes_count = try shared_functions.readOffsetValue(usize, compressed_values, &offset);
             try timestamps.append(slopes_count);
 
             // Process each slope in the group.
             for (0..slopes_count) |_| {
                 // Read and append the slope value.
-                const slope = try shared_functions.readValue(f64, compressed_values, &offset);
+                const slope = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
                 try coefficients.append(slope);
 
                 // Read and append the number of timestamps for this slope.
-                const timestamps_count = try shared_functions.readValue(
+                const timestamps_count = try shared_functions.readOffsetValue(
                     usize,
                     compressed_values,
                     &offset,
@@ -222,7 +222,7 @@ pub fn extractMixPiece(
 
                 // Read and append each timestamp delta.
                 for (0..timestamps_count) |_| {
-                    const delta = try shared_functions.readValue(usize, compressed_values, &offset);
+                    const delta = try shared_functions.readOffsetValue(usize, compressed_values, &offset);
                     try timestamps.append(delta);
                 }
             }
@@ -233,21 +233,21 @@ pub fn extractMixPiece(
     if (part2_count > 0) {
         for (0..part2_count) |_| {
             // Read and append the slope value.
-            const slope = try shared_functions.readValue(f64, compressed_values, &offset);
+            const slope = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
             try coefficients.append(slope);
 
             // Read and append the number of intercept-delta pairs in this group.
-            const pair_count = try shared_functions.readValue(usize, compressed_values, &offset);
+            const pair_count = try shared_functions.readOffsetValue(usize, compressed_values, &offset);
             try timestamps.append(pair_count);
 
             // Process each intercept-delta pair.
             for (0..pair_count) |_| {
                 // Read and append the intercept value.
-                const intercept = try shared_functions.readValue(f64, compressed_values, &offset);
+                const intercept = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
                 try coefficients.append(intercept);
 
                 // Read and append the delta value.
-                const delta = try shared_functions.readValue(usize, compressed_values, &offset);
+                const delta = try shared_functions.readOffsetValue(usize, compressed_values, &offset);
                 try timestamps.append(delta);
             }
         }
@@ -257,21 +257,21 @@ pub fn extractMixPiece(
     if (part3_count > 0) {
         for (0..part3_count) |_| {
             // Read and append the slope value.
-            const slope = try shared_functions.readValue(f64, compressed_values, &offset);
+            const slope = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
             try coefficients.append(slope);
 
             // Read and append the intercept value.
-            const intercept = try shared_functions.readValue(f64, compressed_values, &offset);
+            const intercept = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
             try coefficients.append(intercept);
 
             // Read and append the delta value.
-            const delta = try shared_functions.readValue(usize, compressed_values, &offset);
+            const delta = try shared_functions.readOffsetValue(usize, compressed_values, &offset);
             try timestamps.append(delta);
         }
     }
 
     // Read and append the final timestamp.
-    const final_timestamp = try shared_functions.readValue(usize, compressed_values, &offset);
+    const final_timestamp = try shared_functions.readOffsetValue(usize, compressed_values, &offset);
     try timestamps.append(final_timestamp);
 }
 
@@ -313,6 +313,12 @@ pub fn rebuildSwing(
     coefficients: []const f64,
     compressed_values: *ArrayList(u8),
 ) Error!void {
+    // Validate input lengths: coefficients must have at least one element,
+    // and timestamps must have one less element than coefficients.
+    if (coefficients.len == 0 or coefficients.len != timestamps.len + 1) {
+        return Error.UnsupportedInput;
+    }
+
     // Each pair is 16 bytes (two f64). Reserve once.
     try compressed_values.ensureTotalCapacity(coefficients.len * 16);
 
@@ -342,6 +348,10 @@ pub fn rebuildSlide(
 ) Error!void {
     // Each pair is 16 bytes (two f64). Reserve once.
     try compressed_values.ensureTotalCapacity(coefficients.len * 24);
+
+    if (coefficients.len != timestamps.len * 2) {
+        return Error.UnsupportedInput;
+    }
 
     const total_len = coefficients.len + timestamps.len;
     var time_idx: usize = 0;
@@ -559,7 +569,11 @@ test "rebuildPMC rejects mismatched input lengths" {
     const timestamps = [_]usize{1};
     const coefficients = [_]f64{ 1.0, 2.0 };
 
-    try testing.expectError(Error.UnsupportedInput, rebuildPMC(timestamps[0..], coefficients[0..], &compressed));
+    try testing.expectError(Error.UnsupportedInput, rebuildPMC(
+        timestamps[0..],
+        coefficients[0..],
+        &compressed,
+    ));
 }
 
 test "extract and rebuild Swing round trip" {
@@ -582,6 +596,21 @@ test "extract and rebuild Swing round trip" {
     try testing.expectEqualSlices(f64, coefficients[0..], extracted_coeffs.items);
 }
 
+test "rebuildSwing rejects mismatched input lengths" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).init(allocator);
+    defer compressed.deinit();
+
+    const timestamps = [_]usize{ 1, 2 };
+    const coefficients = [_]f64{ 1.0, 2.0 };
+
+    try testing.expectError(Error.UnsupportedInput, rebuildSwing(
+        timestamps[0..],
+        coefficients[0..],
+        &compressed,
+    ));
+}
+
 test "extract and rebuild Slide round trip" {
     const allocator = testing.allocator;
 
@@ -600,6 +629,21 @@ test "extract and rebuild Slide round trip" {
 
     try testing.expectEqualSlices(usize, timestamps[0..], extracted_ts.items);
     try testing.expectEqualSlices(f64, coefficients[0..], extracted_coeffs.items);
+}
+
+test "rebuildSlide rejects mismatched input lengths" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).init(allocator);
+    defer compressed.deinit();
+
+    const timestamps = [_]usize{ 1, 2, 3 };
+    const coefficients = [_]f64{ 1.0, 2.0 };
+
+    try testing.expectError(Error.UnsupportedInput, rebuildSlide(
+        timestamps[0..],
+        coefficients[0..],
+        &compressed,
+    ));
 }
 
 test "extract and rebuild SimPiece round trip" {
