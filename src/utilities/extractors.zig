@@ -27,7 +27,6 @@ const mem = std.mem;
 const testing = std.testing;
 
 const tersets = @import("../tersets.zig");
-const Method = tersets.Method;
 const Error = tersets.Error;
 
 const shared_functions = @import("shared_functions.zig");
@@ -557,7 +556,7 @@ test "rebuildPMC rejects mismatched input lengths" {
     var compressed = ArrayList(u8).init(allocator);
     defer compressed.deinit();
 
-    const timestamps = [_]usize{ 1 };
+    const timestamps = [_]usize{1};
     const coefficients = [_]f64{ 1.0, 2.0 };
 
     try testing.expectError(Error.UnsupportedInput, rebuildPMC(timestamps[0..], coefficients[0..], &compressed));
