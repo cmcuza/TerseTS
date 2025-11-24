@@ -182,3 +182,26 @@ pub fn isApproximatelyEqual(value_a: f64, value_b: f64) bool {
     const max_abs = @max(@abs(value_a), @abs(value_b));
     return abs_diff <= shared_structs.ABS_EPS or abs_diff <= max_abs * shared_structs.REL_EPS;
 }
+
+/// Convert a floating f64 `value` to its u64 representation, ensuring the sign bit is preserved
+/// in the most significant bit. This is useful for comparing floating-point values in a way that
+/// respects their ordering, including negative values. The function returns the `u64`, where the
+/// sign bit is preserved in the most significant bit.
+pub fn floatBitsOrdered(value: f64) u64 {
+    const value_bits: u64 = @bitCast(value);
+    // If negative: flip all bits (mirror to top range).
+    return if ((value_bits >> 63) == 1)
+        ~value_bits
+    else
+        value_bits | (@as(u64, 1) << 63);
+}
+
+/// Convert a u64 `value` back to its original `f64` representation, ensuring the sign bit is
+/// restored correctly. This is useful for decompressing values that were quantized and
+/// bit-packed, preserving the original ordering of the floating-point values.
+pub fn orderedBitsToFloat(value: u64) f64 {
+    return if ((value >> 63) == 1)
+        @bitCast(value & ~(@as(u64, 1) << 63))
+    else
+        @bitCast(~value);
+}
