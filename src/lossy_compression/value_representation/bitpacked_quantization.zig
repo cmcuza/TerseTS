@@ -29,13 +29,13 @@ const testing = std.testing;
 const ArrayList = std.ArrayList;
 const Allocator = mem.Allocator;
 
-const tersets = @import("../tersets.zig");
-const configuration = @import("../configuration.zig");
+const tersets = @import("../../tersets.zig");
+const configuration = @import("../../configuration.zig");
 const Method = tersets.Method;
 const Error = tersets.Error;
-const tester = @import("../tester.zig");
+const tester = @import("../../tester.zig");
 
-const shared_functions = @import("../utilities/shared_functions.zig");
+const shared_functions = @import("../../utilities/shared_functions.zig");
 
 /// Compress `uncompressed_values` within error_bound using "Bucket Quantization" and a
 /// "Fixed-length Bit-Packing". The function writes the result to `compressed_values`. The

@@ -28,16 +28,16 @@ const time = std.time;
 const testing = std.testing;
 const ArrayList = std.ArrayList;
 
-const tersets = @import("../tersets.zig");
-const configuration = @import("../configuration.zig");
+const tersets = @import("../../tersets.zig");
+const configuration = @import("../../configuration.zig");
 
 const Method = tersets.Method;
 const Error = tersets.Error;
-const shared_structs = @import("../utilities/shared_structs.zig");
-const shared_functions = @import("../utilities/shared_functions.zig");
+const shared_structs = @import("../../utilities/shared_structs.zig");
+const shared_functions = @import("../../utilities/shared_functions.zig");
 const DiscretePoint = shared_structs.DiscretePoint;
 
-const tester = @import("../tester.zig");
+const tester = @import("../../tester.zig");
 
 /// Compresses `uncompressed_values` within `error_bound` using the "Sim-Piece" algorithm.
 /// The function writes the result to `compressed_values`. The `allocator` is used for memory

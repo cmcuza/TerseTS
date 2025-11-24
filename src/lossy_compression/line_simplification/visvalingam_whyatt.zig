@@ -24,23 +24,23 @@ const time = std.time;
 const testing = std.testing;
 const ArrayList = std.ArrayList;
 
-const tersets = @import("../tersets.zig");
-const configuration = @import("../configuration.zig");
+const tersets = @import("../../tersets.zig");
+const configuration = @import("../../configuration.zig");
 const Method = tersets.Method;
 const Error = tersets.Error;
 
 const HashedPriorityQueue = @import(
-    "../utilities/hashed_priority_queue.zig",
+    "../../utilities/hashed_priority_queue.zig",
 ).HashedPriorityQueue;
 
-const shared_structs = @import("../utilities/shared_structs.zig");
-const shared_functions = @import("../utilities/shared_functions.zig");
+const shared_structs = @import("../../utilities/shared_structs.zig");
+const shared_functions = @import("../../utilities/shared_functions.zig");
 
 const DiscretePoint = shared_structs.DiscretePoint;
 const LinearFunction = shared_structs.LinearFunction;
 const Segment = shared_structs.Segment;
 
-const tester = @import("../tester.zig");
+const tester = @import("../../tester.zig");
 
 /// Compress `uncompressed_values` using "Visvalingam-Whyatt" simplification algorithm by keeping
 /// points whose effective area is greater than the `error_bound`. The function writes the result

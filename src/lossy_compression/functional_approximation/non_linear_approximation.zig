@@ -33,17 +33,17 @@ const math = std.math;
 const ArrayList = std.ArrayList;
 const testing = std.testing;
 
-const tersets = @import("../tersets.zig");
-const tester = @import("../tester.zig");
-const configuration = @import("../configuration.zig");
+const tersets = @import("../../tersets.zig");
+const tester = @import("../../tester.zig");
+const configuration = @import("../../configuration.zig");
 
 const Error = tersets.Error;
 const Method = tersets.Method;
 const Allocator = mem.Allocator;
 
-const shared_structs = @import("../utilities/shared_structs.zig");
-const convex_polygon = @import("../utilities/convex_polygon.zig");
-const shared_functions = @import("../utilities/shared_functions.zig");
+const shared_structs = @import("../../utilities/shared_structs.zig");
+const convex_polygon = @import("../../utilities/convex_polygon.zig");
+const shared_functions = @import("../../utilities/shared_functions.zig");
 const DiscretePoint = shared_structs.DiscretePoint;
 const LinearFunction = shared_structs.LinearFunction;
 const BorderLine = convex_polygon.BorderLine;

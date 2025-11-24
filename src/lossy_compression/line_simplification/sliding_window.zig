@@ -26,18 +26,18 @@ const math = std.math;
 const time = std.time;
 const ArrayList = std.ArrayList;
 
-const tersets = @import("../tersets.zig");
-const configuration = @import("../configuration.zig");
+const tersets = @import("../../tersets.zig");
+const configuration = @import("../../configuration.zig");
 const Method = tersets.Method;
 const Error = tersets.Error;
 
-const shared_structs = @import("../utilities/shared_structs.zig");
-const shared_functions = @import("../utilities/shared_functions.zig");
+const shared_structs = @import("../../utilities/shared_structs.zig");
+const shared_functions = @import("../../utilities/shared_functions.zig");
 
 const DiscretePoint = shared_structs.DiscretePoint;
 const LinearFunction = shared_structs.LinearFunction;
 
-const tester = @import("../tester.zig");
+const tester = @import("../../tester.zig");
 
 const testing = std.testing;
 

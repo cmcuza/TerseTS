@@ -18,18 +18,18 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
-const poor_mans_compression = @import("functional_approximation/poor_mans_compression.zig");
-const swing_slide_filter = @import("functional_approximation/swing_slide_filter.zig");
-const sim_piece = @import("functional_approximation/sim_piece.zig");
-const mix_piece = @import("functional_approximation/mix_piece.zig");
-const piecewise_histogram = @import("histogram_representation/constant_linear_representation.zig");
-const abc_linear_approximation = @import("functional_approximation/abc_linear_approximation.zig");
-const vw = @import("line_simplification/visvalingam_whyatt.zig");
-const sliding_window = @import("line_simplification/sliding_window.zig");
-const bottom_up = @import("line_simplification/bottom_up.zig");
-const rle_enconding = @import("lossless_encoding/run_length_encoding.zig");
-const bitpacked_quantization = @import("quantization/bitpacked_quantization.zig");
-const non_linear_approximation = @import("functional_approximation/non_linear_approximation.zig");
+const poor_mans_compression = @import("lossy_compression/functional_approximation/poor_mans_compression.zig");
+const swing_slide_filter = @import("lossy_compression/functional_approximation/swing_slide_filter.zig");
+const abc_linear_approximation = @import("lossy_compression/functional_approximation/abc_linear_approximation.zig");
+const sim_piece = @import("lossy_compression/functional_approximation/sim_piece.zig");
+const mix_piece = @import("lossy_compression/functional_approximation/mix_piece.zig");
+const non_linear_approximation = @import("lossy_compression/functional_approximation/non_linear_approximation.zig");
+const piecewise_histogram = @import("lossy_compression/value_representation/histogram_representation.zig");
+const bitpacked_quantization = @import("lossy_compression/value_representation/bitpacked_quantization.zig");
+const vw = @import("lossy_compression/line_simplification/visvalingam_whyatt.zig");
+const sliding_window = @import("lossy_compression/line_simplification/sliding_window.zig");
+const bottom_up = @import("lossy_compression/line_simplification/bottom_up.zig");
+const rle_enconding = @import("lossless_compression/run_length_encoding.zig");
 
 /// The errors that can occur in TerseTS.
 pub const Error = error{
