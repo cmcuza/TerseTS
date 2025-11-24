@@ -74,7 +74,7 @@ pub fn compress(
     // For non-zero error_bound, we apply fixed-width bucket quantization
     // using the defined bucket size (1.99 × error_bound).
 
-    var encoded_value: usize = 0;
+    var encoded_value: u64 = 0;
     for (uncompressed_values) |value| {
         if (!math.isFinite(value) or @abs(value) > tester.max_test_value) return Error.UnsupportedInput;
 
@@ -82,15 +82,19 @@ pub fn compress(
             // Quantization for the lossless case.
             // This case is not defined in the paper, but we implement it
             // as the difference from the previous value.
-            const usize_value: usize = shared_functions.floatBitsOrdered(value);
+            const usize_value: u64 = shared_functions.floatBitsOrdered(value);
             encoded_value = usize_value - usize_previous_value;
         } else {
-            // Fixed-width bucket quantization with rounding.
+            // Fixed-width bucket quantization with rounding (Equation 2).
             const quantized_value: i64 = @intFromFloat(@floor((value - previous_value) / bucket_size + 0.5));
-            encoded_value = shared_functions.zigZagEncoder(quantized_value);
+            // Apply zigzag encoding to handle negative values (Equation 4).
+            encoded_value = shared_functions.zigzagEncoder(quantized_value + 1);
         }
 
         try quantized_values.append(encoded_value);
         previous_value = value;
     }
+
+    // Encode the quantized values using Elias Gamma encoding.
+    try shared_functions.eliasGammaEncode(allocator, quantized_values.items, compressed_values);
 }
