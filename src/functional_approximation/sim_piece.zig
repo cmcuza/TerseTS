@@ -29,6 +29,8 @@ const testing = std.testing;
 const ArrayList = std.ArrayList;
 
 const tersets = @import("../tersets.zig");
+const configuration = @import("../configuration.zig");
+
 const Method = tersets.Method;
 const Error = tersets.Error;
 const shared_structs = @import("../utilities/shared_structs.zig");
@@ -39,14 +41,25 @@ const tester = @import("../tester.zig");
 
 /// Compresses `uncompressed_values` within `error_bound` using the "Sim-Piece" algorithm.
 /// The function writes the result to `compressed_values`. The `allocator` is used for memory
-/// allocation of intermediate data structures. If an error occurs, it is returned.
+/// allocation of intermediate data structures and the `method_configuration` parser.
+/// The `method_configuration` is expected to be of `AbsoluteErrorBound` type otherwise
+/// an `InvalidConfiguration` error is return. If any other error occurs during the execution
+/// of the method, it is returned.
 pub fn compress(
     allocator: mem.Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
-    error_bound: f32,
+    method_configuration: []const u8,
 ) Error!void {
-    if (error_bound <= 0.0) {
+    const parsed_configuration = try configuration.parse(
+        allocator,
+        configuration.AbsoluteErrorBound,
+        method_configuration,
+    );
+
+    const error_bound: f32 = parsed_configuration.abs_error_bound;
+
+    if (error_bound == 0.0) {
         return Error.UnsupportedErrorBound;
     }
     // Sim-Piece Phase 1: Compute `SegmentMetadata` for all segments that can be approximated
@@ -637,11 +650,15 @@ test "sim-piece cannot compress NaN values" {
     var compressed_values = ArrayList(u8).init(allocator);
     defer compressed_values.deinit();
 
+    const method_configuration =
+        \\ {"abs_error_bound": 0.1}
+    ;
+
     compress(
         allocator,
         uncompressed_values,
         &compressed_values,
-        0.1,
+        method_configuration,
     ) catch |err| {
         try testing.expectEqual(Error.UnsupportedInput, err);
         return;
@@ -662,11 +679,15 @@ test "sim-piece cannot compress inf values" {
     var compressed_values = ArrayList(u8).init(allocator);
     defer compressed_values.deinit();
 
+    const method_configuration =
+        \\ {"abs_error_bound": 0.1}
+    ;
+
     compress(
         allocator,
         uncompressed_values,
         &compressed_values,
-        0.1,
+        method_configuration,
     ) catch |err| {
         try testing.expectEqual(Error.UnsupportedInput, err);
         return;
@@ -687,11 +708,15 @@ test "sim-piece cannot compress f64 with reduced precision" {
     var compressed_values = ArrayList(u8).init(allocator);
     defer compressed_values.deinit();
 
+    const method_configuration =
+        \\ {"abs_error_bound": 0.1}
+    ;
+
     compress(
         allocator,
         uncompressed_values,
         &compressed_values,
-        0.1,
+        method_configuration,
     ) catch |err| {
         try testing.expectEqual(Error.UnsupportedInput, err);
         return;
@@ -701,5 +726,29 @@ test "sim-piece cannot compress f64 with reduced precision" {
         "",
         "The Sim-Piece algorithm cannot compress reduced precision floating point values",
         .{},
+    );
+}
+
+test "check simpiece configuration parsing" {
+    // Tests the configuration parsing and functionality of the `compress` function.
+    // The test verifies that the provided configuration is correctly interpreted and
+    // that the `configuration.AbsoluteErrorBound` is expected in the function.
+    const allocator = testing.allocator;
+
+    const uncompressed_values = &[4]f64{ 19.0, 48.0, 28.0, 3.0 };
+
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+
+    const method_configuration =
+        \\ {"abs_error_bound": 0.1}
+    ;
+
+    // The configuration is properly defined. No error expected.
+    try compress(
+        allocator,
+        uncompressed_values,
+        &compressed_values,
+        method_configuration,
     );
 }
