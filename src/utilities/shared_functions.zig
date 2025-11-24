@@ -194,8 +194,19 @@ pub fn zigzagEncoder(value: i64) u64 {
 /// Decodes an u64 `value` back into a signed 64-bit integer (i64) using ZigZag decoding.
 /// This reverses the transformation performed by `zigzagEncode`.
 pub fn zigzagDecoder(value: u64) i64 {
-    const decoded_value: i64 = @bitCast(value);
-    return (decoded_value >> 1) ^ (-(decoded_value & 1));
+    // Revert logical shift.
+    const shifted_value = value >> 1;
+    const last_bit: u64 = value & 1;
+
+    // Make a signed value 0 or -1.
+    // last_bit == 0 -> sign = 0.
+    // last_bit == 1 -> sign = -1.
+    const sign: i64 = -@as(i64, @intCast(last_bit));
+
+    // Reinterpret sign as an unsigned mask: 0 or 0xFFFF...FFFF.
+    const sign_mask: u64 = @bitCast(sign);
+
+    return @bitCast(shifted_value ^ sign_mask);
 }
 
 /// Encodes an array of u64 `values` using Elias Gamma encoding. Elias Gamma encoding is a
@@ -275,19 +286,50 @@ pub fn eliasGammaDecoder(allocator: Allocator, compressed_values: []const u8) !A
     }
 }
 
-test "zigzag can encode and decode signed integers correctly" {
+test "zigzag can encode and decode small signed integers correctly" {
     const default_random = tester.getDefaultRandomGenerator();
     const number_of_tests = tester.generateNumberOfValues(default_random);
+    // Using math.maxInt(i64) would generate only large integers due to the biases.
+    // Thus, limit the range to ensure that small integers are generated.
     for (0..number_of_tests) |_| {
         const original = tester.generateBoundRandomInteger(
             i64,
-            -tester.max_test_value,
-            tester.max_test_value,
+            -1e5,
+            1e5,
             default_random,
         );
         const encoded = zigzagEncoder(original);
         const decoded = zigzagDecoder(encoded);
-        try testing.expect(decoded == original);
+        try testing.expectEqual(decoded, original);
+    }
+}
+
+test "zigzag can encode and decode big signed integers correctly" {
+    const default_random = tester.getDefaultRandomGenerator();
+    const number_of_tests = tester.generateNumberOfValues(default_random);
+    // Using math.maxInt(i64) would generate only large integers due to the biases.
+    for (0..number_of_tests) |_| {
+        const original = tester.generateBoundRandomInteger(
+            i64,
+            -math.maxInt(i64),
+            math.maxInt(i64),
+            default_random,
+        );
+        const encoded = zigzagEncoder(original);
+        const decoded = zigzagDecoder(encoded);
+        try testing.expectEqual(decoded, original);
+    }
+
+    for (0..number_of_tests) |_| {
+        const original = tester.generateBoundRandomInteger(
+            i64,
+            -1e5,
+            1e5,
+            default_random,
+        );
+        const encoded = zigzagEncoder(original);
+        const decoded = zigzagDecoder(encoded);
+        try testing.expectEqual(decoded, original);
     }
 }
 
