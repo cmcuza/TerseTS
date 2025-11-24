@@ -176,7 +176,7 @@ decompressed_values = decompress(compressed_values)
 print("Decompression successful. Decompressed data length: ", len(decompressed_values))
 ```
 
-TerseTS provides `./bindings/python/tersets/__init__.py` as binding for Python which can be imported directly into a Python program with `import tersets`. The binding automatically loads the native library but assumes it is not moved.
+TerseTS provides Python bindings located in `./bindings/python/tersets/__init__.py`, which can be directly imported into a Python program using `import tersets`. To install the bindings, navigate to the Python binding root directory and run `pip install .` as described in the [Python bindings README](bindings/python/README.md). The bindings automatically load the native library, assuming it remains in its default location.
 
 
 - **`compress(values, method, configuration)` Function:**
