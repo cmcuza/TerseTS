@@ -18,14 +18,34 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
-const poor_mans_compression = @import("lossy_compression/functional_approximation/poor_mans_compression.zig");
-const swing_slide_filter = @import("lossy_compression/functional_approximation/swing_slide_filter.zig");
-const abc_linear_approximation = @import("lossy_compression/functional_approximation/abc_linear_approximation.zig");
+// Import functional approximation methods.
+const poor_mans_compression = @import(
+    "lossy_compression/functional_approximation/poor_mans_compression.zig",
+);
+const swing_slide_filter = @import(
+    "lossy_compression/functional_approximation/swing_slide_filter.zig",
+);
+const abc_linear_approximation = @import(
+    "lossy_compression/functional_approximation/abc_linear_approximation.zig",
+);
 const sim_piece = @import("lossy_compression/functional_approximation/sim_piece.zig");
 const mix_piece = @import("lossy_compression/functional_approximation/mix_piece.zig");
-const non_linear_approximation = @import("lossy_compression/functional_approximation/non_linear_approximation.zig");
-const piecewise_histogram = @import("lossy_compression/value_representation/histogram_representation.zig");
-const bitpacked_quantization = @import("lossy_compression/value_representation/bitpacked_quantization.zig");
+const non_linear_approximation = @import(
+    "lossy_compression/functional_approximation/non_linear_approximation.zig",
+);
+
+// Import value approximation methods.
+const piecewise_histogram = @import(
+    "lossy_compression/value_representation/histogram_representation.zig",
+);
+const bitpacked_quantization = @import(
+    "lossy_compression/value_representation/bitpacked_quantization.zig",
+);
+const serqt = @import(
+    "lossy_compression/value_representation/serf_qt.zig",
+);
+
+// Import line simplification methods.
 const vw = @import("lossy_compression/line_simplification/visvalingam_whyatt.zig");
 const sliding_window = @import("lossy_compression/line_simplification/sliding_window.zig");
 const bottom_up = @import("lossy_compression/line_simplification/bottom_up.zig");
@@ -63,6 +83,7 @@ pub const Method = enum {
     BitPackedQuantization,
     RunLengthEncoding,
     NonLinearApproximation,
+    SerfQT,
 };
 
 /// Compress `uncompressed_values` using `method` and its `configuration` and returns the results
@@ -85,7 +106,7 @@ pub fn compress(
             try compressed_values.appendSlice(value_as_bytes[0..]);
             return compressed_values;
         }
-        // The uncompressed_values is empty.
+        // The `uncompressed_values` is empty.
         return Error.UnsupportedInput;
     }
 
@@ -147,7 +168,6 @@ pub fn compress(
             );
         },
         .PiecewiseConstantHistogram => {
-            // Again, we need to extract the actual value from the optional `number_histogram_bins`.
             try piecewise_histogram.compressPWCH(
                 allocator,
                 uncompressed_values,
@@ -156,7 +176,6 @@ pub fn compress(
             );
         },
         .PiecewiseLinearHistogram => {
-            // Again, we need to extract the actual value from the optional `number_histogram_bins`.
             try piecewise_histogram.compressPWLH(
                 allocator,
                 uncompressed_values,
@@ -214,6 +233,14 @@ pub fn compress(
         },
         .NonLinearApproximation => {
             try non_linear_approximation.compress(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                configuration,
+            );
+        },
+        .SerfQT => {
+            try serqt.compress(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
@@ -292,6 +319,9 @@ pub fn decompress(
         },
         .NonLinearApproximation => {
             try non_linear_approximation.decompress(allocator, compressed_values_slice, &decompressed_values);
+        },
+        .SerfQT => {
+            try serqt.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
     }
 
