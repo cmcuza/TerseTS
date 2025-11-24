@@ -1022,7 +1022,7 @@ test "check swing configuration parsing" {
 }
 
 test "check slide configuration parsing" {
-    // Tests the configuration parsing and functionality of the `compressSwingFilter` function.
+    // Tests the configuration parsing and functionality of the `compressSlideFilter` function.
     // The test verifies that the provided configuration is correctly interpreted and
     // that the `configuration.AbsoluteErrorBound` is expected in the function.
     const allocator = testing.allocator;

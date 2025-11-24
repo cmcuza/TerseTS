@@ -142,19 +142,184 @@ pub fn decompress(
     }
 }
 
-test "serfqt quantization can compress and decompress bounded values" {
+test "serfqt can compress and decompress bounded values" {
     const allocator = testing.allocator;
     const data_distributions = &[_]tester.DataDistribution{
         .LinearFunctions,
         .BoundedRandomValues,
         .SinusoidalFunction,
+        .MixedBoundedValuesFunctions,
     };
 
-    // This function evaluates BitPackedQuantization using all data distribution stored in
-    // `data_distribution`.
     try tester.testErrorBoundedCompressionMethod(
         allocator,
         Method.SerfQT,
         data_distributions,
+    );
+}
+
+test "serfqt cannot compress and decompress nan values" {
+    const allocator = testing.allocator;
+    const uncompressed_values = [3]f64{ 343.0, math.nan(f64), 520.0 };
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+
+    const method_configuration =
+        \\ {"abs_error_bound": 0.1}
+    ;
+
+    compress(
+        allocator,
+        uncompressed_values[0..],
+        &compressed_values,
+        method_configuration,
+    ) catch |err| {
+        try testing.expectEqual(Error.UnsupportedInput, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The SerfQT method cannot compress nan values",
+        .{},
+    );
+}
+
+test "serfqt cannot compress and decompress unbounded values" {
+    const allocator = testing.allocator;
+    const uncompressed_values = [3]f64{ 343.0, 1e20, 520.0 };
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+
+    const method_configuration =
+        \\ {"abs_error_bound": 0.1}
+    ;
+
+    compress(
+        allocator,
+        uncompressed_values[0..],
+        &compressed_values,
+        method_configuration,
+    ) catch |err| {
+        try testing.expectEqual(Error.UnsupportedInput, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "The SerfQT method cannot compress unbounded values",
+        .{},
+    );
+}
+
+test "serfqt can compress and decompress bounded values at different scales" {
+    const allocator = testing.allocator;
+    const error_bound = tester.generateBoundedRandomValue(f32, 0, 1e3, undefined);
+
+    var uncompressed_values = ArrayList(f64).init(allocator);
+    defer uncompressed_values.deinit();
+
+    try tester.generateBoundedRandomValues(&uncompressed_values, -1, 1, undefined);
+    try tester.generateBoundedRandomValues(&uncompressed_values, -1e2, 1e2, undefined);
+    try tester.generateBoundedRandomValues(&uncompressed_values, -1e4, 1e4, undefined);
+    try tester.generateBoundedRandomValues(&uncompressed_values, -1e6, 1e6, undefined);
+    try tester.generateBoundedRandomValues(&uncompressed_values, -1e8, 1e8, undefined);
+
+    try tester.testCompressAndDecompress(
+        allocator,
+        uncompressed_values.items,
+        Method.SerfQT,
+        error_bound,
+        shared_functions.isWithinErrorBound,
+    );
+}
+
+test "serfqt can compress and decompress with zero error bound at different scales" {
+    const allocator = testing.allocator;
+    const error_bound = 0;
+
+    var uncompressed_values = ArrayList(f64).init(allocator);
+    defer uncompressed_values.deinit();
+
+    try tester.generateBoundedRandomValues(&uncompressed_values, -1, 1, undefined);
+    try tester.generateBoundedRandomValues(&uncompressed_values, -1e2, 1e2, undefined);
+    try tester.generateBoundedRandomValues(&uncompressed_values, -1e4, 1e4, undefined);
+    try tester.generateBoundedRandomValues(&uncompressed_values, -1e6, 1e6, undefined);
+    try tester.generateBoundedRandomValues(&uncompressed_values, -1e8, 1e8, undefined);
+    try tester.generateBoundedRandomValues(&uncompressed_values, -1e14, 1e14, undefined);
+
+    try tester.testCompressAndDecompress(
+        allocator,
+        uncompressed_values.items,
+        Method.SerfQT,
+        error_bound,
+        shared_functions.isWithinErrorBound,
+    );
+}
+
+test "serfqt always reduces size of time series" {
+    const allocator = testing.allocator;
+    // Generate a random error bound between 10 and 1000, which will be used for quantization.
+    const error_bound = @floor(tester.generateBoundedRandomValue(
+        f32,
+        1e1,
+        1e3,
+        undefined,
+    )) * 0.1;
+
+    var uncompressed_values = ArrayList(f64).init(allocator);
+    defer uncompressed_values.deinit();
+
+    // Generate 500 random values within different ranges. Even if some values require 8 bytes
+    // to be stored, the quantization should reduce the size of the time series since some
+    // values require less than 8 bytes to be stored after quantization.
+    try tester.generateBoundedRandomValues(&uncompressed_values, -1, 1, undefined);
+    try tester.generateBoundedRandomValues(&uncompressed_values, -1e2, 1e2, undefined);
+    try tester.generateBoundedRandomValues(&uncompressed_values, -1e4, 1e4, undefined);
+    try tester.generateBoundedRandomValues(&uncompressed_values, -1e6, 1e6, undefined);
+    try tester.generateBoundedRandomValues(&uncompressed_values, -1e8, 1e8, undefined);
+
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+
+    const method_configuration = try std.fmt.allocPrint(
+        allocator,
+        "{{\"abs_error_bound\": {d}}}",
+        .{error_bound},
+    );
+    defer allocator.free(method_configuration);
+
+    try compress(
+        allocator,
+        uncompressed_values.items,
+        &compressed_values,
+        method_configuration,
+    );
+
+    // Considering the range of the input data, the compressed values should always be smaller.
+    try testing.expect(uncompressed_values.items.len * 8 > compressed_values.items.len);
+}
+
+test "check serqt configuration parsing" {
+    // Tests the configuration parsing and functionality of the `compress` function.
+    // The test verifies that the provided configuration is correctly interpreted and
+    // that the `configuration.AbsoluteErrorBound` is expected in the function.
+    const allocator = testing.allocator;
+
+    const uncompressed_values = &[4]f64{ 19.0, 48.0, 29.0, 3.0 };
+
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+
+    const method_configuration =
+        \\ {"abs_error_bound": 0.1}
+    ;
+
+    // The configuration is properly defined. No error expected.
+    try compress(
+        allocator,
+        uncompressed_values,
+        &compressed_values,
+        method_configuration,
     );
 }

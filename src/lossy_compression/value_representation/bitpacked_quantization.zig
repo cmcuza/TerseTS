@@ -219,7 +219,7 @@ test "bitpacked quantization cannot compress and decompress nan values" {
     const allocator = testing.allocator;
     const uncompressed_values = [3]f64{ 343.0, math.nan(f64), 520.0 };
     var compressed_values = ArrayList(u8).init(allocator);
-    compressed_values.deinit();
+    defer compressed_values.deinit();
 
     const method_configuration =
         \\ {"abs_error_bound": 0.1}
@@ -246,7 +246,7 @@ test "bitpacked quantization cannot compress and decompress unbounded values" {
     const allocator = testing.allocator;
     const uncompressed_values = [3]f64{ 343.0, 1e20, 520.0 };
     var compressed_values = ArrayList(u8).init(allocator);
-    compressed_values.deinit();
+    defer compressed_values.deinit();
 
     const method_configuration =
         \\ {"abs_error_bound": 0.1}
@@ -358,7 +358,7 @@ test "bitpacked quantization always reduces size of time series" {
 }
 
 test "check bit-quantization configuration parsing" {
-    // Tests the configuration parsing and functionality of the `compressMidrange` function.
+    // Tests the configuration parsing and functionality of the `compress` function.
     // The test verifies that the provided configuration is correctly interpreted and
     // that the `configuration.AbsoluteErrorBound` is expected in the function.
     const allocator = testing.allocator;
