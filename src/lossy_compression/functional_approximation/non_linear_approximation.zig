@@ -91,7 +91,7 @@ pub fn compress(
         method_configuration,
     );
 
-    const error_bound: f32 = parsed_configuration.abs_error_bound;
+    const error_bound: f32 = parsed_configuration.abs_error_bound - shared_structs.ErrorBoundMargin;
 
     // Validates that the input contains at least 2 data points for meaningful compression.
     if (error_bound == 0.0) return Error.UnsupportedErrorBound;
