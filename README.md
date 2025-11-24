@@ -40,14 +40,14 @@ pub fn main() void {
    const configuration = "{ \"abs_error_bound\": 0.1 }";
 
    // Compress the data.
-   var compressed_values = try tersets.compress(uncompressed_values, allocator, method, configuration);
+   var compressed_values = try tersets.compress(allocator, uncompressed_values, method, configuration);
    // The compressed values point to dynamically allocated data that should be deallocated.
    defer compressed_values.deinit();
 
    std.debug.print("Compression successful. Compressed data length: {any}\n", .{compressed_values.items.len});
 
    // Decompress the data.
-   var decompressed_values = try tersets.decompress(compressed_values, allocator);
+   var decompressed_values = try tersets.decompress(allocator, compressed_values);
    // The decompressed values point to dynamically allocated data that should be deallocated.
    defer decompressed_values.deinit();
 
@@ -57,18 +57,21 @@ pub fn main() void {
 
 TerseTS provides `./src/tersets.zig` as the single access point and two main functions `compress()` and `decompress()`.
 
-- **`compress()` Function:**
+- **`compress(allocator, uncompressed_values, method, configuration)` Function:**
    - **Parameters:**
-      - `uncompressed_values`: The array of values to compress.
-      - `allocator`: Used to allocate memory for the returned `compressed_values` and other intermediate structures needed for compression.
-      - `method`: Compression method identifier as specified in `tersets.Method`, e.g., `tersets.Method.SwingFilter`. The supported compression methods are specified in `src/tersets.zig`.
-      - `error_bound`: An error bound of type `f32`.
-   - **Returns:** A dynamically allocated `compressed_values: ArrayList`, which must be deallocated with `deinit()`.
-- **`decompress()` Function:**
+      - `allocator`: Allocator instance used to allocate memory for the returned. 
+      - `uncompressed_values`: A sequence of floats (e.g., `[_]f64`) representing the data to compress.
+      `compressed_values` and intermediate structures.
+      - `method`: Compression method identifier from the `tersets.Method` enum (e.g., `tersets.Method.SwingFilter`).
+      - `configuration`: A JSON string specifying compression parameters (e.g., `"{ \"abs_error_bound\": 0.1 }"`).
+   - **Returns:** A dynamically allocated `compressed_values` (of type `ArrayList`), which must be deallocated using `deinit()`.
+
+- **`decompress(allocator, compressed_values)` Function:**
    - **Parameters:**
       - `compressed_values`: The compressed data to decompress.
-      - `allocator`: Used to allocate memory for the returned `decompressed_values`.
-   - **Returns:** A dynamically allocated `decompressed_values: ArrayList`, which must be deallocated with `deinit()`.
+      - `allocator`: Allocator instance used to allocate memory for the returned `decompressed_values`.
+   - **Returns:** A dynamically allocated `decompressed_values` (of type `ArrayList`), which must be deallocated using `deinit()`.
+
 </details>
 
 <a id="c-usage-example"></a>
@@ -128,15 +131,18 @@ TerseTS provides `./bindings/c/tersets.h` as API for C which should be included 
    - **Parameters:**
       - `uncompressed_values`: The array of values to compress.
       - `compressed_values`: A pointer to a structure where the compressed values will be stored. The data is dynamically allocated.
-      - `config`: The configuration structure specifying the compression method and error bound. The supported compression methods are specified in `src/tersets.zig`.
-   - **Returns:** An integer indicating success `(0)` or an error code.
+      - `method`: Compression method identifier from the `Method` enum (e.g., `SwingFilter`).
+      - `configuration`: A JSON string specifying compression parameters (e.g., `"{\"abs_error_bound\": 0.01}"`).
+   - **Returns:** An integer indicating success `(0)` or an error code. Memory for `compressed_values` is dynamically allocated and must be freed using `freeCompressedValues()`.
+
 - **`decompress()` Function:**
    - **Parameters:**
       - `compressed_values`: The compressed data to decompress.
-      - `decompressed_values`: A pointer to a structure where the decompressed values will be stored. The data is dynamically allocated.
-   - **Returns:** An integer indicating success `(0)` or an error code.
+      - `uncompressed_values`: A pointer to a structure where the decompressed values will be stored. The data is dynamically allocated.
+   - **Returns:** An integer indicating success `(0)` or an error code. Memory for `uncompressed_values` is dynamically allocated and must be freed using `freeUncompressedValues()`.
 
-Remember to free dynamically allocated memory appropriately to avoid memory leaks.
+Compression methods are listed in the enum Method in the header.
+   
 </details>
 
 <a id="python-usage-example"></a>
@@ -172,16 +178,21 @@ print("Decompression successful. Decompressed data length: ", len(decompressed_v
 
 TerseTS provides `./bindings/python/tersets/__init__.py` as binding for Python which can be imported directly into a Python program with `import tersets`. The binding automatically loads the native library but assumes it is not moved.
 
-- **`compress()` Function:**
+
+- **`compress(values, method, configuration)` Function:**
    - **Parameters:**
-      - `uncompressed_values`: The array of values to compress.
-      - `method`: The Python binding provides the `Method` enum to provide direct access to the available methods supported by `TerseTS`. The supported compression methods are specified in `src/tersets.zig`.
-      - `error_bound`: The error bound.
-   - **Returns:** A list of compressed values.
-- **`decompress()` Function:**
+      - `values`: A list, tuple, or `numpy.ndarray` of floats representing the data to compress.
+      - `method`: An enum value from `tersets.Method` specifying the compression method.
+      - `configuration`: A dictionary or JSON string specifying compression parameters (e.g., `{"abs_error_bound": 0.1}`).
+   - **Returns:** Compressed data as bytes. NumPy arrays are supported for zero-copy performance. Errors are raised as Python exceptions.
+
+- **`decompress(values)` Function:**
    - **Parameters:**
-      - `compressed_values`: The compressed data to decompress.
-   - **Returns:** A list of decompressed values.
+      - `values`: The compressed data as bytes to decompress.
+   - **Returns:** Decompressed values as a Python list of floats. 
+
+Errors are raised as Python exceptions.
+
 </details>
 
 ## Linking:
