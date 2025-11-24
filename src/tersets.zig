@@ -36,6 +36,7 @@ pub const Error = error{
     UnknownMethod,
     UnsupportedInput,
     UnsupportedErrorBound,
+    InvalidConfiguration,
     CorruptedCompressedData,
     ItemNotFound,
     OutOfMemory,
@@ -64,7 +65,7 @@ pub const Method = enum {
     NonLinearApproximation,
 };
 
-/// Compress `uncompressed_values` within `error_bound` using `method` and returns the results
+/// Compress `uncompressed_values` using `method` and its `configuration` and returns the results
 /// as a ArrayList of bytes returned by the compression methods. `allocator` is passed to the
 /// compression functions for memory management. If the compression is sucessful, the `method`
 /// is encoded in the compressed values last byte. If an error occurs it is returned.
@@ -72,48 +73,53 @@ pub fn compress(
     allocator: Allocator,
     uncompressed_values: []const f64,
     method: Method,
-    error_bound: f32,
+    configuration: []const u8,
 ) Error!ArrayList(u8) {
-    if (error_bound < 0) return Error.UnsupportedErrorBound;
-
     var compressed_values = ArrayList(u8).init(allocator);
 
-    // If the input is one or zero elements, just store them uncompressed.
+    // If the input is one or zero elements, just store them uncompressed disregarding
+    // the compression method.
     if (uncompressed_values.len < 2) {
         if (uncompressed_values.len == 1) {
             const value_as_bytes: [8]u8 = @bitCast(uncompressed_values[0]);
             try compressed_values.appendSlice(value_as_bytes[0..]);
+            return compressed_values;
         }
-        return compressed_values;
+        // The uncompressed_values is empty.
+        return Error.UnsupportedInput;
     }
 
     switch (method) {
         .PoorMansCompressionMidrange => {
             try poor_mans_compression.compressMidrange(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                configuration,
             );
         },
         .PoorMansCompressionMean => {
             try poor_mans_compression.compressMean(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                configuration,
             );
         },
         .SwingFilter => {
             try swing_slide_filter.compressSwingFilter(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                configuration,
             );
         },
         .SwingFilterDisconnected => {
             try swing_slide_filter.compressSwingFilterDisconnected(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                configuration,
             );
         },
         .SlideFilter => {
@@ -121,7 +127,7 @@ pub fn compress(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                configuration,
             );
         },
         .SimPiece => {
@@ -129,7 +135,7 @@ pub fn compress(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                configuration,
             );
         },
         .MixPiece => {
@@ -137,23 +143,25 @@ pub fn compress(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                configuration,
             );
         },
         .PiecewiseConstantHistogram => {
+            // Again, we need to extract the actual value from the optional `number_histogram_bins`.
             try piecewise_histogram.compressPWCH(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                configuration,
             );
         },
         .PiecewiseLinearHistogram => {
+            // Again, we need to extract the actual value from the optional `number_histogram_bins`.
             try piecewise_histogram.compressPWLH(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                configuration,
             );
         },
         .ABCLinearApproximation => {
@@ -161,7 +169,7 @@ pub fn compress(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                configuration,
             );
         },
         .VisvalingamWhyatt => {
@@ -169,14 +177,15 @@ pub fn compress(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                configuration,
             );
         },
         .SlidingWindow => {
             try sliding_window.compress(
+                allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                configuration,
             );
         },
         .BottomUp => {
@@ -184,18 +193,23 @@ pub fn compress(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                configuration,
             );
         },
         .RunLengthEncoding => {
-            try rle_enconding.compress(uncompressed_values, &compressed_values);
+            try rle_enconding.compress(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                configuration,
+            );
         },
         .BitPackedQuantization => {
             try bitpacked_quantization.compress(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                configuration,
             );
         },
         .NonLinearApproximation => {
@@ -203,7 +217,7 @@ pub fn compress(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
-                error_bound,
+                configuration,
             );
         },
     }
@@ -220,22 +234,21 @@ pub fn decompress(
 ) Error!ArrayList(f64) {
     if (compressed_values.len == 0) return Error.CorruptedCompressedData;
 
+    var decompressed_values = ArrayList(f64).init(allocator);
+
+    // Handle the trivial case of one element.
+    if (compressed_values.len == 8) {
+        const value: f64 = @bitCast(compressed_values[0..8].*);
+        try decompressed_values.append(value);
+        return decompressed_values;
+    }
+
     const method_index: u8 = compressed_values[compressed_values.len - 1];
+
     if (method_index > getMaxMethodIndex()) return Error.UnknownMethod;
 
     const method: Method = @enumFromInt(method_index);
     const compressed_values_slice = compressed_values[0 .. compressed_values.len - 1];
-
-    var decompressed_values = ArrayList(f64).init(allocator);
-
-    // Handle the trivial case of one or zero elements.
-    if (compressed_values.len < 9) {
-        if (compressed_values.len == 8) {
-            const value: f64 = @bitCast(compressed_values_slice[0..8].*);
-            try decompressed_values.append(value);
-        }
-        return decompressed_values;
-    }
 
     switch (method) {
         .PoorMansCompressionMidrange, .PoorMansCompressionMean => {
