@@ -38,17 +38,12 @@ struct CompressedValues {
   size_t   len;    
 };
 
-// Compression configuration.
-struct Configuration {
-  uint8_t method;
-  float   error_bound;
-};
-
 // Compress uncompressed_values to compressed_values according to configuration.
 // Returns 0 on success, non-zero on error (e.g., 1 = unsupported method).
 int32_t compress(struct UncompressedValues uncompressed_values,
                  struct CompressedValues *compressed_values,
-                 struct Configuration configuration);
+                 uint8_t method, 
+                 const char *configuration);
 
 // Decompress compressed_values to uncompressed_values according to configuration.
 // Returns 0 on success, non-zero on error (e.g., 1 = unsupported method).

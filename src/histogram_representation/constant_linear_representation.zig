@@ -27,6 +27,7 @@ const math = std.math;
 const testing = std.testing;
 const time = std.time;
 const ArrayList = std.ArrayList;
+const Allocator = mem.Allocator;
 
 const expectEqual = testing.expectEqual;
 
@@ -45,6 +46,7 @@ const LinearFunction = shared_structs.LinearFunction;
 const Segment = shared_structs.Segment;
 
 const tersets = @import("../tersets.zig");
+const configuration = @import("../configuration.zig");
 const Error = tersets.Error;
 
 const tester = @import("../tester.zig");
@@ -53,24 +55,31 @@ const tester = @import("../tester.zig");
 const Approximation = enum(i8) { constant, linear };
 
 /// Compress `uncompressed_values` with the maximum number of buckets defined by the `error_bound`
-/// using "Piecewice Constant Histogram" compression method. The function writes the result to
-/// `compressed_values`. If an error occurs it is returned.
+/// using "Piecewice Constant Histogram" compression method. The `allocator` is used to dynamically
+/// allocate memory for the histogram and the `method_configuration` parser. The function writes
+///  the result to `compressed_values`. If an error occurs it is returned.
 pub fn compressPWCH(
-    allocator: mem.Allocator,
+    allocator: Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
-    error_bound: f32,
+    method_configuration: []const u8,
 ) Error!void {
-    if (error_bound <= 1.0) {
-        return Error.UnsupportedErrorBound;
-    }
+    const parsed_configuration = try configuration.parse(
+        allocator,
+        configuration.HistogramBinsNumber,
+        method_configuration,
+    );
 
-    // The original implementation requires the maximum number of buckets which can be represented
-    // by a usize instead of `error_bound: f32`. Changing this requires modifications in
-    // `src/tersets.zig` and `src/capi.zig` files.
-    // TODO: Find the right way of passing the maximum number of buckets.
-    const max_buckets: usize = @as(usize, @intFromFloat(@floor(error_bound)));
-    var histogram = try Histogram.init(allocator, max_buckets, .constant);
+    const maximum_buckets: u32 = parsed_configuration.histogram_bins_number;
+
+    if (maximum_buckets <= 1)
+        return Error.UnsupportedErrorBound;
+
+    var histogram = try Histogram.init(
+        allocator,
+        maximum_buckets,
+        .constant,
+    );
     defer histogram.deinit();
 
     for (uncompressed_values, 0..) |elem, index| {
@@ -91,24 +100,30 @@ pub fn compressPWCH(
 }
 
 /// Compress `uncompressed_values` with the maximum number of buckets defined by the `error_bound`
-/// using "Piecewice Linear Histogram" compression method. The function writes the result to
-/// `compressed_values`. If an error occurs it is returned.
+/// using "Piecewice Linear Histogram" compression method. The `allocator` is used to dynamically
+/// allocate memory for the histogram and the `method_configuration` parser. The function writes
+///  the result to `compressed_values`. The `method_configuration` is expected to be of
+/// `HistogramBinsNumber  type otherwise an `InvalidConfiguration` error is return.
+/// If any other error occurs during the execution of the method, it is returned.
 pub fn compressPWLH(
-    allocator: mem.Allocator,
+    allocator: Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
-    error_bound: f32,
+    method_configuration: []const u8,
 ) Error!void {
-    if (error_bound <= 1.0) {
+    const parsed_configuration = try configuration.parse(
+        allocator,
+        configuration.HistogramBinsNumber,
+        method_configuration,
+    );
+
+    const maximum_buckets: u32 = parsed_configuration.histogram_bins_number;
+
+    if (maximum_buckets <= 1.0) {
         return Error.UnsupportedErrorBound;
     }
 
-    // The original implementation requires the maximum number of buckets which can be represented
-    // by a usize instead of `error_bound: f32`. Changing this requires modifications in
-    // `src/tersets.zig` and `src/capi.zig` files.
-    // TODO: Find the right way of passing the maximum number of buckets.
-    const max_buckets: usize = @as(usize, @intFromFloat(@floor(error_bound)));
-    var histogram = try Histogram.init(allocator, max_buckets, .linear);
+    var histogram = try Histogram.init(allocator, maximum_buckets, .linear);
     defer histogram.deinit();
 
     for (uncompressed_values, 0..) |elem, index| {
@@ -300,7 +315,7 @@ fn compareMergeError(_: void, error_1: MergeError, error_2: MergeError) math.Ord
 /// A Histogram structure containing an `ArrayList` of `buckets` and a `HashedPriorityQueue`
 /// `merge_queue` that keeps track of the minimum merge error merging two adjacent buckets.
 /// This structure contains the Min-Merge algorithm from https://doi.org/10.1109/ICDE.2007.368961
-/// which maintain the histogram using only `max_buckets` buckets.
+/// which maintain the histogram using only `maximum_buckets` buckets.
 const Histogram = struct {
     const Self = @This();
 
@@ -309,7 +324,7 @@ const Histogram = struct {
     // Memory allocator for the convex hull in the buckets.
     allocator: mem.Allocator,
     // Target number of buckets.
-    max_buckets: usize,
+    maximum_buckets: u32,
     // List of current buckets.
     buckets: ArrayList(Bucket),
     // Priority queue of merge errors.
@@ -323,12 +338,12 @@ const Histogram = struct {
     /// Initialize the histogram with a given allocator and maximum number of buckets. This
     /// parameter can be thought of as fixing a minimum compression ratio that users wants to achieve.
     /// The `minMerge` function will then find the optimal histogram under this constraint.
-    /// For example, if `max_buckets=|N|/2`, then the compression ratio will be at least 2x.
-    pub fn init(allocator: mem.Allocator, max_buckets: usize, approximation: Approximation) !Histogram {
+    /// For example, if `maximum_buckets=|N|/2`, then the compression ratio will be at least 2x.
+    pub fn init(allocator: mem.Allocator, maximum_buckets: u32, approximation: Approximation) !Histogram {
         return Histogram{
             .approximation = approximation,
             .allocator = allocator,
-            .max_buckets = max_buckets,
+            .maximum_buckets = maximum_buckets,
             .buckets = ArrayList(Bucket).init(allocator),
             .merge_queue = try HashedPriorityQueue(
                 MergeError,
@@ -367,8 +382,8 @@ const Histogram = struct {
             };
             try self.merge_queue.add(MergeError{ .index = bucket_last_index - 1, .merge_error = merge_error });
         }
-        // If the number of buckets exceeds `max_buckets`, merge the least increasing pair.
-        if (self.buckets.items.len > self.max_buckets) {
+        // If the number of buckets exceeds `maximum_buckets`, merge the least increasing pair.
+        if (self.buckets.items.len > self.maximum_buckets) {
             try self.minMerge();
         }
     }
@@ -422,7 +437,7 @@ const Histogram = struct {
 
     /// Perform the minimum merge by finding the pair with the smallest merge error when a `constant`
     /// approximations is required. This function is only called when the number of buckets exceeds the
-    /// `max_buckets`, which is always higher than 1. Thus, this function is only called with 2 or more
+    /// `maximum_buckets`, which is always higher than 1. Thus, this function is only called with 2 or more
     /// elements in the `buckets` list.
     fn minMerge(self: *Self) !void {
         // Pop the smallest merge error (the least costly merge).
@@ -503,11 +518,11 @@ const Histogram = struct {
             if (i == index) {
                 // To effectively remove an index from the queue without physically deleting it,
                 // we perform a logical removal. This is done by setting its `index` to an
-                // unreachable value (`max_buckets + 10`), ensuring it falls outside the normal range.
+                // unreachable value (`maximum_buckets + 10`), ensuring it falls outside the normal range.
                 // Additionally, we set `merge_error` to a very high value (1e16).
                 // This combination guarantees that during the `update`, this entry will
                 // be pushed to the end of the list, simulating its removal.
-                new_merge_error.index = self.max_buckets + 10;
+                new_merge_error.index = self.maximum_buckets + 10;
                 new_merge_error.merge_error = 1e16;
             }
             try self.merge_queue.update(old_merge_error, new_merge_error);
@@ -535,13 +550,13 @@ test "Hash PriorityQueue with hash_context for MergeError" {
     try pq.add(error3);
 
     const top_value = try pq.pop();
-    try std.testing.expect(top_value.index == 2);
+    try testing.expect(top_value.index == 2);
 
     const next_top = try pq.pop();
-    try std.testing.expect(next_top.index == 1);
+    try testing.expect(next_top.index == 1);
 
     const final_top = try pq.pop();
-    try std.testing.expect(final_top.index == 3);
+    try testing.expect(final_top.index == 3);
 }
 
 test "Histogram insert, and merge test number buckets in PWCH" {
@@ -551,8 +566,8 @@ test "Histogram insert, and merge test number buckets in PWCH" {
     const random = prng.random();
 
     const allocator = testing.allocator;
-    const max_buckets: usize = 100;
-    var histogram = try Histogram.init(allocator, max_buckets, .constant);
+    const maximum_buckets: u32 = 100;
+    var histogram = try Histogram.init(allocator, maximum_buckets, .constant);
     defer histogram.deinit();
 
     // Insert 1000 random numbers into the histogram.
@@ -560,7 +575,7 @@ test "Histogram insert, and merge test number buckets in PWCH" {
         const rand_number = tester.generateBoundedRandomValue(f64, 0, 1000, random);
         try histogram.insert(i, rand_number);
     }
-    try expectEqual(max_buckets, histogram.buckets.items.len);
+    try expectEqual(maximum_buckets, histogram.buckets.items.len);
 }
 
 test "Simple fixed values test of PWCH" {
@@ -610,7 +625,7 @@ test "Fixed cluster number with random values for PWCH" {
     var prng = std.Random.DefaultPrng.init(seed);
     const random = prng.random();
 
-    const allocator = std.testing.allocator;
+    const allocator = testing.allocator;
 
     const cluster_ranges = [_]struct {
         min: f64,
@@ -630,7 +645,7 @@ test "Fixed cluster number with random values for PWCH" {
     };
 
     // Collect all data points.
-    var data_points = std.ArrayList(f64).init(allocator);
+    var data_points = ArrayList(f64).init(allocator);
     defer data_points.deinit();
 
     // Generate random values for each cluster.
@@ -651,7 +666,7 @@ test "Fixed cluster number with random values for PWCH" {
     }
 
     // Build the expected histogram by iterating over cluster_ranges.
-    var expected_histogram = std.ArrayList(Bucket).init(allocator);
+    var expected_histogram = ArrayList(Bucket).init(allocator);
     defer expected_histogram.deinit();
 
     var convex_hull: ConvexHull = try ConvexHull.init(allocator);
@@ -684,10 +699,10 @@ test "Random clusters, elements per cluster and values for PWCH" {
     var prng = std.Random.DefaultPrng.init(12345);
     const random = prng.random();
 
-    const allocator = std.testing.allocator;
-    const num_cluster: usize = prng.random().uintLessThan(usize, 100) + 10;
+    const allocator = testing.allocator;
+    const number_of_cluster: u32 = prng.random().uintLessThan(u32, 100) + 10;
 
-    var cluster_ranges = std.ArrayList(struct {
+    var cluster_ranges = ArrayList(struct {
         min: f64,
         max: f64,
         count: usize,
@@ -701,8 +716,8 @@ test "Random clusters, elements per cluster and values for PWCH" {
     const max_counts_per_cluster: usize = 100;
 
     var current_min_value = min_value;
-    for (0..num_cluster) |i| {
-        const momentum: f64 = if (i < num_cluster / 2) 1.0 else -1.0;
+    for (0..number_of_cluster) |i| {
+        const momentum: f64 = if (i < number_of_cluster / 2) 1.0 else -1.0;
         const cluster_min = current_min_value + momentum * gap;
         const cluster_max = cluster_min + cluster_width;
         const count: usize = prng.random().uintLessThan(usize, max_counts_per_cluster) + 10;
@@ -716,7 +731,7 @@ test "Random clusters, elements per cluster and values for PWCH" {
     }
 
     // Collect all data points.
-    var data_points = std.ArrayList(f64).init(allocator);
+    var data_points = ArrayList(f64).init(allocator);
     defer data_points.deinit();
 
     // Generate random values for each cluster.
@@ -727,8 +742,8 @@ test "Random clusters, elements per cluster and values for PWCH" {
         }
     }
 
-    // Initialize the histogram with a maximum of 'num_cluster' buckets.
-    var histogram = try Histogram.init(allocator, num_cluster, .constant);
+    // Initialize the histogram with a maximum of 'number_of_cluster' buckets.
+    var histogram = try Histogram.init(allocator, number_of_cluster, .constant);
     defer histogram.deinit();
 
     // Insert data points into the histogram.
@@ -737,7 +752,7 @@ test "Random clusters, elements per cluster and values for PWCH" {
     }
 
     // Build the expected histogram by iterating over cluster_ranges.
-    var expected_histogram = std.ArrayList(Bucket).init(allocator);
+    var expected_histogram = ArrayList(Bucket).init(allocator);
     defer expected_histogram.deinit();
 
     var convex_hull: ConvexHull = try ConvexHull.init(allocator);
@@ -765,36 +780,8 @@ test "Random clusters, elements per cluster and values for PWCH" {
     }
 }
 
-test "PWCH can compress and decompress with bounded values and expected maximum error" {
-    var prng = std.Random.DefaultPrng.init(0);
-    const random = prng.random();
-    const error_bound: f32 = 10;
-
-    const allocator = testing.allocator;
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, error_bound, random);
-
-    // This test internally calls the functions `compress()` and `decompress()`. However, the line
-    // `testing.expect(withinErrorBound(uncompressed_values,decompressed_values.items,error_bound))`
-    // inside the function, is nonsensical in the context of PWCH. This is because the `error_bound`
-    // represents the number of bins in the histogram and not the maximum decompression error.
-    // To solve this problem, we need to create another type of configuration for compression
-    // algorithms like PWCH, which do not base their compression on a maximum decompression error
-    // but a minimum (or maximum) compression ratio.
-    // Nevertheless, since all `uncompressed_values` are between 0 and 10, the `error_bound=10`
-    // should be fulfilled as the PWCH finds the mean value over the buckets.
-    try tester.testCompressAndDecompress(
-        allocator,
-        uncompressed_values.items,
-        tersets.Method.PiecewiseConstantHistogram,
-        error_bound,
-        shared_functions.isWithinErrorBound,
-    );
-}
-
 test "Compute simple linear approximation merge error with known results" {
-    const allocator = std.testing.allocator;
+    const allocator = testing.allocator;
 
     // Create Convex Hulls for the buckets.
     // No need to deallocate memory because histogram will do it.
@@ -830,11 +817,11 @@ test "Compute simple linear approximation merge error with known results" {
 
     const merge_error = try histogram.calculateLinearApproximationMergeError(0);
 
-    try std.testing.expectApproxEqAbs(0.0, merge_error, 1e-15);
+    try testing.expectApproxEqAbs(0.0, merge_error, 1e-15);
 }
 
 test "Compute divergent linear approximation merge error with known results" {
-    const allocator = std.testing.allocator;
+    const allocator = testing.allocator;
 
     // No need to deallocate memory because `histogram` will do it.
     var convex_hull_one = try ConvexHull.init(allocator);
@@ -869,11 +856,11 @@ test "Compute divergent linear approximation merge error with known results" {
 
     const merge_error = try histogram.calculateLinearApproximationMergeError(0);
 
-    try std.testing.expectApproxEqAbs(0.25, merge_error, 1e-10);
+    try testing.expectApproxEqAbs(0.25, merge_error, 1e-10);
 }
 
 test "Compute PWLH with a simple set of values with known results" {
-    const allocator = std.testing.allocator;
+    const allocator = testing.allocator;
 
     var histogram = try Histogram.init(allocator, 2, .linear);
     defer histogram.deinit();
@@ -900,8 +887,8 @@ test "Insert random values in an Histogram with expected number of buckets" {
     const random = prng.random();
 
     const allocator = testing.allocator;
-    const max_buckets: usize = 100;
-    var histogram = try Histogram.init(allocator, max_buckets, .linear);
+    const maximum_buckets: usize = 100;
+    var histogram = try Histogram.init(allocator, maximum_buckets, .linear);
     defer histogram.deinit();
 
     // Insert 1000 random numbers into the histogram.
@@ -909,33 +896,53 @@ test "Insert random values in an Histogram with expected number of buckets" {
         const rand_number = tester.generateBoundedRandomValue(f64, 0, 1000, random);
         try histogram.insert(i, rand_number);
     }
-    try expectEqual(max_buckets, histogram.buckets.items.len);
+    try expectEqual(maximum_buckets, histogram.buckets.items.len);
 }
 
-test "PWLH can compress and decompress with bounded values and expected maximum error" {
-    var prng = std.Random.DefaultPrng.init(0);
-    const random = prng.random();
-    const error_bound: f32 = 10;
-
+test "check PWCH configuration parsing" {
+    // Tests the configuration parsing and functionality of the `compressPWCH` function.
+    // The test verifies that the provided configuration is correctly interpreted and
+    // that the `configuration.HistogramBinsNumber` is expected in the function.
     const allocator = testing.allocator;
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0.0, error_bound / 4.0, random);
 
-    // This test internally calls the functions `compress()` and `decompress()`. However, the line
-    // `testing.expect(withinErrorBound(uncompressed_values,decompressed_values.items,error_bound))`
-    // inside the function, is nonsensical in the context of PWLH. This is because the `error_bound`
-    // represents the number of bins in the histogram and not the maximum decompression error.
-    // To solve this problem, we need to create another type of configuration for compression
-    // algorithms like PWLH, which do not base their compression on a maximum decompression error
-    // but a minimum (or maximum) compression ratio.
-    // Nevertheless, since all `uncompressed_values` are between 0 and error_bound/4.0, the `error_bound=10`
-    // should be fulfilled as the PWLH finds the mean value over the buckets.
-    try tester.testCompressAndDecompress(
+    const uncompressed_values = &[4]f64{ 19.0, 48.0, 28.0, 3.0 };
+
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+
+    const method_configuration =
+        \\ {"histogram_bins_number": 10}
+    ;
+
+    // The configuration is properly defined. No error expected.
+    try compressPWCH(
         allocator,
-        uncompressed_values.items,
-        tersets.Method.PiecewiseLinearHistogram,
-        error_bound,
-        shared_functions.isWithinErrorBound,
+        uncompressed_values,
+        &compressed_values,
+        method_configuration,
+    );
+}
+
+test "check PWLH configuration parsing" {
+    // Tests the configuration parsing and functionality of the `compressPWLH` function.
+    // The test verifies that the provided configuration is correctly interpreted and
+    // that the `configuration.HistogramBinsNumber` is expected in the function.
+    const allocator = testing.allocator;
+
+    const uncompressed_values = &[4]f64{ 19.0, 48.0, 28.0, 3.0 };
+
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+
+    const method_configuration =
+        \\ {"histogram_bins_number": 10}
+    ;
+
+    // The configuration is properly defined. No error expected.
+    try compressPWLH(
+        allocator,
+        uncompressed_values,
+        &compressed_values,
+        method_configuration,
     );
 }

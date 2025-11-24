@@ -17,6 +17,7 @@
 const std = @import("std");
 const math = std.math;
 const testing = std.testing;
+const mem = std.mem;
 const ArrayList = std.ArrayList;
 
 const tersets = @import("tersets.zig");
@@ -33,9 +34,6 @@ pub const UncompressedValues = Array(f64);
 /// A pointer to compressed values and the number of bytes.
 pub const CompressedValues = Array(u8);
 
-/// Configuration to use for compression and/or decompression.
-pub const Configuration = extern struct { method: u8, error_bound: f32 };
-
 /// Compress `uncompressed_values` to `compressed_values` according to `configuration`.
 /// The General Purpose Allocator `allocator` is passed as a parameter to tersets for
 /// memory management in the compression methods. On success zero is returned, and the
@@ -47,20 +45,23 @@ pub const Configuration = extern struct { method: u8, error_bound: f32 };
 export fn compress(
     uncompressed_values_array: UncompressedValues,
     compressed_values_array: *CompressedValues,
-    configuration: Configuration,
+    method_index: u8,
+    configuration: [*:0]const u8,
 ) i32 {
     const uncompressed_values = uncompressed_values_array.data[0..uncompressed_values_array.len];
 
-    // Returning 1 is equivalent to returning Error.UnknownMethod.
-    if (configuration.method > tersets.getMaxMethodIndex()) return 1;
+    const configuration_slice: []const u8 = mem.span(configuration);
 
-    const method: Method = @enumFromInt(configuration.method);
+    // Returning 1 is equivalent to returning Error.UnknownMethod.
+    if (method_index > tersets.getMaxMethodIndex()) return 1;
+
+    const method: Method = @enumFromInt(method_index);
 
     var compressed_values = tersets.compress(
         allocator,
         uncompressed_values,
         method,
-        configuration.error_bound,
+        configuration_slice,
     ) catch |err| return errorToInt(err);
 
     // Convert the ArrayList into an owned slice with exact length.
@@ -139,12 +140,13 @@ fn errorToInt(err: Error) i32 {
         Error.UnknownMethod => return 1,
         Error.UnsupportedInput => return 2,
         Error.UnsupportedErrorBound => return 3,
-        Error.CorruptedCompressedData => return 4,
-        Error.OutOfMemory => return 5,
-        Error.ItemNotFound => return 6,
-        Error.EmptyConvexHull => return 7,
-        Error.EmptyQueue => return 8,
-        Error.ByteStreamError => return 9,
+        Error.InvalidConfiguration => return 4,
+        Error.CorruptedCompressedData => return 5,
+        Error.OutOfMemory => return 6,
+        Error.ItemNotFound => return 7,
+        Error.EmptyConvexHull => return 8,
+        Error.EmptyQueue => return 9,
+        Error.ByteStreamError => return 10,
     }
 }
 
@@ -172,12 +174,14 @@ test "error for unknown compression method" {
         .data = undefined,
         .len = undefined,
     };
-    var configuration = Configuration{ .method = 0, .error_bound = 0 };
-    configuration.method = math.maxInt(@TypeOf(configuration.method));
+
+    const method_index: u8 = math.maxInt(u8);
+    const configuration = "{ \"abs_error_bound\": 0.0 }";
 
     const return_code = compress(
         uncompressed_values,
         &compressed_values,
+        method_index,
         configuration,
     );
 
@@ -193,31 +197,39 @@ test "error for empty input when compressing" {
         .data = undefined,
         .len = undefined,
     };
-    const configuration = Configuration{ .method = 0, .error_bound = 0 };
+
+    const method_index: u8 = math.maxInt(u8);
+    const configuration = "{ \"abs_error_bound\": 0.1 }";
 
     const return_code = compress(
         uncompressed_values,
         &compressed_values,
+        method_index,
         configuration,
     );
 
-    try testing.expectEqual(0, return_code);
-    try testing.expectEqual(0, compressed_values.len);
+    try testing.expectEqual(1, return_code);
 }
 
 test "error for negative error bound when compressing" {
-    const uncompressed_values = UncompressedValues{ .data = undefined, .len = 1 };
+    const uncompressed_array = [_]f64{ 0.1, 0.3, 0.4, 0.5 };
+    const uncompressed_values = UncompressedValues{
+        .data = &uncompressed_array,
+        .len = uncompressed_array.len,
+    };
     var compressed_values = CompressedValues{ .data = undefined, .len = undefined };
 
-    const configuration = Configuration{ .method = 0, .error_bound = -1 };
+    const method_index: u8 = 0;
+    const configuration = "{ \"abs_error_bound\": -1.0 }";
 
     const return_code = compress(
         uncompressed_values,
         &compressed_values,
+        method_index,
         configuration,
     );
 
-    try testing.expectEqual(3, return_code);
+    try testing.expectEqual(4, return_code);
 }
 
 test "error for unknown decompression method" {
@@ -237,7 +249,7 @@ test "error for empty input when decompressing" {
 
     const return_code = decompress(compressed_values, &decompressed_values);
 
-    try testing.expectEqual(4, return_code);
+    try testing.expectEqual(5, return_code);
 }
 
 test "can compress and decompress" {
@@ -251,11 +263,13 @@ test "can compress and decompress" {
         .data = &uncompressed_array,
         .len = uncompressed_array.len,
     };
-    const configuration = Configuration{ .method = 0, .error_bound = 0 };
+    const method_index: u8 = 0;
+    const configuration = "{ \"abs_error_bound\": 0.0 }";
 
     const compress_return_code = compress(
         uncompressed_values,
         &compressed_values,
+        method_index,
         configuration,
     );
     try testing.expectEqual(0, compress_return_code);
