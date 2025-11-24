@@ -127,7 +127,7 @@ class Method(Enum):
     BitPackedQuantization = 13
     RunLengthEncoding = 14
     NonLinearApproximation = 15
-    SerQT = 16
+    SerfQT = 16
 
 
 # Public API. 
