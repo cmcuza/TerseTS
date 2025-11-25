@@ -21,6 +21,7 @@
 
 const std = @import("std");
 const mem = std.mem;
+const math = std.math;
 const ArrayList = std.ArrayList;
 const testing = std.testing;
 
@@ -144,19 +145,19 @@ pub const ConvexHull = struct {
             const angle = angleToXAxis(segment);
 
             // Initialize min/max values for rotated points.
-            var minX: f64 = std.math.floatMax(f64); // Minimum x-coordinate after rotation.
-            var maxX: f64 = std.math.floatMin(f64); // Maximum x-coordinate after rotation.
-            var minY: f64 = std.math.floatMax(f64); // Minimum y-coordinate after rotation.
-            var maxY: f64 = std.math.floatMin(f64); // Maximum y-coordinate after rotation.
+            var minX: f64 = math.floatMax(f64); // Minimum x-coordinate after rotation.
+            var maxX: f64 = -math.floatMax(f64); // Maximum x-coordinate after rotation.
+            var minY: f64 = math.floatMax(f64); // Minimum y-coordinate after rotation.
+            var maxY: f64 = -math.floatMax(f64); // Maximum y-coordinate after rotation.
 
             // Rotate all points and update min/max coordinates.
             for (0..convex_hull_len) |j| {
                 const point: DiscretePoint = self.at(j);
 
-                // Rotate point by -angle to align the edge with the x-axis
+                // Rotate point by -angle to align the edge with the x-axis.
                 const rotated_point: ContinousPoint = rotateToXAxis(DiscretePoint, point, -angle);
 
-                // Update min/max x and y values
+                // Update min/max x and y values.
                 minX = @min(minX, rotated_point.time);
                 maxX = @max(maxX, rotated_point.time);
                 minY = @min(minY, rotated_point.value);
@@ -164,16 +165,16 @@ pub const ConvexHull = struct {
             }
 
             // Compute the area of the bounding rectangle in the rotated coordinate system.
+
             const width = maxX - minX; // Width of the bounding rectangle.
             const height = maxY - minY; // Height of the bounding rectangle.
             const area = width * height; // Area of the bounding rectangle.
-
             // Update minimum area and corresponding parameters if a smaller area is found.
             if (area < min_area) {
                 min_area = area;
 
                 // Compute the slope of the edge (tan(angle)).
-                min_slope = std.math.tan(angle);
+                min_slope = math.tan(angle);
 
                 // Compute the center of the bounding rectangle in rotated coordinates.
                 const centerX = (minX + maxX) / 2.0;
@@ -423,24 +424,28 @@ fn computeTurn(
         Turn.left;
 }
 
-/// Compute the angle between a segment and the x-axis.
+/// Compute the angle between a `segment` and the x-axis.
 fn angleToXAxis(segment: Segment) f64 {
     const deltaX: f64 = @as(f64, @floatFromInt(segment.end_point.time)) - @as(f64, @floatFromInt(segment.start_point.time));
     const deltaY: f64 = segment.end_point.value - segment.start_point.value;
-    return std.math.atan2(deltaY, deltaX);
+    return math.atan2(deltaY, deltaX);
 }
 
-/// Rotate a point around the origin by a given angle.
+/// Rotate a `point` around the origin by a given `angle`. The function returns a `ContinuosPoint`.
 fn rotateToXAxis(comptime Point: type, point: Point, angle: f64) ContinousPoint {
-    if (Point == DiscretePoint) {
-        const newX: f64 = @as(f64, @floatFromInt(point.time)) *
-            std.math.cos(angle) - point.value * std.math.sin(angle);
-        const newY: f64 = @as(f64, @floatFromInt(point.time)) *
-            std.math.sin(angle) + point.value * std.math.cos(angle);
-        return ContinousPoint{ .time = newX, .value = newY };
-    }
-    const newX: f64 = point.time * std.math.cos(angle) - point.value * std.math.sin(angle);
-    const newY: f64 = point.time * std.math.sin(angle) + point.value * std.math.cos(angle);
+    const point_time: f64 = if (Point == DiscretePoint)
+        @as(f64, @floatFromInt(point.time))
+    else
+        point.time;
+
+    const point_value: f64 = point.value;
+
+    const cos_theta = math.cos(angle);
+    const sin_theta = math.sin(angle);
+
+    const newX: f64 = point_time * cos_theta - point_value * sin_theta;
+    const newY: f64 = point_time * sin_theta + point_value * cos_theta;
+
     return ContinousPoint{ .time = newX, .value = newY };
 }
 
@@ -523,6 +528,89 @@ fn findTangent(
     return .{ .hull_one_idx = hull_one_idx, .hull_two_idx = hull_two_idx };
 }
 
+/// Validates that the Convex Hull `convex_hull` satisfies the required properties:
+/// 1. In the `upper_hull`, every sequence of three consecutive points must turn to the right.
+/// 2. In the `lower_hull`, every sequence of three consecutive points must turn to the left.
+/// If any of these properties are violated, an error is returned.
+fn testConvexHullProperty(convex_hull: *ConvexHull) !void {
+    // All points in the Upper Hull should turn to the right.
+    for (1..convex_hull.upper_hull.items.len - 1) |i| {
+        const turn = computeTurn(
+            convex_hull.upper_hull.items[i - 1],
+            convex_hull.upper_hull.items[i],
+            convex_hull.upper_hull.items[i + 1],
+        );
+        try testing.expectEqual(turn, Turn.right);
+    }
+
+    // All points in the Lower Hull should turn to the left.
+    for (1..convex_hull.lower_hull.items.len - 1) |i| {
+        const turn = computeTurn(
+            convex_hull.lower_hull.items[i - 1],
+            convex_hull.lower_hull.items[i],
+            convex_hull.lower_hull.items[i + 1],
+        );
+        try testing.expectEqual(turn, Turn.left);
+    }
+}
+
+/// Helper function to test the merging of two convex hulls. The function initializes two convex
+/// hulls with random points and merges them either in-place or not in-place based on the `in_place`
+/// flag. After merging, it validates the properties of the resulting convex hull.
+fn mergeConvexHullsTestHelper(in_place: bool) !void {
+    const allocator = testing.allocator;
+    const random = tester.getDefaultRandomGenerator();
+
+    // Initialize the first convex hull with random points.
+    var convex_hull_one = try ConvexHull.init(allocator);
+    defer convex_hull_one.deinit();
+
+    const number_of_values = tester.generateNumberOfValues(random);
+    for (0..number_of_values) |i| {
+        try convex_hull_one.add(.{ .time = i, .value = random.float(f64) });
+    }
+
+    // Initialize the second convex hull with random points.
+    var convex_hull_two = try ConvexHull.init(allocator);
+    defer convex_hull_two.deinit();
+    for (number_of_values..2 * number_of_values) |i| {
+        try convex_hull_two.add(.{ .time = i, .value = random.float(f64) });
+    }
+
+    if (in_place) {
+        // Merge the second convex hull into the first one in-place.
+        try convex_hull_one.merge(&convex_hull_two, null);
+        // Validate the properties of the merged convex hull.
+        try testConvexHullProperty(&convex_hull_one);
+    } else {
+        // Initialize a new convex hull for the merged result.
+        var convex_hull_merged = try ConvexHull.init(allocator);
+        defer convex_hull_merged.deinit();
+        // Merge the two convex hulls into the new one.
+        try convex_hull_one.merge(&convex_hull_two, &convex_hull_merged);
+        // Validate the properties of the merged convex hull.
+        try testConvexHullProperty(&convex_hull_merged);
+    }
+}
+
+/// Helper function that verifies that the points in the `convex_hull` are the same as the points
+/// in `list_of_points`. This ensures that the convex hull has not been modified during operations.
+fn verifyConvexHullNotModified(convex_hull: *ConvexHull, list_of_points: *const ArrayList(DiscretePoint)) !void {
+    // Get all points from the convex hull, sorted.
+    const convex_hull_points = try convex_hull.getAllPointsSorted();
+    defer convex_hull_points.deinit(); // Ensure the allocated memory is freed.
+
+    // Iterate over each point and compare it with the corresponding point in the list.
+    for (0..convex_hull_points.items.len) |i| {
+        // Check if the values of the points are approximately equal.
+        try testing.expectApproxEqAbs(
+            convex_hull_points.items[i].value,
+            list_of_points.items[i].value,
+            1e-10, // Tolerance for floating-point comparison.
+        );
+    }
+}
+
 test "Create incrementally convex hull with known result" {
     const allocator = testing.allocator;
 
@@ -584,6 +672,59 @@ test "Create incrementally a convex hull with random elements" {
     try testConvexHullProperty(&convex_hull);
 }
 
+test "Compute MABR Linear Function for one value Convex Hull" {
+    const allocator = std.testing.allocator;
+
+    var convex_hull = try ConvexHull.init(allocator);
+    defer convex_hull.deinit();
+
+    try convex_hull.add(.{ .time = 0, .value = 5 });
+    const mabr_linear_function = try convex_hull.computeMABRLinearFunction();
+
+    try testing.expectApproxEqAbs(@as(f64, 0.0), mabr_linear_function.slope, 1e-15);
+    try testing.expectApproxEqAbs(@as(f64, 5.0), mabr_linear_function.intercept, 1e-15);
+}
+
+test "Compute MABR Linear Function for two horizontal points" {
+    const allocator = testing.allocator;
+
+    const points = [_]DiscretePoint{
+        .{ .time = 0, .value = 2.0 },
+        .{ .time = 1, .value = 2.0 },
+    };
+
+    var convex_hull = try ConvexHull.init(allocator);
+    defer convex_hull.deinit();
+
+    for (points) |point| {
+        try convex_hull.add(point);
+    }
+
+    const mabr_linear_function = try convex_hull.computeMABRLinearFunction();
+    try testing.expectApproxEqAbs(@as(f64, 0.0), mabr_linear_function.slope, 1e-15);
+    try testing.expectApproxEqAbs(@as(f64, 2.0), mabr_linear_function.intercept, 1e-15);
+}
+
+test "Compute MABR Linear Function for two diagonal points" {
+    const allocator = testing.allocator;
+
+    const points = [_]DiscretePoint{
+        .{ .time = 0, .value = 2.0 },
+        .{ .time = 1, .value = 3.0 },
+    };
+
+    var convex_hull = try ConvexHull.init(allocator);
+    defer convex_hull.deinit();
+
+    for (points) |point| {
+        try convex_hull.add(point);
+    }
+
+    const mabr_linear_function = try convex_hull.computeMABRLinearFunction();
+    try testing.expectApproxEqAbs(@as(f64, 1.0), mabr_linear_function.slope, 1e-15);
+    try testing.expectApproxEqAbs(@as(f64, 2.0), mabr_linear_function.intercept, 1e-15);
+}
+
 test "Compute MABR LinearFunction for known Convex Hull one" {
     const allocator = std.testing.allocator;
 
@@ -641,9 +782,7 @@ test "Compute MABR LinearFunction for known Convex Hull two" {
 
 test "Compute MABR LinearFunction for random Convex Hull" {
     const allocator = testing.allocator;
-    const seed: u64 = @bitCast(time.milliTimestamp());
-    var rnd = std.Random.DefaultPrng.init(seed);
-    const random = rnd.random();
+    const random = tester.getDefaultRandomGenerator();
 
     var convex_hull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
@@ -653,10 +792,45 @@ test "Compute MABR LinearFunction for random Convex Hull" {
     }
 
     // Calculate MABR Linear Function. The exact value of the `intercept` is unknown but it must be
-    // less than 1.0 given that all points lie strictly within [0,1]. This is because the linear function is the height bisector and goes through the midpoint of the rectangle side which has as lower and upper bounds 0 and 1.
+    // less than 1.0 given that all points lie strictly within [0,1]. This is because the linear
+    // function is the height bisector and goes through the midpoint of the rectangle side
+    // has as lower and upper bounds 0 and 1.
     const mabr_linear_function = try convex_hull.computeMABRLinearFunction();
 
     try testing.expect(mabr_linear_function.intercept <= 1.0);
+}
+
+test "MABR recovers random and noisy linear function" {
+    const allocator = testing.allocator;
+    const random = tester.getDefaultRandomGenerator();
+
+    var convex_hull = try ConvexHull.init(allocator);
+    defer convex_hull.deinit();
+
+    // Generating small slope and intercept to avoid overflowing.
+    const known_slope = tester.generateBoundedRandomValue(f64, 10, 10, random);
+    const known_intercept = tester.generateBoundedRandomValue(f64, 10, 10, random);
+
+    const number_of_points = tester.generateNumberOfValues(random);
+    for (0..number_of_points) |i| {
+        const x_axis: f64 = @floatFromInt(i);
+        const base: f64 = known_slope * x_axis + known_intercept;
+        const noise = tester.generateBoundedRandomValue(f64, -0.5, 0.5, random);
+        const point: DiscretePoint = .{ .time = i, .value = base + noise };
+        try convex_hull.add(point);
+    }
+
+    const mabr_linear_function = try convex_hull.computeMABRLinearFunction();
+
+    // The tolerance is computed based on the noise level and the number of points generated.
+    // In this case, the noise level is 1.0 because we generate noise between -0.5 and 0.5.
+    const x_span: f64 = @floatFromInt(number_of_points - 1);
+    const slope_tolerance: f64 = 1.0 / x_span;
+    const intercept_tolerance = 1.0 + slope_tolerance * x_span / 2.0;
+
+    // Given the noise level the tolerance for the slope and intercept should be ...
+    try testing.expectApproxEqAbs(mabr_linear_function.slope, known_slope, slope_tolerance);
+    try testing.expectApproxEqAbs(mabr_linear_function.intercept, known_intercept, intercept_tolerance);
 }
 
 test "Merge in-place convex hulls with known result" {
@@ -941,89 +1115,4 @@ test "Compute max error with random points and linear function" {
 
     // Assert that the computed error matches the expected error
     try testing.expectApproxEqAbs(expected_max_error, computed_max_error, 1e-10);
-}
-
-/// Validates that the Convex Hull `convex_hull` satisfies the required properties:
-/// 1. In the `upper_hull`, every sequence of three consecutive points must turn to the right.
-/// 2. In the `lower_hull`, every sequence of three consecutive points must turn to the left.
-/// If any of these properties are violated, an error is returned.
-fn testConvexHullProperty(convex_hull: *ConvexHull) !void {
-    // All points in the Upper Hull should turn to the right.
-    for (1..convex_hull.upper_hull.items.len - 1) |i| {
-        const turn = computeTurn(
-            convex_hull.upper_hull.items[i - 1],
-            convex_hull.upper_hull.items[i],
-            convex_hull.upper_hull.items[i + 1],
-        );
-        try testing.expectEqual(turn, Turn.right);
-    }
-
-    // All points in the Lower Hull should turn to the left.
-    for (1..convex_hull.lower_hull.items.len - 1) |i| {
-        const turn = computeTurn(
-            convex_hull.lower_hull.items[i - 1],
-            convex_hull.lower_hull.items[i],
-            convex_hull.lower_hull.items[i + 1],
-        );
-        try testing.expectEqual(turn, Turn.left);
-    }
-}
-
-/// Helper function to test the merging of two convex hulls. The function initializes two convex
-/// hulls with random points and merges them either in-place or not in-place based on the `in_place`
-/// flag. After merging, it validates the properties of the resulting convex hull.
-fn mergeConvexHullsTestHelper(in_place: bool) !void {
-    const allocator = testing.allocator;
-    const seed: u64 = @bitCast(time.milliTimestamp());
-    var rnd = std.Random.DefaultPrng.init(seed);
-    const random = rnd.random();
-
-    // Initialize the first convex hull with random points.
-    var convex_hull_one = try ConvexHull.init(allocator);
-    defer convex_hull_one.deinit();
-
-    const number_of_values = tester.generateNumberOfValues(random);
-    for (0..number_of_values) |i| {
-        try convex_hull_one.add(.{ .time = i, .value = random.float(f64) });
-    }
-
-    // Initialize the second convex hull with random points.
-    var convex_hull_two = try ConvexHull.init(allocator);
-    defer convex_hull_two.deinit();
-    for (number_of_values..2 * number_of_values) |i| {
-        try convex_hull_two.add(.{ .time = i, .value = random.float(f64) });
-    }
-
-    if (in_place) {
-        // Merge the second convex hull into the first one in-place.
-        try convex_hull_one.merge(&convex_hull_two, null);
-        // Validate the properties of the merged convex hull.
-        try testConvexHullProperty(&convex_hull_one);
-    } else {
-        // Initialize a new convex hull for the merged result.
-        var convex_hull_merged = try ConvexHull.init(allocator);
-        defer convex_hull_merged.deinit();
-        // Merge the two convex hulls into the new one.
-        try convex_hull_one.merge(&convex_hull_two, &convex_hull_merged);
-        // Validate the properties of the merged convex hull.
-        try testConvexHullProperty(&convex_hull_merged);
-    }
-}
-
-/// Helper function that verifies that the points in the `convex_hull` are the same as the points
-/// in `list_of_points`. This ensures that the convex hull has not been modified during operations.
-fn verifyConvexHullNotModified(convex_hull: *ConvexHull, list_of_points: *const ArrayList(DiscretePoint)) !void {
-    // Get all points from the convex hull, sorted.
-    const convex_hull_points = try convex_hull.getAllPointsSorted();
-    defer convex_hull_points.deinit(); // Ensure the allocated memory is freed.
-
-    // Iterate over each point and compare it with the corresponding point in the list.
-    for (0..convex_hull_points.items.len) |i| {
-        // Check if the values of the points are approximately equal.
-        try testing.expectApproxEqAbs(
-            convex_hull_points.items[i].value,
-            list_of_points.items[i].value,
-            1e-10, // Tolerance for floating-point comparison.
-        );
-    }
 }
