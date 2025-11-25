@@ -26,6 +26,7 @@ from ctypes import (
     c_ubyte,
     c_int,
     c_char_p,
+    c_float,
     c_uint8,
     c_double,
     c_size_t,

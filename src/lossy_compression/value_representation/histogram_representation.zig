@@ -138,16 +138,16 @@ pub fn compressPWLH(
         const linear_approximation = try bucket.computeLinearApproximation();
 
         if (bucket.end - bucket.begin > 1) {
-            const begin_value: f64 = @floatCast(linear_approximation.slope *
-                @as(f64, @floatFromInt(bucket.begin)) +
-                linear_approximation.intercept);
+            const slope = linear_approximation.slope;
+            const intercept = linear_approximation.intercept;
+            const x_init: f64 = @floatFromInt(bucket.begin);
+            const x_end: f64 = @floatFromInt(bucket.end);
+
+            const begin_value: f64 = slope * x_init + intercept;
+            const end_value: f64 = slope * x_end + linear_approximation.intercept;
+
             try shared_functions.appendValue(f64, begin_value, compressed_values);
-
-            const end_value: f64 = @floatCast(linear_approximation.slope *
-                @as(f64, @floatFromInt(bucket.end)) +
-                linear_approximation.intercept);
-
-            try shared_functions.appendValue(f64, end_value + 1, compressed_values);
+            try shared_functions.appendValue(f64, end_value, compressed_values);
         } else {
             try shared_functions.appendValue(f64, uncompressed_values[bucket.begin], compressed_values);
             try shared_functions.appendValue(f64, uncompressed_values[bucket.end], compressed_values);
@@ -274,7 +274,7 @@ const Bucket = struct {
 
     /// Returns the absolute error of the values in the bucket.
     pub fn computeConstantApproximation(self: *Bucket) f64 {
-        return (self.max_val - self.min_val) / 2.0;
+        return (self.max_val + self.min_val) / 2.0;
     }
 
     pub fn computeLinearApproximation(self: *Bucket) Error!LinearFunction {
@@ -617,6 +617,14 @@ test "Simple fixed values test of PWCH" {
         try expectEqual(expected_histogram[i].min_val, bucket.min_val);
         try expectEqual(expected_histogram[i].max_val, bucket.max_val);
     }
+
+    for (0..histogram.len()) |i| {
+        var bucket: Bucket = histogram.at(i);
+        try expectEqual(
+            bucket.computeConstantApproximation(),
+            (expected_histogram[i].min_val + expected_histogram[i].max_val) / 2.0,
+        );
+    }
 }
 
 test "Fixed cluster number with random values for PWCH" {
@@ -686,21 +694,21 @@ test "Fixed cluster number with random values for PWCH" {
     }
 
     // Verify that the output histogram matches the expected histogram.
-    for (histogram.buckets.items, 0..) |bucket, i| {
+    for (0..histogram.buckets.items.len) |i| {
+        const actual_bucket: Bucket = histogram.at(i);
         const expected_bucket = expected_histogram.items[i];
 
-        try expectEqual(expected_bucket.begin, bucket.begin);
-        try expectEqual(expected_bucket.end, bucket.end);
+        try expectEqual(expected_bucket.begin, actual_bucket.begin);
+        try expectEqual(expected_bucket.end, actual_bucket.end);
     }
 }
 
 test "Random clusters, elements per cluster and values for PWCH" {
     // Initialize a random number generator.
-    var prng = std.Random.DefaultPrng.init(12345);
-    const random = prng.random();
+    const random = tester.getDefaultRandomGenerator();
 
     const allocator = testing.allocator;
-    const number_of_cluster: u32 = prng.random().uintLessThan(u32, 100) + 10;
+    const number_of_cluster: u32 = random.uintLessThan(u32, 100) + 10;
 
     var cluster_ranges = ArrayList(struct {
         min: f64,
@@ -720,7 +728,7 @@ test "Random clusters, elements per cluster and values for PWCH" {
         const momentum: f64 = if (i < number_of_cluster / 2) 1.0 else -1.0;
         const cluster_min = current_min_value + momentum * gap;
         const cluster_max = cluster_min + cluster_width;
-        const count: usize = prng.random().uintLessThan(usize, max_counts_per_cluster) + 10;
+        const count: usize = random.uintLessThan(usize, max_counts_per_cluster) + 10;
         // Append the cluster to cluster_ranges.
         try cluster_ranges.append(.{
             .min = cluster_min,
@@ -887,7 +895,7 @@ test "Insert random values in an Histogram with expected number of buckets" {
     const random = prng.random();
 
     const allocator = testing.allocator;
-    const maximum_buckets: usize = 100;
+    const maximum_buckets: u32 = tester.generateBoundRandomInteger(u32, 10, 100, null);
     var histogram = try Histogram.init(allocator, maximum_buckets, .linear);
     defer histogram.deinit();
 
