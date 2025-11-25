@@ -29,13 +29,13 @@ const testing = std.testing;
 const ArrayList = std.ArrayList;
 const Allocator = mem.Allocator;
 
-const tersets = @import("../tersets.zig");
-const configuration = @import("../configuration.zig");
+const tersets = @import("../../tersets.zig");
+const configuration = @import("../../configuration.zig");
 const Method = tersets.Method;
 const Error = tersets.Error;
-const tester = @import("../tester.zig");
+const tester = @import("../../tester.zig");
 
-const shared_functions = @import("../utilities/shared_functions.zig");
+const shared_functions = @import("../../utilities/shared_functions.zig");
 
 /// Compress `uncompressed_values` within error_bound using "Bucket Quantization" and a
 /// "Fixed-length Bit-Packing". The function writes the result to `compressed_values`. The
@@ -70,27 +70,27 @@ pub fn compress(
     try shared_functions.appendValue(f64, min_val, compressed_values);
 
     // All values will map to the closest bucket based on the bucket_size.
-    const bucket_size: f32 = 2 * error_bound;
+    const bucket_size: f32 = 1.99 * error_bound;
 
-    // Append the minimum value to the header of the compressed values.
+    // Append the bucker size to the header of the compressed values.
     try shared_functions.appendValue(f32, bucket_size, compressed_values);
 
     //Intermediate quantized values.
     var quantized_values = ArrayList(usize).init(allocator);
     defer quantized_values.deinit();
 
-    const usize_min_value: usize = floatBitsOrdered(min_val);
+    const usize_min_value: usize = shared_functions.floatBitsOrdered(min_val);
 
     // Quantize each value by mapping it to a discrete bucket index.
     // If the error_bound is zero, we compute the difference between the
     // value and the minimum value, ensuring all resulting integers are >= 0.
     // For non-zero error_bound, we apply fixed-width bucket quantization
-    // using the defined bucket size (2 × error_bound).
+    // using the defined bucket size (1.99 × error_bound).
     var quantized_value: usize = 0;
     for (uncompressed_values) |value| {
         if (error_bound == 0.0) {
             // Bit-diff quantization for the lossless case.
-            const usize_value: usize = floatBitsOrdered(value);
+            const usize_value: usize = shared_functions.floatBitsOrdered(value);
             quantized_value = usize_value - usize_min_value;
         } else {
             // Fixed-width bucket quantization with rounding.
@@ -151,7 +151,7 @@ pub fn decompress(
     // Convert min_val to its ordered bit representation.
     // “Ordered bit representation” means a transformation that makes float bits sortable as integers.
     // This ensures correct decoding when using raw bit differences.
-    const bits_ordered_min_val = floatBitsOrdered(min_val);
+    const bits_ordered_min_val = shared_functions.floatBitsOrdered(min_val);
 
     // Read each quantized value based on fixed-length header.
     while (true) {
@@ -189,36 +189,13 @@ pub fn decompress(
         if (bucket_size == 0.0) {
             // If bucket size is zero, we assume the values were not quantized and are stored as usize directy.
             const raw_usize = quantized_value + bits_ordered_min_val;
-            decompressed_value = orderedBitsToFloat(raw_usize);
+            decompressed_value = shared_functions.orderedBitsToFloat(raw_usize);
         } else {
             // Reconstruct value from quantized_value and append to decompressed_value.
             decompressed_value = min_val + @as(f64, @floatFromInt(quantized_value)) * bucket_size;
         }
         try decompressed_values.append(decompressed_value);
     }
-}
-
-/// Convert a floating f64 `value` to its u64 representation, ensuring the sign bit is preserved
-/// in the most significant bit. This is useful for comparing floating-point values in a way that
-/// respects their ordering, including negative values. The function returns the `u64`, where the
-/// sign bit is preserved in the most significant bit.
-fn floatBitsOrdered(value: f64) u64 {
-    const value_bits: u64 = @bitCast(value);
-    // If negative: flip all bits (mirror to top range).
-    return if ((value_bits >> 63) == 1)
-        ~value_bits
-    else
-        value_bits | (@as(u64, 1) << 63);
-}
-
-/// Convert a u64 `value` back to its original `f64` representation, ensuring the sign bit is
-/// restored correctly. This is useful for decompressing values that were quantized and
-/// bit-packed, preserving the original ordering of the floating-point values.
-fn orderedBitsToFloat(value: u64) f64 {
-    return if ((value >> 63) == 1)
-        @bitCast(value & ~(@as(u64, 1) << 63))
-    else
-        @bitCast(~value);
 }
 
 test "bitpacked quantization can compress and decompress bounded values" {
@@ -242,7 +219,7 @@ test "bitpacked quantization cannot compress and decompress nan values" {
     const allocator = testing.allocator;
     const uncompressed_values = [3]f64{ 343.0, math.nan(f64), 520.0 };
     var compressed_values = ArrayList(u8).init(allocator);
-    compressed_values.deinit();
+    defer compressed_values.deinit();
 
     const method_configuration =
         \\ {"abs_error_bound": 0.1}
@@ -269,7 +246,7 @@ test "bitpacked quantization cannot compress and decompress unbounded values" {
     const allocator = testing.allocator;
     const uncompressed_values = [3]f64{ 343.0, 1e20, 520.0 };
     var compressed_values = ArrayList(u8).init(allocator);
-    compressed_values.deinit();
+    defer compressed_values.deinit();
 
     const method_configuration =
         \\ {"abs_error_bound": 0.1}
@@ -381,7 +358,7 @@ test "bitpacked quantization always reduces size of time series" {
 }
 
 test "check bit-quantization configuration parsing" {
-    // Tests the configuration parsing and functionality of the `compressMidrange` function.
+    // Tests the configuration parsing and functionality of the `compress` function.
     // The test verifies that the provided configuration is correctly interpreted and
     // that the `configuration.AbsoluteErrorBound` is expected in the function.
     const allocator = testing.allocator;

@@ -24,13 +24,13 @@ const mem = std.mem;
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
 
-const tersets = @import("../tersets.zig");
+const tersets = @import("../../tersets.zig");
 const Method = tersets.Method;
 const Error = tersets.Error;
-const tester = @import("../tester.zig");
+const tester = @import("../../tester.zig");
 
-const shared_functions = @import("../utilities/shared_functions.zig");
-const configuration = @import("../configuration.zig");
+const shared_functions = @import("../../utilities/shared_functions.zig");
+const configuration = @import("../../configuration.zig");
 
 /// Compress `uncompressed_values` within `error_bound` using "Poor Man’s Compression - Midrange".
 /// The function writes the result to `compressed_values`. The `allocator` is used to allocate

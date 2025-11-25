@@ -187,13 +187,13 @@ pub fn isApproximatelyEqual(value_a: f64, value_b: f64) bool {
 /// Encodes a signed i64 `value` into an unsigned 64-bit integer (u64) using ZigZag encoding.
 /// ZigZag encoding maps small signed integers (both positive and negative) to small
 /// unsigned integers, which is useful for variable-length encoding schemes.
-pub fn zigzagEncoder(value: i64) u64 {
+pub fn encodeZigZag(value: i64) u64 {
     return @bitCast((value << 1) ^ (value >> 63));
 }
 
 /// Decodes an u64 `value` back into a signed 64-bit integer (i64) using ZigZag decoding.
 /// This reverses the transformation performed by `zigzagEncode`.
-pub fn zigzagDecoder(value: u64) i64 {
+pub fn decodeZigZag(value: u64) i64 {
     // Revert logical shift.
     const shifted_value = value >> 1;
     const last_bit: u64 = value & 1;
@@ -215,13 +215,11 @@ pub fn zigzagDecoder(value: u64) i64 {
 /// commonly used in data compression. The memory `allocator` is used to allocate the resulting
 /// encoded data. The function returns an `ArrayList(u8)` containing the encoded data, or an error
 /// if the input is unsupported or if memory allocation fails.
-pub fn eliasGammaEncoder(allocator: Allocator, values: []const u64) !ArrayList(u8) {
-    var encoded_values = ArrayList(u8).init(allocator);
+pub fn encodeEliasGamma(values: []const u64, encoded_values: *ArrayList(u8)) !void {
     var bit_writer = std.io.bitWriter(.big, encoded_values.writer());
     for (values) |value| {
         if (value == 0) {
             // Elias Gamma encoding is not defined for zero.
-            encoded_values.deinit();
             return Error.UnsupportedInput;
         }
         // Calculate n = floor(log2(value)).
@@ -234,7 +232,6 @@ pub fn eliasGammaEncoder(allocator: Allocator, values: []const u64) !ArrayList(u
         try bit_writer.writeBits(value, nbits + 1);
     }
     try bit_writer.flushBits();
-    return encoded_values;
 }
 
 /// Decodes an array of u8 `compressed_values` previously encoded using Elias Gamma encoding.
@@ -242,9 +239,10 @@ pub fn eliasGammaEncoder(allocator: Allocator, values: []const u64) !ArrayList(u
 /// an `ArrayList(u64)` containing the decoded data, or an error if the input is unsupported,
 /// meaning it was not encoded using Elias Gamma encoder or corrupted. Any other memory related
 /// error is also returned.
-pub fn eliasGammaDecoder(allocator: Allocator, compressed_values: []const u8) !ArrayList(u64) {
-    var decoded_values = ArrayList(u64).init(allocator);
-
+pub fn decodeEliasGamma(
+    compressed_values: []const u8,
+    decoded_values: *ArrayList(u64),
+) !void {
     // Create bit reader over full byte slice.
     var stream = std.io.fixedBufferStream(compressed_values);
     var bit_reader = std.io.bitReader(.big, stream.reader());
@@ -256,11 +254,10 @@ pub fn eliasGammaDecoder(allocator: Allocator, compressed_values: []const u8) !A
             const leading_bit: u8 = bit_reader.readBitsNoEof(u8, 1) catch |err| {
                 if (err == error.EndOfStream) {
                     // No more values to decode.
-                    return decoded_values;
+                    return;
                 }
                 // Some other error occurred.
-                decoded_values.deinit();
-                return err;
+                return Error.ByteStreamError;
             };
 
             if (leading_bit == 1) break;
@@ -273,7 +270,6 @@ pub fn eliasGammaDecoder(allocator: Allocator, compressed_values: []const u8) !A
         } else {
             const suffix: u64 = bit_reader.readBitsNoEof(u64, leading_bits_number) catch |err| {
                 // If we cannot read all k bits, the stream is malformed.
-                decoded_values.deinit();
                 if (err == error.EndOfStream) {
                     return Error.ByteStreamError;
                 }
@@ -284,6 +280,29 @@ pub fn eliasGammaDecoder(allocator: Allocator, compressed_values: []const u8) !A
             try decoded_values.append(value);
         }
     }
+}
+
+/// Convert a floating f64 `value` to its u64 representation, ensuring the sign bit is preserved
+/// in the most significant bit. This is useful for comparing floating-point values in a way that
+/// respects their ordering, including negative values. The function returns the `u64`, where the
+/// sign bit is preserved in the most significant bit.
+pub fn floatBitsOrdered(value: f64) u64 {
+    const value_bits: u64 = @bitCast(value);
+    // If negative: flip all bits (mirror to top range).
+    return if ((value_bits >> 63) == 1)
+        ~value_bits
+    else
+        value_bits | (@as(u64, 1) << 63);
+}
+
+/// Convert a u64 `value` back to its original `f64` representation, ensuring the sign bit is
+/// restored correctly. This is useful for decompressing values that were quantized and
+/// bit-packed, preserving the original ordering of the floating-point values.
+pub fn orderedBitsToFloat(value: u64) f64 {
+    return if ((value >> 63) == 1)
+        @bitCast(value & ~(@as(u64, 1) << 63))
+    else
+        @bitCast(~value);
 }
 
 test "zigzag can encode and decode small signed integers correctly" {
@@ -298,8 +317,8 @@ test "zigzag can encode and decode small signed integers correctly" {
             1e5,
             default_random,
         );
-        const encoded = zigzagEncoder(original);
-        const decoded = zigzagDecoder(encoded);
+        const encoded = encodeZigZag(original);
+        const decoded = decodeZigZag(encoded);
         try testing.expectEqual(decoded, original);
     }
 }
@@ -315,8 +334,8 @@ test "zigzag can encode and decode big signed integers correctly" {
             math.maxInt(i64),
             default_random,
         );
-        const encoded = zigzagEncoder(original);
-        const decoded = zigzagDecoder(encoded);
+        const encoded = encodeZigZag(original);
+        const decoded = decodeZigZag(encoded);
         try testing.expectEqual(decoded, original);
     }
 
@@ -327,18 +346,20 @@ test "zigzag can encode and decode big signed integers correctly" {
             1e5,
             default_random,
         );
-        const encoded = zigzagEncoder(original);
-        const decoded = zigzagDecoder(encoded);
+        const encoded = encodeZigZag(original);
+        const decoded = decodeZigZag(encoded);
         try testing.expectEqual(decoded, original);
     }
 }
 
-test "eliasGammaEncoder can encode simple values correctly" {
+test "encodeEliasGamma can encode simple values correctly" {
     const allocator = std.testing.allocator;
 
     const vals = [_]u64{ 15, 7, 3, 1 };
-    const encoded_values = try eliasGammaEncoder(allocator, &vals);
+    var encoded_values = ArrayList(u8).init(allocator);
     defer encoded_values.deinit();
+    try encodeEliasGamma(&vals, &encoded_values);
+
     // The expected encoded values for 15, 7, 3, 1 are:
     // at encoded_values.items[0] -> 00011110 == 30
     // at encoded_values.items[1] -> 01110111 == 119
@@ -346,33 +367,37 @@ test "eliasGammaEncoder can encode simple values correctly" {
     try testing.expect(encoded_values.items[1] == 119);
 }
 
-test "eliasGammaEncoder cannot encode zero value" {
+test "encodeEliasGamma cannot encode zero value" {
     const allocator = std.testing.allocator;
 
     const vals = [_]u64{ 15, 7, 0, 3, 1 };
-    const encoded_values = eliasGammaEncoder(allocator, &vals) catch |err| {
+    var encoded_values = ArrayList(u8).init(allocator);
+    defer encoded_values.deinit();
+
+    encodeEliasGamma(&vals, &encoded_values) catch |err| {
         try testing.expect(err == Error.UnsupportedInput);
         return;
     };
-    defer encoded_values.deinit();
 }
 
-test "eliasGammaDecoder can encode and decode simple values correctly" {
+test "decodeEliasGamma can encode and decode simple values correctly" {
     const allocator = std.testing.allocator;
 
     const uncompressed_values = [_]u64{ 15, 7, 3, 1 };
-    const encoded_values = try eliasGammaEncoder(allocator, &uncompressed_values);
+    var encoded_values = ArrayList(u8).init(allocator);
     defer encoded_values.deinit();
+    try encodeEliasGamma(&uncompressed_values, &encoded_values);
 
-    const decoded_values = try eliasGammaDecoder(allocator, encoded_values.items);
+    var decoded_values = ArrayList(u64).init(allocator);
     defer decoded_values.deinit();
+    try decodeEliasGamma(encoded_values.items, &decoded_values);
 
     for (decoded_values.items, 0..) |decoded_value, index| {
         try testing.expect(decoded_value == uncompressed_values[index]);
     }
 }
 
-test "eliasGammaDecoder can encode and decode complex values correctly" {
+test "decodeEliasGamma can encode and decode complex values correctly" {
     const allocator = std.testing.allocator;
     var uncompressed_values = ArrayList(u64).init(allocator);
     defer uncompressed_values.deinit();
@@ -390,11 +415,13 @@ test "eliasGammaDecoder can encode and decode complex values correctly" {
         try uncompressed_values.append(value);
     }
 
-    const encoded_values = try eliasGammaEncoder(allocator, uncompressed_values.items);
+    var encoded_values = ArrayList(u8).init(allocator);
     defer encoded_values.deinit();
+    try encodeEliasGamma(uncompressed_values.items, &encoded_values);
 
-    const decoded_values = try eliasGammaDecoder(allocator, encoded_values.items);
+    var decoded_values = ArrayList(u64).init(allocator);
     defer decoded_values.deinit();
+    try decodeEliasGamma(encoded_values.items, &decoded_values);
 
     for (decoded_values.items, 0..) |decoded_value, index| {
         try testing.expect(decoded_value == uncompressed_values.items[index]);

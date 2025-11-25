@@ -31,11 +31,11 @@ const Method = tersets.Method;
 const ArrayList = std.ArrayList;
 const Allocator = mem.Allocator;
 
-const tersets = @import("../tersets.zig");
-const configuration = @import("../configuration.zig");
-const shared_structs = @import("../utilities/shared_structs.zig");
-const shared_functions = @import("../utilities/shared_functions.zig");
-const tester = @import("../tester.zig");
+const tersets = @import("../../tersets.zig");
+const configuration = @import("../../configuration.zig");
+const shared_structs = @import("../../utilities/shared_structs.zig");
+const shared_functions = @import("../../utilities/shared_functions.zig");
+const tester = @import("../../tester.zig");
 const sp = @import("sim_piece.zig");
 
 const Error = tersets.Error;

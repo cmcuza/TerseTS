@@ -38,22 +38,22 @@ const mem = std.mem;
 const testing = std.testing;
 const ArrayList = std.ArrayList;
 
-const tersets = @import("../tersets.zig");
+const tersets = @import("../../tersets.zig");
 const Method = tersets.Method;
 const Error = tersets.Error;
 const Allocator = std.mem.Allocator;
 
-const tester = @import("../tester.zig");
-const configuration = @import("../configuration.zig");
+const tester = @import("../../tester.zig");
+const configuration = @import("../../configuration.zig");
 
-const shared_structs = @import("../utilities/shared_structs.zig");
-const shared_functions = @import("../utilities/shared_functions.zig");
+const shared_structs = @import("../../utilities/shared_structs.zig");
+const shared_functions = @import("../../utilities/shared_functions.zig");
 const DiscretePoint = shared_structs.DiscretePoint;
 const ContinousPoint = shared_structs.ContinousPoint;
 const Segment = shared_structs.Segment;
 const LinearFunction = shared_structs.LinearFunction;
 
-const ConvexHull = @import("../utilities/convex_hull.zig").ConvexHull;
+const ConvexHull = @import("../../utilities/convex_hull.zig").ConvexHull;
 
 /// Compress `uncompressed_values` using "Swing Filter" and its `method_configuration`.
 /// The function writes the result to `compressed_values`. The `allocator` is used to
@@ -1022,7 +1022,7 @@ test "check swing configuration parsing" {
 }
 
 test "check slide configuration parsing" {
-    // Tests the configuration parsing and functionality of the `compressSwingFilter` function.
+    // Tests the configuration parsing and functionality of the `compressSlideFilter` function.
     // The test verifies that the provided configuration is correctly interpreted and
     // that the `configuration.AbsoluteErrorBound` is expected in the function.
     const allocator = testing.allocator;

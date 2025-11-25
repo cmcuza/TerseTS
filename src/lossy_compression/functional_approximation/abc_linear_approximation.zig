@@ -26,21 +26,21 @@ const time = std.time;
 const rand = std.Random;
 const ArrayList = std.ArrayList;
 
-const tersets = @import("../tersets.zig");
-const tester = @import("../tester.zig");
-const configuration = @import("../configuration.zig");
+const tersets = @import("../../tersets.zig");
+const tester = @import("../../tester.zig");
+const configuration = @import("../../configuration.zig");
 
 const testing = std.testing;
 const Error = tersets.Error;
 const Method = tersets.Method;
 
-const shared_structs = @import("../utilities/shared_structs.zig");
+const shared_structs = @import("../../utilities/shared_structs.zig");
 const DiscretePoint = shared_structs.DiscretePoint;
 const LinearFunction = shared_structs.LinearFunction;
 const Segment = shared_structs.Segment;
 
-const shared_functions = @import("../utilities/shared_functions.zig");
-const ConvexHull = @import("../utilities/convex_hull.zig").ConvexHull;
+const shared_functions = @import("../../utilities/shared_functions.zig");
+const ConvexHull = @import("../../utilities/convex_hull.zig").ConvexHull;
 
 /// Compresses `uncompressed_values` using the "ABCLinearApproximation" algorithm under the
 /// L-inf norm. The function writes the result to `compressed_values`. The `allocator`

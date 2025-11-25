@@ -33,17 +33,17 @@ const math = std.math;
 const ArrayList = std.ArrayList;
 const testing = std.testing;
 
-const tersets = @import("../tersets.zig");
-const tester = @import("../tester.zig");
-const configuration = @import("../configuration.zig");
+const tersets = @import("../../tersets.zig");
+const tester = @import("../../tester.zig");
+const configuration = @import("../../configuration.zig");
 
 const Error = tersets.Error;
 const Method = tersets.Method;
 const Allocator = mem.Allocator;
 
-const shared_structs = @import("../utilities/shared_structs.zig");
-const convex_polygon = @import("../utilities/convex_polygon.zig");
-const shared_functions = @import("../utilities/shared_functions.zig");
+const shared_structs = @import("../../utilities/shared_structs.zig");
+const convex_polygon = @import("../../utilities/convex_polygon.zig");
+const shared_functions = @import("../../utilities/shared_functions.zig");
 const DiscretePoint = shared_structs.DiscretePoint;
 const LinearFunction = shared_structs.LinearFunction;
 const BorderLine = convex_polygon.BorderLine;
@@ -91,7 +91,7 @@ pub fn compress(
         method_configuration,
     );
 
-    const error_bound: f32 = parsed_configuration.abs_error_bound;
+    const error_bound: f32 = parsed_configuration.abs_error_bound - shared_structs.ErrorBoundMargin;
 
     // Validates that the input contains at least 2 data points for meaningful compression.
     if (error_bound == 0.0) return Error.UnsupportedErrorBound;
