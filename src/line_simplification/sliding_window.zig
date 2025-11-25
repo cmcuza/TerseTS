@@ -27,6 +27,7 @@ const time = std.time;
 const ArrayList = std.ArrayList;
 
 const tersets = @import("../tersets.zig");
+const configuration = @import("../configuration.zig");
 const Method = tersets.Method;
 const Error = tersets.Error;
 
@@ -43,17 +44,25 @@ const testing = std.testing;
 /// Compresses `uncompressed_values` using the "Sliding Window" simplification algorithm.
 /// This algorithm iteratively merges points to minimize the RMSE, ensuring that the resulting
 /// compressed sequence stays within the specified `error_bound`. The function writes the
-/// simplified sequence to the `compressed_values`. If an error occurs it is returned.
+/// simplified sequence to the `compressed_values`. The `allocator` is used to allocate memory
+/// for the `method_configuration` parser. The `method_configuration` is expected to be of
+/// `AggregateError` type otherwise an `InvalidConfiguration` error is return. If any other
+/// error occurs during the execution of the method, it is returned.
 pub fn compress(
+    allocator: mem.Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
-    error_bound: f32,
+    method_configuration: []const u8,
 ) Error!void {
+    const parsed_configuration = try configuration.parse(
+        allocator,
+        configuration.AggregateError,
+        method_configuration,
+    );
+
+    const error_bound: f32 = parsed_configuration.aggregate_error_bound;
+
     var seg_start: usize = 0;
-
-    // Return error if the error bound is negative.
-    if (error_bound < 0) return Error.UnsupportedErrorBound;
-
     // Iterate through the input values to segment them.
     while (seg_start < uncompressed_values.len - 1) {
         // We can skip the next point as it has 0 error.
@@ -176,7 +185,7 @@ fn computeRMSE(uncompressed_values: []const f64, seg_start: usize, seg_end: usiz
 
 test "sliding-window can compress and decompress bounded values with zero error bound" {
     const allocator = testing.allocator;
-    const error_bound = 0;
+    const error_bound: f32 = 0.0;
 
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
@@ -188,13 +197,29 @@ test "sliding-window can compress and decompress bounded values with zero error 
         undefined,
     );
 
-    try tester.testCompressAndDecompress(
+    const configuration_json = try std.fmt.allocPrint(
+        allocator,
+        "{{\"aggregate_error_type\": \"rmse\", \"aggregate_error_bound\": {d}}}",
+        .{error_bound},
+    );
+    defer allocator.free(configuration_json);
+
+    const compressed_values = try tersets.compress(
         allocator,
         uncompressed_values.items,
-        Method.SlidingWindow,
-        error_bound,
-        shared_functions.isWithinErrorBound,
+        tersets.Method.SlidingWindow,
+        configuration_json,
     );
+    defer compressed_values.deinit();
+
+    const decompressed_values = try tersets.decompress(allocator, compressed_values.items);
+    defer decompressed_values.deinit();
+
+    try testing.expect(shared_functions.isWithinErrorBound(
+        uncompressed_values.items,
+        decompressed_values.items,
+        error_bound,
+    ));
 }
 
 test "sliding-window cannot compress and decompress nan values" {
@@ -203,7 +228,16 @@ test "sliding-window cannot compress and decompress nan values" {
     var compressed_values = std.ArrayList(u8).init(allocator);
     compressed_values.deinit();
 
-    compress(uncompressed_values[0..], &compressed_values, 0.1) catch |err| {
+    const method_configuration =
+        \\ { "aggregate_error_type": "rmse", "aggregate_error_bound": 0.1 }
+    ;
+
+    compress(
+        allocator,
+        uncompressed_values[0..],
+        &compressed_values,
+        method_configuration,
+    ) catch |err| {
         try testing.expectEqual(Error.UnsupportedInput, err);
         return;
     };
@@ -221,7 +255,16 @@ test "sliding-window cannot compress and decompress unbounded values" {
     var compressed_values = std.ArrayList(u8).init(allocator);
     compressed_values.deinit();
 
-    compress(uncompressed_values[0..], &compressed_values, 0.1) catch |err| {
+    const method_configuration =
+        \\ { "aggregate_error_type": "rmse", "aggregate_error_bound": 0.1 }
+    ;
+
+    compress(
+        allocator,
+        uncompressed_values[0..],
+        &compressed_values,
+        method_configuration,
+    ) catch |err| {
         try testing.expectEqual(Error.UnsupportedInput, err);
         return;
     };
@@ -248,10 +291,18 @@ test "sliding-window compress and decompress random lines and random error bound
 
     try tester.generateRandomLinearFunctions(&uncompressed_values, random);
 
+    const method_configuration = try std.fmt.allocPrint(
+        allocator,
+        "{{\"aggregate_error_type\": \"rmse\", \"aggregate_error_bound\": {d}}}",
+        .{error_bound},
+    );
+    defer allocator.free(method_configuration);
+
     try compress(
+        allocator,
         uncompressed_values.items,
         &compressed_values,
-        error_bound,
+        method_configuration,
     );
 
     try decompress(compressed_values.items, &decompressed_values);
@@ -259,11 +310,12 @@ test "sliding-window compress and decompress random lines and random error bound
     // Check if the decompressed values have the same lenght as the compressed ones.
     try testing.expectEqual(uncompressed_values.items.len, decompressed_values.items.len);
 
-    // In theory, the linear interpolation of all segments formed by the slices of preserved points, should have a RMSE
-    // within the error bound otherwise there a mistake. Since the error bound and the poitns are unknown, we need to
-    // used the compressed representation to access each of the points preserved and their index `current_point_index`.
-    // Then, the RMSE of the linear regression of the segment formed by the slices from
-    // `previous_point_index`..`current_point_index` should be less than `error_bound`.
+    // In theory, the linear interpolation of all segments formed by the slices of preserved points,
+    // should have a RMSE within the error bound otherwise there a mistake. Since the error bound
+    // and the poitns are unknown, we need to used the compressed representation to access each of
+    // the points preserved and their index `current_point_index`. Then, the RMSE of the linear
+    // regression of the segment formed by the slices from `previous_point_index` to
+    // `current_point_index` should be less than `error_bound`.
     const compressed_representation = mem.bytesAsSlice(f64, compressed_values.items);
 
     var index: usize = 0;
@@ -281,4 +333,28 @@ test "sliding-window compress and decompress random lines and random error bound
         );
         previous_point_index = current_point_index + 1;
     }
+}
+
+test "check sliding window configuration parsing" {
+    // Tests the configuration parsing and functionality of the `compress` function.
+    // The test verifies that the provided configuration is correctly interpreted and
+    // that the `configuration.AggregateError` is expected in the function.
+    const allocator = testing.allocator;
+
+    const uncompressed_values = &[4]f64{ 19.0, 48.0, 28.0, 3.0 };
+
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+
+    const method_configuration =
+        \\ {"aggregate_error_type": "rmse", "aggregate_error_bound": 0.3}
+    ;
+
+    // The configuration is properly defined. No error expected.
+    try compress(
+        allocator,
+        uncompressed_values,
+        &compressed_values,
+        method_configuration,
+    );
 }

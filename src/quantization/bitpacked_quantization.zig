@@ -22,12 +22,15 @@
 //! https://doi.org/10.1002/spe.2326.
 
 const std = @import("std");
-const ArrayList = std.ArrayList;
 const math = std.math;
 const mem = std.mem;
+const io = std.io;
 const testing = std.testing;
+const ArrayList = std.ArrayList;
+const Allocator = mem.Allocator;
 
 const tersets = @import("../tersets.zig");
+const configuration = @import("../configuration.zig");
 const Method = tersets.Method;
 const Error = tersets.Error;
 const tester = @import("../tester.zig");
@@ -37,19 +40,24 @@ const shared_functions = @import("../utilities/shared_functions.zig");
 /// Compress `uncompressed_values` within error_bound using "Bucket Quantization" and a
 /// "Fixed-length Bit-Packing". The function writes the result to `compressed_values`. The
 /// `compressed_values` includes the bit width, original length and smallest value so that it
-/// can be decompressed. The `allocator` is used for memory management of intermediates containers.
-/// If an error occurs it is returned.
+/// can be decompressed. The `allocator` is used for memory management of intermediates containers
+/// and the `method_configuration` parser. If an error occurs it is returned.
 pub fn compress(
-    allocator: mem.Allocator,
+    allocator: Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
-    error_bound: f32,
+    method_configuration: []const u8,
 ) Error!void {
+    const parsed_configuration = try configuration.parse(
+        allocator,
+        configuration.AbsoluteErrorBound,
+        method_configuration,
+    );
+
+    const error_bound: f32 = parsed_configuration.abs_error_bound;
+
     // Ensure the compressed values are not empty.
     if (uncompressed_values.len == 0) return Error.UnsupportedInput;
-
-    // Ensure the error bound is non-negative.
-    if (error_bound < 0.0) return Error.UnsupportedErrorBound;
 
     // Find the minimum value.
     var min_val = uncompressed_values[0];
@@ -97,7 +105,7 @@ pub fn compress(
     const large_limit = 0xFFFFFFFF; // Fits in 32 bits.
 
     // Bit-wise packing with fixed-length header.
-    var bit_writer = std.io.bitWriter(.little, compressed_values.writer());
+    var bit_writer = io.bitWriter(.little, compressed_values.writer());
 
     for (quantized_values.items) |val| {
         if (val <= small_limit) {
@@ -136,8 +144,8 @@ pub fn decompress(
     const bucket_size: f32 = @bitCast(compressed_values[8..12].*);
 
     // Create a bit reader from remaining bytes.
-    var stream = std.io.fixedBufferStream(compressed_values[12..]);
-    var bit_reader = std.io.bitReader(.little, stream.reader());
+    var stream = io.fixedBufferStream(compressed_values[12..]);
+    var bit_reader = io.bitReader(.little, stream.reader());
     var decompressed_value: f64 = 0.0;
 
     // Convert min_val to its ordered bit representation.
@@ -233,10 +241,19 @@ test "bitpacked quantization can compress and decompress bounded values" {
 test "bitpacked quantization cannot compress and decompress nan values" {
     const allocator = testing.allocator;
     const uncompressed_values = [3]f64{ 343.0, math.nan(f64), 520.0 };
-    var compressed_values = std.ArrayList(u8).init(allocator);
+    var compressed_values = ArrayList(u8).init(allocator);
     compressed_values.deinit();
 
-    compress(allocator, uncompressed_values[0..], &compressed_values, 0.1) catch |err| {
+    const method_configuration =
+        \\ {"abs_error_bound": 0.1}
+    ;
+
+    compress(
+        allocator,
+        uncompressed_values[0..],
+        &compressed_values,
+        method_configuration,
+    ) catch |err| {
         try testing.expectEqual(Error.UnsupportedInput, err);
         return;
     };
@@ -251,10 +268,19 @@ test "bitpacked quantization cannot compress and decompress nan values" {
 test "bitpacked quantization cannot compress and decompress unbounded values" {
     const allocator = testing.allocator;
     const uncompressed_values = [3]f64{ 343.0, 1e20, 520.0 };
-    var compressed_values = std.ArrayList(u8).init(allocator);
+    var compressed_values = ArrayList(u8).init(allocator);
     compressed_values.deinit();
 
-    compress(allocator, uncompressed_values[0..], &compressed_values, 0.1) catch |err| {
+    const method_configuration =
+        \\ {"abs_error_bound": 0.1}
+    ;
+
+    compress(
+        allocator,
+        uncompressed_values[0..],
+        &compressed_values,
+        method_configuration,
+    ) catch |err| {
         try testing.expectEqual(Error.UnsupportedInput, err);
         return;
     };
@@ -336,13 +362,44 @@ test "bitpacked quantization always reduces size of time series" {
     var compressed_values = ArrayList(u8).init(allocator);
     defer compressed_values.deinit();
 
+    const method_configuration = try std.fmt.allocPrint(
+        allocator,
+        "{{\"abs_error_bound\": {d}}}",
+        .{error_bound},
+    );
+    defer allocator.free(method_configuration);
+
     try compress(
         allocator,
         uncompressed_values.items,
         &compressed_values,
-        error_bound,
+        method_configuration,
     );
 
     // Considering the range of the input data, the compressed values should always be smaller.
     try testing.expect(uncompressed_values.items.len * 8 > compressed_values.items.len);
+}
+
+test "check bit-quantization configuration parsing" {
+    // Tests the configuration parsing and functionality of the `compressMidrange` function.
+    // The test verifies that the provided configuration is correctly interpreted and
+    // that the `configuration.AbsoluteErrorBound` is expected in the function.
+    const allocator = testing.allocator;
+
+    const uncompressed_values = &[4]f64{ 19.0, 48.0, 29.0, 3.0 };
+
+    var compressed_values = ArrayList(u8).init(allocator);
+    defer compressed_values.deinit();
+
+    const method_configuration =
+        \\ {"abs_error_bound": 0.1}
+    ;
+
+    // The configuration is properly defined. No error expected.
+    try compress(
+        allocator,
+        uncompressed_values,
+        &compressed_values,
+        method_configuration,
+    );
 }
