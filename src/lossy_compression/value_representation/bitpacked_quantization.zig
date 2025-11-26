@@ -54,7 +54,7 @@ pub fn compress(
         method_configuration,
     );
 
-    const error_bound: f32 = parsed_configuration.abs_error_bound;
+    const error_bound: f64 = @floatCast(parsed_configuration.abs_error_bound);
 
     // Ensure the compressed values are not empty.
     if (uncompressed_values.len == 0) return Error.UnsupportedInput;
@@ -70,10 +70,10 @@ pub fn compress(
     try shared_functions.appendValue(f64, min_val, compressed_values);
 
     // All values will map to the closest bucket based on the bucket_size.
-    const bucket_size: f32 = 1.99 * error_bound;
+    const bucket_size: f64 = 1.999 * error_bound;
 
-    // Append the bucker size to the header of the compressed values.
-    try shared_functions.appendValue(f32, bucket_size, compressed_values);
+    // Append the minimum value to the header of the compressed values.
+    try shared_functions.appendValue(f64, bucket_size, compressed_values);
 
     //Intermediate quantized values.
     var quantized_values = ArrayList(usize).init(allocator);
@@ -85,7 +85,7 @@ pub fn compress(
     // If the error_bound is zero, we compute the difference between the
     // value and the minimum value, ensuring all resulting integers are >= 0.
     // For non-zero error_bound, we apply fixed-width bucket quantization
-    // using the defined bucket size (1.99 × error_bound).
+    // using the defined bucket size (1.999 × error_bound).
     var quantized_value: usize = 0;
     for (uncompressed_values) |value| {
         if (error_bound == 0.0) {
@@ -137,14 +137,14 @@ pub fn decompress(
     decompressed_values: *ArrayList(f64),
 ) Error!void {
     // Ensure the compressed values are not empty, i.e., at least the header is present.
-    if (compressed_values.len < 12) return Error.UnsupportedInput;
+    if (compressed_values.len < 16) return Error.UnsupportedInput;
 
     // Read min_val and bucket_size from the header.
     const min_val: f64 = @bitCast(compressed_values[0..8].*);
-    const bucket_size: f32 = @bitCast(compressed_values[8..12].*);
+    const bucket_size: f64 = @bitCast(compressed_values[8..16].*);
 
     // Create a bit reader from remaining bytes.
-    var stream = io.fixedBufferStream(compressed_values[12..]);
+    var stream = io.fixedBufferStream(compressed_values[16..]);
     var bit_reader = io.bitReader(.little, stream.reader());
     var decompressed_value: f64 = 0.0;
 

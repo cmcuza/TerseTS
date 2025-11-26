@@ -1,13 +1,19 @@
 <h1 align="center">
-  <img src="docs/tersets.png" alt="TerseTS", width="400">
+  <img src="docs/tersets.svg" alt="TerseTS", width="400">
 </h1>
 
-TerseTS is a library that provides methods for lossless and lossy compressing time series. To match existing literature the lossy compression methods are organized in a [hierarchy](docs/hierarchy.pdf) based on [Time Series Compression Survey](https://dl.acm.org/doi/10.1145/3560814).The library is implemented in Zig and provides a Zig-API and C-API with [bindings](#usage) for other languages.
+TerseTS is a library that provides methods for lossless and lossy compressing time series. To match existing literature, the lossy compression methods are organized in the hierarchy below based on [Time Series Compression Survey](https://dl.acm.org/doi/10.1145/3560814). Each category represents a distinct approach to time series compression. The library is implemented in Zig and provides a Zig-API and C-API with [bindings](#usage) for other languages.
 
-# Getting Started
-## Compilation
+<p align="center">
+   <img src="docs/figure.svg" alt="Compression Techniques Hierarchy" width="600">
+   <br>
+   <em>Figure: Hierarchical organization of lossy time series compression techniques.</em>
+</p>
+
+
+# Compilation
 TerseTS can be compiled and cross-compiled from source:
-1. Install the latest version of [Zig](https://ziglang.org/)
+1. Download the latest version of [Zig](https://ziglang.org/).
 2. Build TerseTS for development in `Debug` mode using Zig, e.g.,:
    - Linux: `zig build -Dtarget=x86_64-linux`
    - macOS: `zig build -Dtarget=aarch64-macos`
@@ -17,7 +23,7 @@ TerseTS can be compiled and cross-compiled from source:
    - macOS: `zig build -Dtarget=aarch64-macos -Doptimize=ReleaseFast`
    - Microsoft Windows: `zig build -Dtarget=x86_64-windows -Doptimize=ReleaseFast`
 
-## Usage
+# Usage
 TerseTS provides a Zig-API and a C-API that is designed to be simple to wrap. Currently, TerseTS includes APIs for the following programming languages which can be used without installation of any dependencies:
 <a id="zig-usage-example"></a>
 <details>
@@ -57,16 +63,15 @@ pub fn main() void {
 
 TerseTS provides `./src/tersets.zig` as the single access point and two main functions `compress()` and `decompress()`.
 
-- **`compress(allocator, uncompressed_values, method, configuration)` Function:**
+- **`compress()` Function:**
    - **Parameters:**
       - `allocator`: Allocator instance used to allocate memory for the returned. 
       - `uncompressed_values`: A sequence of floats (e.g., `[_]f64`) representing the data to compress.
-      `compressed_values` and intermediate structures.
       - `method`: Compression method identifier from the `tersets.Method` enum (e.g., `tersets.Method.SwingFilter`).
       - `configuration`: A JSON string specifying compression parameters (e.g., `"{ \"abs_error_bound\": 0.1 }"`).
-   - **Returns:** A dynamically allocated `compressed_values` (of type `ArrayList`), which must be deallocated using `deinit()`.
+   - **Returns:** The function returns an `Error!ArrayList(u8)` which includes a dynamically allocated `compressed_values` (of type `ArrayList(u8)`) or an `TerseTS.Error` in case failure. 
 
-- **`decompress(allocator, compressed_values)` Function:**
+- **`decompress()` Function:**
    - **Parameters:**
       - `compressed_values`: The compressed data to decompress.
       - `allocator`: Allocator instance used to allocate memory for the returned `decompressed_values`.
@@ -179,28 +184,28 @@ print("Decompression successful. Decompressed data length: ", len(decompressed_v
 TerseTS provides Python bindings located in `./bindings/python/tersets/__init__.py`, which can be directly imported into a Python program using `import tersets`. To install the bindings, navigate to the Python binding root directory and run `pip install .` as described in the [Python bindings README](bindings/python/README.md). The bindings automatically load the native library, assuming it remains in its default location.
 
 
-- **`compress(values, method, configuration)` Function:**
+- **`compress()` Function:**
    - **Parameters:**
       - `values`: A list, tuple, or `numpy.ndarray` of floats representing the data to compress.
       - `method`: An enum value from `tersets.Method` specifying the compression method.
       - `configuration`: A dictionary or JSON string specifying compression parameters (e.g., `{"abs_error_bound": 0.1}`).
    - **Returns:** Compressed data as bytes. NumPy arrays are supported for zero-copy performance. Errors are raised as Python exceptions.
 
-- **`decompress(values)` Function:**
+- **`decompress()` Function:**
    - **Parameters:**
       - `values`: The compressed data as bytes to decompress.
    - **Returns:** Decompressed values as a Python list of floats. 
 
 Errors are raised as Python exceptions.
-
 </details>
 
-## Linking:
+
+# Linking:
 - **Microsoft Windows**: Link the `tersets.dll` to the project. It can be found in the output folder after compiling TerseTS, by default: `zig-out/lib/tersets.dll`.
 - **Linux**: Link the `tersets.so` to the project. It can be found in the output folder after compiling TerseTS, by default: `zig-out/lib/tersets.so`.
 - **macOS**: Link the `tersets.dylib` to the project. It can be found in the output folder after compiling TerseTS, by default: `zig-out/lib/tersets.dylib`.
 
-## Contributing:  
+# Contributing:  
 Please read our [contributing guidelines](.github/CONTRIBUTING.md) before submitting an [issue](https://github.com/cmcuza/TerseTS/issues/new/choose) or a [pull request](https://github.com/cmcuza/TerseTS/compare)..
 
 # License
