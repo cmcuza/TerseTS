@@ -386,6 +386,20 @@ pub fn extract(
                 coefficients,
             );
         },
+        .PiecewiseConstantHistogram => {
+            try extractors.extractPWCH(
+                compressed_values_slice,
+                timestamps,
+                coefficients,
+            );
+        },
+        .PiecewiseLinearHistogram => {
+            try extractors.extractPWLH(
+                compressed_values_slice,
+                timestamps,
+                coefficients,
+            );
+        },
         // Unsupported methods for extraction.
         // TODO: Implement extractors for the remaining methods.
         else => return Error.UnsupportedInput,
@@ -441,6 +455,20 @@ pub fn rebuild(
         },
         .MixPiece => {
             try extractors.rebuildMixPiece(
+                timestamps,
+                coefficients,
+                &compressed_values,
+            );
+        },
+        .PiecewiseConstantHistogram => {
+            try extractors.rebuildPWCH(
+                timestamps,
+                coefficients,
+                &compressed_values,
+            );
+        },
+        .PiecewiseLinearHistogram => {
+            try extractors.rebuildConvexABC(
                 timestamps,
                 coefficients,
                 &compressed_values,

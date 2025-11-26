@@ -17,8 +17,7 @@
 //! buffers to retrieve timestamps and coefficients, enabling analysis or transformation of the
 //! compressed data. Functions prefixed with `rebuild` recreate compressed buffers from extracted
 //! components, allowing users to customize and reassemble compression pipelines. These utilities
-//! are designed to support advanced workflows and interoperability with TerseTS's compression
-//! techniques.
+//! are designed to support advanced compression pipelines construction with TerseTS.
 
 const std = @import("std");
 const ArrayList = std.ArrayList;
@@ -110,6 +109,20 @@ pub fn extractSlide(
             try timestamps.append(end_idx);
         }
     }
+}
+
+/// Extracts timestamps and coefficients from the ConvexABC's `compressed_values`.
+/// The function accepts a `timestamps` ArrayList to store the extracted end indices,
+/// and a `coefficients` ArrayList to store the extracted coefficient values.
+/// If any validation of the `compressed_values` fails, and `Error.UnsupportedInput` is returned.
+/// If any other memory allocation error occurs, it is propagated.
+pub fn extractConvexABC(
+    compressed_values: []const u8,
+    timestamps: *ArrayList(usize),
+    coefficients: *ArrayList(f64),
+) Error!void {
+    // The logic of this function is exactly the same as `extractSlide`.
+    try extractSlide(compressed_values, timestamps, coefficients);
 }
 
 /// Extracts timestamps and coefficients from SimPiece's `compressed_values`.
@@ -275,6 +288,34 @@ pub fn extractMixPiece(
     try timestamps.append(final_timestamp);
 }
 
+/// Extracts timestamps and coefficients from the Piecewice Constant Histogram's `compressed_values`.
+/// The function accepts a `timestamps` ArrayList to store the extracted end indices,
+/// and a `coefficients` ArrayList to store the extracted coefficient values.
+/// If any validation of the `compressed_values` fails, and `Error.UnsupportedInput` is returned.
+/// If any other memory allocation error occurs, it is propagated.
+pub fn extractPWCH(
+    compressed_values: []const u8,
+    timestamps: *ArrayList(usize),
+    coefficients: *ArrayList(f64),
+) Error!void {
+    // The logic of this function is exactly the same as `extractPMC`.
+    try extractPMC(compressed_values, timestamps, coefficients);
+}
+
+/// Extracts timestamps and coefficients from the Piecewice Linear Histogram's `compressed_values`.
+/// The function accepts a `timestamps` ArrayList to store the extracted end indices,
+/// and a `coefficients` ArrayList to store the extracted coefficient values.
+/// If any validation of the `compressed_values` fails, and `Error.UnsupportedInput` is returned.
+/// If any other memory allocation error occurs, it is propagated.
+pub fn extractPWLH(
+    compressed_values: []const u8,
+    timestamps: *ArrayList(usize),
+    coefficients: *ArrayList(f64),
+) Error!void {
+    // The logic of this function is exactly the same as `extractSlide`.
+    try extractSlide(compressed_values, timestamps, coefficients);
+}
+
 /// Rebuilds Poor Man's Compression (PMC) `compressed_values` from `timestamps` and `coefficients`.
 /// The function expects `timestamps` and `coefficients` to have equal length.
 /// Each pair is encoded as (f64 coefficient, usize end_index as f64 bits).
@@ -339,7 +380,7 @@ pub fn rebuildSwing(
 }
 
 /// Rebuilds SlideFilter's `compressed_values` from `timestamps` and `coefficients`.
-/// Every third value is a `timestamp`, others are `coefficients`.
+/// Every third value is a `timestamp`, while the other two are `coefficients`.
 /// Returns `Error.UnsupportedInput` if input lengths are invalid, or propagates allocation errors.
 pub fn rebuildSlide(
     timestamps: []const usize,
@@ -367,6 +408,18 @@ pub fn rebuildSlide(
             time_idx += 1;
         }
     }
+}
+
+/// Rebuilds SlideFilter's `compressed_values` from `timestamps` and `coefficients`.
+/// Every third value is a `timestamp`, while the other two are `coefficients`.
+/// Returns `Error.UnsupportedInput` if input lengths are invalid, or propagates allocation errors.
+pub fn rebuildConvexABC(
+    timestamps: []const usize,
+    coefficients: []const f64,
+    compressed_values: *ArrayList(u8),
+) Error!void {
+    // The logic of this function is exactly the same as `rebuildSlide`.
+    try rebuildSlide(timestamps, coefficients, compressed_values);
 }
 
 /// Rebuilds SimPiece's `compressed_values` from `timestamps` and `coefficients`.
@@ -541,6 +594,31 @@ pub fn rebuildMixPiece(
     try shared_functions.appendValue(usize, final_timestamp, compressed_values);
 }
 
+/// Rebuilds Piecewise Linear Histogram's `compressed_values` from `timestamps` and `coefficients`.
+/// Every third value is a `timestamp`, while the other two are `coefficients`.
+/// Returns `Error.UnsupportedInput` if lengths mismatch, or propagates allocation errors.
+pub fn rebuildPWLH(
+    timestamps: []const usize,
+    coefficients: []const f64,
+    compressed_values: *ArrayList(u8),
+) Error!void {
+    // The logic of this function is exactly the same as `rebuildSlide`.
+    try rebuildSlide(timestamps, coefficients, compressed_values);
+}
+
+/// Rebuilds Piecewise Constant Histogram's `compressed_values` from `timestamps` and `coefficients`.
+/// The function expects `timestamps` and `coefficients` to have equal length.
+/// Each pair is encoded as (f64 coefficient, usize end_index as f64 bits).
+/// Returns `Error.UnsupportedInput` if lengths mismatch, or propagates allocation errors.
+pub fn rebuildPWCH(
+    timestamps: []const usize,
+    coefficients: []const f64,
+    compressed_values: *ArrayList(u8),
+) Error!void {
+    // The logic of this function is exactly the same as `rebuildPMC`.
+    try rebuildPMC(timestamps, coefficients, compressed_values);
+}
+
 test "extract and rebuild PMC round trip" {
     const allocator = testing.allocator;
 
@@ -684,4 +762,39 @@ test "extract and rebuild MixPiece round trip" {
 
     try testing.expectEqualSlices(usize, timestamps[0..], extracted_ts.items);
     try testing.expectEqualSlices(f64, coefficients[0..], extracted_coeffs.items);
+}
+
+test "extract and rebuild PWCH round trip" {
+    const allocator = testing.allocator;
+
+    const timestamps = [_]usize{ 5, 10 };
+    const coefficients = [_]f64{ 1.5, -0.25 };
+
+    var compressed = ArrayList(u8).init(allocator);
+    defer compressed.deinit();
+    try rebuildPWCH(timestamps[0..], coefficients[0..], &compressed);
+
+    var extracted_ts = ArrayList(usize).init(allocator);
+    defer extracted_ts.deinit();
+    var extracted_coeffs = ArrayList(f64).init(allocator);
+    defer extracted_coeffs.deinit();
+    try extractPWCH(compressed.items, &extracted_ts, &extracted_coeffs);
+
+    try testing.expectEqualSlices(usize, timestamps[0..], extracted_ts.items);
+    try testing.expectEqualSlices(f64, coefficients[0..], extracted_coeffs.items);
+}
+
+test "rebuildPWCH rejects mismatched input lengths" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).init(allocator);
+    defer compressed.deinit();
+
+    const timestamps = [_]usize{1};
+    const coefficients = [_]f64{ 1.0, 2.0 };
+
+    try testing.expectError(Error.UnsupportedInput, rebuildPWCH(
+        timestamps[0..],
+        coefficients[0..],
+        &compressed,
+    ));
 }
