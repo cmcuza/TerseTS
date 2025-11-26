@@ -53,13 +53,10 @@ pub fn compress(
 
     const error_bound: f32 = parsed_configuration.abs_error_bound;
 
-    // Ensure the compressed values are not empty.
-    if (uncompressed_values.len == 0) return Error.UnsupportedInput;
+    const bucket_size: f64 = shared_functions.createQuantizationBucket(error_bound);
 
-    // Avoid edge cases by defining bucket size slightly larger than 2 * error_bound.
-    const bucket_size: f32 = 1.99 * error_bound;
     // Append the minimum value to the header of the compressed values.
-    try shared_functions.appendValue(f32, bucket_size, compressed_values);
+    try shared_functions.appendValue(f64, bucket_size, compressed_values);
 
     //Intermediate quantized values.
     var quantized_values = ArrayList(u64).init(allocator);
@@ -81,11 +78,11 @@ pub fn compress(
             // Quantization for the lossless case.
             // This case is not defined in the paper, but we implement it
             // as the difference from the previous value.
-            const usize_value: u64 = shared_functions.floatBitsOrdered(value);
-            encoded_value = usize_value;
+            const u64_value: u64 = shared_functions.floatBitsOrdered(value);
+            encoded_value = u64_value;
         } else {
             // Fixed-width bucket quantization with rounding (Equation 2).
-            const quantized_value: i64 = @intFromFloat(@floor((value - previous_value) / bucket_size + 0.5));
+            const quantized_value: i64 = @intFromFloat(@round((value - previous_value) / bucket_size));
             // Apply zigzag encoding to handle negative values (Equation 4).
             // Add 1 to ensure non-zero values for Elias Gamma encoding.
             encoded_value = shared_functions.encodeZigZag(quantized_value) + 1;
@@ -111,17 +108,17 @@ pub fn decompress(
     decompressed_values: *ArrayList(f64),
 ) Error!void {
     // Ensure the compressed values are not empty, i.e., at least the header is present.
-    if (compressed_values.len < 4) return Error.UnsupportedInput;
+    if (compressed_values.len < 8) return Error.UnsupportedInput;
 
     // Read bucket_size from the header.
-    const bucket_size: f32 = @bitCast(compressed_values[0..4].*);
+    const bucket_size: f64 = @bitCast(compressed_values[0..8].*);
 
     var decoded_quantized_values = ArrayList(u64).init(allocator);
     defer decoded_quantized_values.deinit();
 
     // Decode the Elias Gamma encoded quantized values.
     try shared_functions.decodeEliasGamma(
-        compressed_values[4..compressed_values.len],
+        compressed_values[8..compressed_values.len],
         &decoded_quantized_values,
     );
 
@@ -130,7 +127,7 @@ pub fn decompress(
     for (decoded_quantized_values.items) |quantized_value| {
         var decompressed_value: f64 = 0.0;
         if (bucket_size == 0.0) {
-            // If bucket size is zero, we assume the values were not quantized and are stored as usize directy.
+            // If bucket size is zero, we assume the values were not quantized and are stored as u64 directy.
             decompressed_value = shared_functions.orderedBitsToFloat(quantized_value);
         } else {
             // Reconstruct value from quantized_value and append to decompressed_value.
@@ -142,7 +139,7 @@ pub fn decompress(
     }
 }
 
-test "serfqt can compress and decompress bounded values" {
+test "serf-qt can compress and decompress bounded values" {
     const allocator = testing.allocator;
     const data_distributions = &[_]tester.DataDistribution{
         .LinearFunctions,
@@ -158,7 +155,7 @@ test "serfqt can compress and decompress bounded values" {
     );
 }
 
-test "serfqt cannot compress and decompress nan values" {
+test "serf-qt cannot compress and decompress nan values" {
     const allocator = testing.allocator;
     const uncompressed_values = [3]f64{ 343.0, math.nan(f64), 520.0 };
     var compressed_values = ArrayList(u8).init(allocator);
@@ -180,13 +177,15 @@ test "serfqt cannot compress and decompress nan values" {
 
     try testing.expectFmt(
         "",
-        "The SerfQT method cannot compress nan values",
+        "The Serf-QT method cannot compress NaN values",
         .{},
     );
 }
 
-test "serfqt cannot compress and decompress unbounded values" {
+test "serf-qt cannot compress and decompress values exceeding floating-point precision limits" {
     const allocator = testing.allocator;
+    // A value exceeding floating-point precision limits refers to a number that cannot be
+    // accurately represented using f64 due to its magnitude, such as 1e20.
     const uncompressed_values = [3]f64{ 343.0, 1e20, 520.0 };
     var compressed_values = ArrayList(u8).init(allocator);
     defer compressed_values.deinit();
@@ -207,12 +206,12 @@ test "serfqt cannot compress and decompress unbounded values" {
 
     try testing.expectFmt(
         "",
-        "The SerfQT method cannot compress unbounded values",
+        "The Serf-QT method cannot compress values exceeding floating-point precision limits",
         .{},
     );
 }
 
-test "serfqt can compress and decompress bounded values at different scales" {
+test "serf-qt can compress and decompress within floating-point precision limits at different scales" {
     const allocator = testing.allocator;
     const error_bound = tester.generateBoundedRandomValue(f32, 0, 1e3, undefined);
 
@@ -224,6 +223,7 @@ test "serfqt can compress and decompress bounded values at different scales" {
     try tester.generateBoundedRandomValues(&uncompressed_values, -1e4, 1e4, undefined);
     try tester.generateBoundedRandomValues(&uncompressed_values, -1e6, 1e6, undefined);
     try tester.generateBoundedRandomValues(&uncompressed_values, -1e8, 1e8, undefined);
+    try tester.generateBoundedRandomValues(&uncompressed_values, -1e14, 1e14, undefined);
 
     try tester.testCompressAndDecompress(
         allocator,
@@ -234,7 +234,7 @@ test "serfqt can compress and decompress bounded values at different scales" {
     );
 }
 
-test "serfqt can compress and decompress with zero error bound at different scales" {
+test "serf-qt can compress and decompress with zero error bound at different scales" {
     const allocator = testing.allocator;
     const error_bound = 0;
 
@@ -257,7 +257,7 @@ test "serfqt can compress and decompress with zero error bound at different scal
     );
 }
 
-test "serfqt always reduces size of time series" {
+test "serf-qt always reduces size of time series" {
     const allocator = testing.allocator;
     // Generate a random error bound between 10 and 1000, which will be used for quantization.
     const error_bound = @floor(tester.generateBoundedRandomValue(
@@ -278,6 +278,7 @@ test "serfqt always reduces size of time series" {
     try tester.generateBoundedRandomValues(&uncompressed_values, -1e4, 1e4, undefined);
     try tester.generateBoundedRandomValues(&uncompressed_values, -1e6, 1e6, undefined);
     try tester.generateBoundedRandomValues(&uncompressed_values, -1e8, 1e8, undefined);
+    try tester.generateBoundedRandomValues(&uncompressed_values, -1e14, 1e14, undefined);
 
     var compressed_values = ArrayList(u8).init(allocator);
     defer compressed_values.deinit();
@@ -300,7 +301,7 @@ test "serfqt always reduces size of time series" {
     try testing.expect(uncompressed_values.items.len * 8 > compressed_values.items.len);
 }
 
-test "check serqt configuration parsing" {
+test "check serf-qt configuration parsing" {
     // Tests the configuration parsing and functionality of the `compress` function.
     // The test verifies that the provided configuration is correctly interpreted and
     // that the `configuration.AbsoluteErrorBound` is expected in the function.

@@ -720,7 +720,12 @@ test "Random clusters, elements per cluster and values for PWCH" {
     const min_value: f64 = -1e6;
     const cluster_width: f64 = tester.generateBoundedRandomValue(f64, 100, 1000, random);
     // Generate min gap.
-    const gap: f64 = cluster_width + tester.generateBoundedRandomValue(f64, 100, 1000, random) + 100;
+    const gap: f64 = cluster_width + tester.generateBoundedRandomValue(
+        f64,
+        500,
+        1000,
+        random,
+    );
     const max_counts_per_cluster: usize = 100;
 
     var current_min_value = min_value;

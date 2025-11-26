@@ -54,10 +54,7 @@ pub fn compress(
         method_configuration,
     );
 
-    const error_bound: f64 = @floatCast(parsed_configuration.abs_error_bound);
-
-    // Ensure the compressed values are not empty.
-    if (uncompressed_values.len == 0) return Error.UnsupportedInput;
+    const error_bound: f32 = parsed_configuration.abs_error_bound;
 
     // Find the minimum value.
     var min_val = uncompressed_values[0];
@@ -70,31 +67,31 @@ pub fn compress(
     try shared_functions.appendValue(f64, min_val, compressed_values);
 
     // All values will map to the closest bucket based on the bucket_size.
-    const bucket_size: f64 = 1.999 * error_bound;
+    const bucket_size: f64 = shared_functions.createQuantizationBucket(error_bound);
 
     // Append the minimum value to the header of the compressed values.
     try shared_functions.appendValue(f64, bucket_size, compressed_values);
 
     //Intermediate quantized values.
-    var quantized_values = ArrayList(usize).init(allocator);
+    var quantized_values = ArrayList(u64).init(allocator);
     defer quantized_values.deinit();
 
-    const usize_min_value: usize = shared_functions.floatBitsOrdered(min_val);
+    const u64_min_value: u64 = shared_functions.floatBitsOrdered(min_val);
 
     // Quantize each value by mapping it to a discrete bucket index.
     // If the error_bound is zero, we compute the difference between the
     // value and the minimum value, ensuring all resulting integers are >= 0.
     // For non-zero error_bound, we apply fixed-width bucket quantization
     // using the defined bucket size (1.999 × error_bound).
-    var quantized_value: usize = 0;
+    var quantized_value: u64 = 0;
     for (uncompressed_values) |value| {
         if (error_bound == 0.0) {
             // Bit-diff quantization for the lossless case.
-            const usize_value: usize = shared_functions.floatBitsOrdered(value);
-            quantized_value = usize_value - usize_min_value;
+            const u64_value: u64 = shared_functions.floatBitsOrdered(value);
+            quantized_value = u64_value - u64_min_value;
         } else {
             // Fixed-width bucket quantization with rounding.
-            quantized_value = @intFromFloat(@floor((value - min_val) / bucket_size + 0.5));
+            quantized_value = @intFromFloat(@round((value - min_val) / bucket_size));
         }
         try quantized_values.append(quantized_value);
     }
@@ -159,7 +156,7 @@ pub fn decompress(
         // If the stream ends before reading them, we break the loop.
         const length_prefix_1: u8 = bit_reader.readBitsNoEof(u8, 1) catch break;
         const length_prefix_2: u8 = bit_reader.readBitsNoEof(u8, 1) catch break;
-        var quantized_value: usize = 0;
+        var quantized_value: u64 = 0;
 
         if (length_prefix_1 == 0) {
             if (length_prefix_2 == 0) {
@@ -187,9 +184,9 @@ pub fn decompress(
         }
 
         if (bucket_size == 0.0) {
-            // If bucket size is zero, we assume the values were not quantized and are stored as usize directy.
-            const raw_usize = quantized_value + bits_ordered_min_val;
-            decompressed_value = shared_functions.orderedBitsToFloat(raw_usize);
+            // If bucket size is zero, we assume the values were not quantized and are stored as u64 directy.
+            const raw_u64 = quantized_value + bits_ordered_min_val;
+            decompressed_value = shared_functions.orderedBitsToFloat(raw_u64);
         } else {
             // Reconstruct value from quantized_value and append to decompressed_value.
             decompressed_value = min_val + @as(f64, @floatFromInt(quantized_value)) * bucket_size;
