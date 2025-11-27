@@ -109,6 +109,7 @@ pub fn compress(
             return compressed_values;
         }
         // The `uncompressed_values` is empty.
+        // The `uncompressed_values` is empty.
         return Error.UnsupportedInput;
     }
 
