@@ -24,6 +24,7 @@ enum Method {
   BitPackedQuantization         = 13,
   RunLengthEncoding             = 14,
   NonLinearApproximation        = 15,
+  SerfQT                        = 16,
 };
 
 // Read-only view of input data (the library will not modify it).

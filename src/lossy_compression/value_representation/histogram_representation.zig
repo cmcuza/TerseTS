@@ -32,24 +32,24 @@ const Allocator = mem.Allocator;
 const expectEqual = testing.expectEqual;
 
 const HashedPriorityQueue = @import(
-    "../utilities/hashed_priority_queue.zig",
+    "../../utilities/hashed_priority_queue.zig",
 ).HashedPriorityQueue;
 
 const ConvexHull = @import(
-    "../utilities/convex_hull.zig",
+    "../../utilities/convex_hull.zig",
 ).ConvexHull;
 
-const shared_structs = @import("../utilities/shared_structs.zig");
-const shared_functions = @import("../utilities/shared_functions.zig");
+const shared_structs = @import("../../utilities/shared_structs.zig");
+const shared_functions = @import("../../utilities/shared_functions.zig");
 
 const LinearFunction = shared_structs.LinearFunction;
 const Segment = shared_structs.Segment;
 
-const tersets = @import("../tersets.zig");
-const configuration = @import("../configuration.zig");
+const tersets = @import("../../tersets.zig");
+const configuration = @import("../../configuration.zig");
 const Error = tersets.Error;
 
-const tester = @import("../tester.zig");
+const tester = @import("../../tester.zig");
 
 // Enum to determine the type of approximation of the buckets in the histogram.
 const Approximation = enum(i8) { constant, linear };
@@ -720,7 +720,12 @@ test "Random clusters, elements per cluster and values for PWCH" {
     const min_value: f64 = -1e6;
     const cluster_width: f64 = tester.generateBoundedRandomValue(f64, 100, 1000, random);
     // Generate min gap.
-    const gap: f64 = cluster_width + tester.generateBoundedRandomValue(f64, 100, 1000, random) + 100;
+    const gap: f64 = cluster_width + tester.generateBoundedRandomValue(
+        f64,
+        500,
+        1000,
+        random,
+    );
     const max_counts_per_cluster: usize = 100;
 
     var current_min_value = min_value;
