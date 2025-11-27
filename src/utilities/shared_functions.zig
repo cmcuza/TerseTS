@@ -305,6 +305,17 @@ pub fn orderedBitsToFloat(value: u64) f64 {
         @bitCast(~value);
 }
 
+/// Creates a uniform quantization bucket based on the provided `error_bound`. In theory, the bucket
+/// size is `2 * error_bound`, since uniform quantization guarantees a maximum reconstruction error
+/// of `bucket_size / 2`. However, in practice, floating-point rounding and cancellation can cause
+/// the actual error to slightly exceed the theoretical bound. To improve numerical stability, the
+/// function shrink the bucket slightly and use `1.998 * error_bound` instead of `2 * error_bound`.
+/// This ~0.1% safety margin helps ensure that the maximum decompression error still satisfies the
+/// user-provided `error_bound`.
+pub fn createQuantizationBucket(error_bound: f32) f64 {
+    return @floatCast(1.998 * error_bound);
+}
+
 test "zigzag can encode and decode small signed integers correctly" {
     const default_random = tester.getDefaultRandomGenerator();
     const number_of_tests = tester.generateNumberOfValues(default_random);
