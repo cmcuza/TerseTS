@@ -373,6 +373,13 @@ pub fn extract(
                 coefficients,
             );
         },
+        .ABCLinearApproximation => {
+            try extractors.extractABCLinearApproximation(
+                compressed_values_slice,
+                timestamps,
+                coefficients,
+            );
+        },
         .SimPiece => {
             try extractors.extractSimPiece(
                 compressed_values_slice,
@@ -442,6 +449,13 @@ pub fn rebuild(
         // Both SlideFilter and SwingFilterDisconnected use the same rebuilder.
         .SlideFilter, .SwingFilterDisconnected => {
             try extractors.rebuildSlide(
+                timestamps,
+                coefficients,
+                &compressed_values,
+            );
+        },
+        .ABCLinearApproximation => {
+            try extractors.rebuildABCLinearApproximation(
                 timestamps,
                 coefficients,
                 &compressed_values,

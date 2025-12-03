@@ -116,7 +116,7 @@ pub fn extractSlide(
 /// and a `coefficients` ArrayList to store the extracted coefficient values.
 /// If any validation of the `compressed_values` fails, and `Error.UnsupportedInput` is returned.
 /// If any other memory allocation error occurs, it is propagated.
-pub fn extractConvexABC(
+pub fn extractABCLinearApproximation(
     compressed_values: []const u8,
     timestamps: *ArrayList(usize),
     coefficients: *ArrayList(f64),
@@ -316,6 +316,20 @@ pub fn extractPWLH(
     try extractSlide(compressed_values, timestamps, coefficients);
 }
 
+/// Extracts timestamps and coefficients from Visvalingam-Whyatt's `compressed_values`.
+/// The function accepts a `timestamps` ArrayList to store the extracted end indices,
+/// and a `coefficients` ArrayList to store the extracted coefficient values.
+/// If any validation of the `compressed_values` fails, and `Error.UnsupportedInput` is returned.
+/// If any other memory allocation error occurs, it is propagated.
+pub fn extractVisvalingamWhyatt(
+    compressed_values: []const u8,
+    timestamps: *ArrayList(usize),
+    coefficients: *ArrayList(f64),
+) Error!void {
+    // The logic of this function is exactly the same as `extractSwing`.
+    try extractSwing(compressed_values, timestamps, coefficients);
+}
+
 /// Rebuilds Poor Man's Compression (PMC) `compressed_values` from `timestamps` and `coefficients`.
 /// The function expects `timestamps` and `coefficients` to have equal length.
 /// Each pair is encoded as (f64 coefficient, usize end_index as f64 bits).
@@ -410,10 +424,10 @@ pub fn rebuildSlide(
     }
 }
 
-/// Rebuilds SlideFilter's `compressed_values` from `timestamps` and `coefficients`.
+/// Rebuilds ABCLinearApproximation's `compressed_values` from `timestamps` and `coefficients`.
 /// Every third value is a `timestamp`, while the other two are `coefficients`.
 /// Returns `Error.UnsupportedInput` if input lengths are invalid, or propagates allocation errors.
-pub fn rebuildConvexABC(
+pub fn rebuildABCLinearApproximation(
     timestamps: []const usize,
     coefficients: []const f64,
     compressed_values: *ArrayList(u8),
