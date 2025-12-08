@@ -978,187 +978,7 @@ inline fn ensureAvailable(total_bytes_available: []const u8, offset: u64, requir
         return Error.CorruptedCompressedData;
 }
 
-test "extract and rebuild PMC round trip" {
-    const allocator = testing.allocator;
-
-    const timestamps = [_]u64{ 5, 10 };
-    const coefficients = [_]f64{ 1.5, -0.25 };
-
-    var compressed = ArrayList(u8).init(allocator);
-    defer compressed.deinit();
-    try rebuildPMC(timestamps[0..], coefficients[0..], &compressed);
-
-    var extracted_ts = ArrayList(u64).init(allocator);
-    defer extracted_ts.deinit();
-    var extracted_coeffs = ArrayList(f64).init(allocator);
-    defer extracted_coeffs.deinit();
-    try extractPMC(compressed.items, &extracted_ts, &extracted_coeffs);
-
-    try testing.expectEqualSlices(u64, timestamps[0..], extracted_ts.items);
-    try testing.expectEqualSlices(f64, coefficients[0..], extracted_coeffs.items);
-}
-
-test "rebuildPMC rejects mismatched input lengths" {
-    const allocator = testing.allocator;
-    var compressed = ArrayList(u8).init(allocator);
-    defer compressed.deinit();
-
-    const timestamps = [_]u64{1};
-    const coefficients = [_]f64{ 1.0, 2.0 };
-
-    try testing.expectError(Error.CorruptedCompressedData, rebuildPMC(
-        timestamps[0..],
-        coefficients[0..],
-        &compressed,
-    ));
-}
-
-test "extract and rebuild Swing round trip" {
-    const allocator = testing.allocator;
-
-    const timestamps = [_]u64{ 7, 11 };
-    const coefficients = [_]f64{ 2.0, 3.0, 4.0 };
-
-    var compressed = ArrayList(u8).init(allocator);
-    defer compressed.deinit();
-    try rebuildSwing(timestamps[0..], coefficients[0..], &compressed);
-
-    var extracted_ts = ArrayList(u64).init(allocator);
-    defer extracted_ts.deinit();
-    var extracted_coeffs = ArrayList(f64).init(allocator);
-    defer extracted_coeffs.deinit();
-    try extractSwing(compressed.items, &extracted_ts, &extracted_coeffs);
-
-    try testing.expectEqualSlices(u64, timestamps[0..], extracted_ts.items);
-    try testing.expectEqualSlices(f64, coefficients[0..], extracted_coeffs.items);
-}
-
-test "rebuildSwing rejects mismatched input lengths" {
-    const allocator = testing.allocator;
-    var compressed = ArrayList(u8).init(allocator);
-    defer compressed.deinit();
-
-    const timestamps = [_]u64{ 1, 2 };
-    const coefficients = [_]f64{ 1.0, 2.0 };
-
-    try testing.expectError(Error.CorruptedCompressedData, rebuildSwing(
-        timestamps[0..],
-        coefficients[0..],
-        &compressed,
-    ));
-}
-
-test "extract and rebuild Slide round trip" {
-    const allocator = testing.allocator;
-
-    const timestamps = [_]u64{ 3, 8 };
-    const coefficients = [_]f64{ 0.5, -1.0, 2.5, 4.0 };
-
-    var compressed = ArrayList(u8).init(allocator);
-    defer compressed.deinit();
-    try rebuildSlide(timestamps[0..], coefficients[0..], &compressed);
-
-    var extracted_ts = ArrayList(u64).init(allocator);
-    defer extracted_ts.deinit();
-    var extracted_coeffs = ArrayList(f64).init(allocator);
-    defer extracted_coeffs.deinit();
-    try extractSlide(compressed.items, &extracted_ts, &extracted_coeffs);
-
-    try testing.expectEqualSlices(u64, timestamps[0..], extracted_ts.items);
-    try testing.expectEqualSlices(f64, coefficients[0..], extracted_coeffs.items);
-}
-
-test "rebuildSlide rejects mismatched input lengths" {
-    const allocator = testing.allocator;
-    var compressed = ArrayList(u8).init(allocator);
-    defer compressed.deinit();
-
-    const timestamps = [_]u64{ 1, 2, 3 };
-    const coefficients = [_]f64{ 1.0, 2.0 };
-
-    try testing.expectError(Error.CorruptedCompressedData, rebuildSlide(
-        timestamps[0..],
-        coefficients[0..],
-        &compressed,
-    ));
-}
-
-test "extract and rebuild SimPiece round trip" {
-    const allocator = testing.allocator;
-
-    const timestamps = [_]u64{ 1, 2, 4, 6, 12 };
-    const coefficients = [_]f64{ 1.25, 0.75 };
-
-    var compressed = ArrayList(u8).init(allocator);
-    defer compressed.deinit();
-    try rebuildSimPiece(timestamps[0..], coefficients[0..], &compressed);
-
-    var extracted_ts = ArrayList(u64).init(allocator);
-    defer extracted_ts.deinit();
-    var extracted_coeffs = ArrayList(f64).init(allocator);
-    defer extracted_coeffs.deinit();
-    try extractSimPiece(compressed.items, &extracted_ts, &extracted_coeffs);
-
-    try testing.expectEqualSlices(u64, timestamps[0..], extracted_ts.items);
-    try testing.expectEqualSlices(f64, coefficients[0..], extracted_coeffs.items);
-}
-
-test "extract and rebuild MixPiece round trip" {
-    const allocator = testing.allocator;
-
-    const timestamps = [_]u64{ 1, 1, 1, 2, 2, 3, 4, 1, 8, 2, 5, 6, 10, 99 };
-    const coefficients = [_]f64{ 1.1, 0.5, 1.5, 2.5, 0.25, 0.75, 3.5, -1.25 };
-
-    var compressed = ArrayList(u8).init(allocator);
-    defer compressed.deinit();
-    try rebuildMixPiece(timestamps[0..], coefficients[0..], &compressed);
-
-    var extracted_ts = ArrayList(u64).init(allocator);
-    defer extracted_ts.deinit();
-    var extracted_coeffs = ArrayList(f64).init(allocator);
-    defer extracted_coeffs.deinit();
-    try extractMixPiece(compressed.items, &extracted_ts, &extracted_coeffs);
-
-    try testing.expectEqualSlices(u64, timestamps[0..], extracted_ts.items);
-    try testing.expectEqualSlices(f64, coefficients[0..], extracted_coeffs.items);
-}
-
-test "extract and rebuild PWCH round trip" {
-    const allocator = testing.allocator;
-
-    const timestamps = [_]u64{ 5, 10 };
-    const coefficients = [_]f64{ 1.5, -0.25 };
-
-    var compressed = ArrayList(u8).init(allocator);
-    defer compressed.deinit();
-    try rebuildPWCH(timestamps[0..], coefficients[0..], &compressed);
-
-    var extracted_ts = ArrayList(u64).init(allocator);
-    defer extracted_ts.deinit();
-    var extracted_coeffs = ArrayList(f64).init(allocator);
-    defer extracted_coeffs.deinit();
-    try extractPWCH(compressed.items, &extracted_ts, &extracted_coeffs);
-
-    try testing.expectEqualSlices(u64, timestamps[0..], extracted_ts.items);
-    try testing.expectEqualSlices(f64, coefficients[0..], extracted_coeffs.items);
-}
-
-test "rebuildPWCH rejects mismatched input lengths" {
-    const allocator = testing.allocator;
-    var compressed = ArrayList(u8).init(allocator);
-    defer compressed.deinit();
-
-    const timestamps = [_]u64{1};
-    const coefficients = [_]f64{ 1.0, 2.0 };
-
-    try testing.expectError(Error.CorruptedCompressedData, rebuildPWCH(
-        timestamps[0..],
-        coefficients[0..],
-        &compressed,
-    ));
-}
-
-test "extract and rebuild works for any compression method" {
+test "extract and rebuild works for any compression method supported" {
     const allocator = testing.allocator;
     const random = tester.getDefaultRandomGenerator();
 
@@ -1180,6 +1000,8 @@ test "extract and rebuild works for any compression method" {
             method == tersets.Method.SerfQT or
             method == tersets.Method.RunLengthEncoding)
         {
+            // These compression methods are not supported for extraction
+            // of the coefficients and time indices.
             continue;
         }
 
@@ -1226,4 +1048,208 @@ test "extract and rebuild works for any compression method" {
         try testing.expectEqual(rebuild_values.items.len, compressed_values.items.len);
         try testing.expectEqualSlices(u8, rebuild_values.items, compressed_values.items);
     }
+}
+
+test "rebuildPMC rejects mismatched input lengths" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).init(allocator);
+    defer compressed.deinit();
+
+    const timestamps = [_]u64{1};
+    const coefficients = [_]f64{ 1.0, 2.0 };
+
+    try testing.expectError(Error.CorruptedCompressedData, rebuildPMC(
+        timestamps[0..],
+        coefficients[0..],
+        &compressed,
+    ));
+}
+
+test "rebuildSwing rejects mismatched input lengths" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).init(allocator);
+    defer compressed.deinit();
+
+    const timestamps = [_]u64{ 1, 2 };
+    const coefficients = [_]f64{ 1.0, 2.0 };
+
+    try testing.expectError(Error.CorruptedCompressedData, rebuildSwing(
+        timestamps[0..],
+        coefficients[0..],
+        &compressed,
+    ));
+}
+
+test "rebuildSlide rejects mismatched input lengths" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).init(allocator);
+    defer compressed.deinit();
+
+    const timestamps = [_]u64{ 1, 2, 3 };
+    const coefficients = [_]f64{ 1.0, 2.0 };
+
+    try testing.expectError(Error.CorruptedCompressedData, rebuildSlide(
+        timestamps[0..],
+        coefficients[0..],
+        &compressed,
+    ));
+}
+
+test "rebuildSimPiece rejects mismatched layout (too few timestamps)" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).init(allocator);
+    defer compressed.deinit();
+
+    // Minimal malformed input:
+    // One intercept in coefficients but timestamps missing nested metadata.
+    const coefficients = [_]f64{1.0}; // intercept only.
+    const timestamps = [_]u64{0}; // slopes_count but missing final_timestamp.
+
+    try testing.expectError(
+        Error.CorruptedCompressedData,
+        rebuildSimPiece(timestamps[0..], coefficients[0..], &compressed),
+    );
+}
+
+test "rebuildSimPiece rejects mismatched layout (missing slope/intercept pairs)" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).init(allocator);
+    defer compressed.deinit();
+
+    // slopes_count = 1, but only intercept is provided.
+    const coefficients = [_]f64{1.0}; // missing slope.
+    const timestamps = [_]u64{ 1, 0, 5 };
+    // timestamps: slopes_count=1, tcount=0, delta missing.
+
+    try testing.expectError(
+        Error.CorruptedCompressedData,
+        rebuildSimPiece(timestamps[0..], coefficients[0..], &compressed),
+    );
+}
+
+test "rebuildMixPiece rejects malformed header-only input" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).init(allocator);
+    defer compressed.deinit();
+
+    // timestamps must contain at least 3 for header, but coefficients missing.
+    const timestamps = [_]u64{ 1, 0, 0 }; // invalid: claims 1 Part1 .
+    const coefficients = [_]f64{}; // no intercept => corrupted.
+
+    try testing.expectError(
+        Error.CorruptedCompressedData,
+        rebuildMixPiece(timestamps[0..], coefficients[0..], &compressed),
+    );
+}
+
+test "rebuildMixPiece rejects mismatched Part1 group structure" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).init(allocator);
+    defer compressed.deinit();
+
+    // part1_count = 1, but missing slope data.
+    const timestamps = [_]u64{
+        1, // part1_count.
+        0, // part2_count.
+        0, // part3_count.
+        1, // slopes_count for group 0.
+        0, // timestamps_count for slope (but missing deltas + final timestamp).
+    };
+
+    const coefficients = [_]f64{
+        5.0, // intercept.
+        // slope missing -> corrupted.
+    };
+
+    try testing.expectError(
+        Error.CorruptedCompressedData,
+        rebuildMixPiece(timestamps[0..], coefficients[0..], &compressed),
+    );
+}
+
+test "rebuildMixPiece rejects missing final timestamp" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).init(allocator);
+    defer compressed.deinit();
+
+    const timestamps = [_]u64{
+        0, 0, 0,
+        // missing final_timestamp.
+    };
+
+    const coefficients = [_]f64{}; // valid for zero groups.
+    try testing.expectError(
+        Error.CorruptedCompressedData,
+        rebuildMixPiece(timestamps[0..], coefficients[0..], &compressed),
+    );
+}
+
+test "rebuildNonLinearApproximation rejects mismatched lengths" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).init(allocator);
+    defer compressed.deinit();
+
+    // num_segments = 1.
+    const timestamps = [_]u64{
+        1, // num_segments.
+        2, // type code.
+        // missing end_idx.
+    };
+
+    const coefficients = [_]f64{
+        0.5, // shift.
+        1.0, // slope0.
+        // missing intercept0.
+    };
+
+    try testing.expectError(
+        Error.CorruptedCompressedData,
+        rebuildNonLinearApproximation(allocator, timestamps[0..], coefficients[0..], &compressed),
+    );
+}
+
+test "rebuildNonLinearApproximation rejects invalid function type code" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).init(allocator);
+    defer compressed.deinit();
+
+    const timestamps = [_]u64{
+        1, // num_segments.
+        999, // invalid > 0x0F -> must fail.
+        5, // end_idx.
+    };
+
+    const coefficients = [_]f64{
+        0.0, // shift.
+        1.0, // slope0.
+        2.0, // intercept0.
+    };
+
+    try testing.expectError(
+        Error.CorruptedCompressedData,
+        rebuildNonLinearApproximation(allocator, timestamps[0..], coefficients[0..], &compressed),
+    );
+}
+
+test "rebuildNonLinearApproximation rejects incomplete coefficient pair" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).init(allocator);
+    defer compressed.deinit();
+
+    const timestamps = [_]u64{
+        1, // num_segments.
+        2, // valid type.
+        10, // end_idx0.
+    };
+
+    // Missing intercept.
+    const coefficients = [_]f64{
+        0.0, // shift.
+        1.0, // slope0.
+    };
+
+    try testing.expectError(
+        Error.CorruptedCompressedData,
+        rebuildNonLinearApproximation(allocator, timestamps[0..], coefficients[0..], &compressed),
+    );
 }
