@@ -65,6 +65,8 @@ pub const Error = error{
     EmptyConvexHull,
     EmptyQueue,
     ByteStreamError,
+    UnsupportedExtractMethod,
+    UnsupportedRebuildMethod,
 };
 
 /// The compression methods in TerseTS.
@@ -337,7 +339,6 @@ pub fn decompress(
 /// for unknown or unsupported methods. Moreover, the propagated errors from the extractors
 /// are also returned.
 pub fn extract(
-    allocator: Allocator,
     compressed_values: []const u8,
     timestamps: *ArrayList(u64),
     coefficients: *ArrayList(f64),
@@ -418,32 +419,36 @@ pub fn extract(
         },
         .SlidingWindow => {
             try extractors.extractSlidingWindow(
-                compressed_values,
+                compressed_values_slice,
                 timestamps,
                 coefficients,
             );
         },
         .BottomUp => {
             try extractors.extractBottomUp(
-                compressed_values,
+                compressed_values_slice,
                 timestamps,
                 coefficients,
             );
         },
         .NonLinearApproximation => {
             try extractors.extractNonLinearApproximation(
-                compressed_values,
+                compressed_values_slice,
                 timestamps,
                 coefficients,
             );
         },
+        // For the following three methods, it is not possible to guarantee
+        // that the pipeline will work as intended.
         .BitPackedQuantization => {
-            const decompressed_values = try decompress(allocator, compressed_values);
-            defer decompressed_values.deinit();
+            return Error.UnsupportedExtractMethod;
         },
-        // Unsupported methods for extraction.
-        // TODO: Implement extractors for the remaining methods.
-        else => return Error.UnsupportedInput,
+        .RunLengthEncoding => {
+            return Error.UnsupportedExtractMethod;
+        },
+        .SerfQT => {
+            return Error.UnsupportedExtractMethod;
+        },
     }
 }
 
@@ -458,7 +463,6 @@ pub fn rebuild(
     coefficients: []const f64,
     method: Method,
 ) Error!ArrayList(u8) {
-    if (timestamps.len == 0) return Error.UnsupportedInput;
     if (coefficients.len == 0) return Error.UnsupportedInput;
 
     var compressed_values = ArrayList(u8).init(allocator);
@@ -536,6 +540,13 @@ pub fn rebuild(
                 &compressed_values,
             );
         },
+        .VisvalingamWhyatt => {
+            try extractors.rebuildVisvalingamWhyatt(
+                timestamps,
+                coefficients,
+                &compressed_values,
+            );
+        },
         .NonLinearApproximation => {
             try extractors.rebuildNonLinearApproximation(
                 allocator,
@@ -544,9 +555,17 @@ pub fn rebuild(
                 &compressed_values,
             );
         },
-        // Unsupported methods for rebuilding.
-        // TODO: Implement rebuilders for the remaining methods.
-        else => return Error.UnsupportedInput,
+        // For the following three methods, it is not possible to guarantee
+        // that the pipeline will work as intended.
+        .BitPackedQuantization => {
+            return Error.UnsupportedRebuildMethod;
+        },
+        .RunLengthEncoding => {
+            return Error.UnsupportedRebuildMethod;
+        },
+        .SerfQT => {
+            return Error.UnsupportedRebuildMethod;
+        },
     }
     try compressed_values.append(@intFromEnum(method));
     return compressed_values;

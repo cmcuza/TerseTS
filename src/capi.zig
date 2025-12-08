@@ -50,7 +50,7 @@ pub const Configuration = extern struct { method: u8, error_bound: f32 };
 /// - 1) Unsupported compression method.
 /// - 2) No uncompressed values.
 /// - 3) Error bound is negative.
-/// - 5) Out-of-memory for compression.
+/// - 4) Invalid configuration.
 export fn compress(
     uncompressed_values_array: UncompressedValues,
     compressed_values_array: *CompressedValues,
@@ -87,10 +87,10 @@ export fn compress(
 
 /// Decompress `compressed_values` to `uncompressed_values` according to `configuration`.
 /// On success zero is returned, and the following non-zero values are returned on errors:
-/// - 1) Unsupported decompression method.
-/// - 2) No compressed values.
-/// - 4) Incorrect compressed values.
-/// - 5) Out-of-memory for decompression.
+/// - 1) Unsupported compression method.
+/// - 2) No uncompressed values.
+/// - 3) Error bound is negative.
+/// - 4) Invalid configuration.
 export fn decompress(
     compressed_values_array: CompressedValues,
     decompressed_values_array: *UncompressedValues,
@@ -253,6 +253,8 @@ fn errorToInt(err: Error) i32 {
         Error.EmptyConvexHull => return 8,
         Error.EmptyQueue => return 9,
         Error.ByteStreamError => return 10,
+        Error.UnsupportedExtractMethod => return 11,
+        Error.UnsupportedRebuildMethod => return 12,
     }
 }
 
@@ -269,6 +271,11 @@ test "method enum must match method constants" {
     try testing.expectEqual(@intFromEnum(tersets.Method.VisvalingamWhyatt), 9);
     try testing.expectEqual(@intFromEnum(tersets.Method.SlidingWindow), 10);
     try testing.expectEqual(@intFromEnum(tersets.Method.BottomUp), 11);
+    try testing.expectEqual(@intFromEnum(tersets.Method.MixPiece), 12);
+    try testing.expectEqual(@intFromEnum(tersets.Method.BitPackedQuantization), 13);
+    try testing.expectEqual(@intFromEnum(tersets.Method.RunLengthEncoding), 14);
+    try testing.expectEqual(@intFromEnum(tersets.Method.NonLinearApproximation), 15);
+    try testing.expectEqual(@intFromEnum(tersets.Method.SerfQT), 16);
 }
 
 test "error for unknown compression method" {

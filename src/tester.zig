@@ -814,7 +814,8 @@ pub fn generateBoundedRandomValues(
 
     for (0..generateNumberOfValues(random)) |_| {
         // generate f64 values in the range [0, 1).
-        const bounded_value = lower_bound + (upper_bound - lower_bound);
+        const random_value: f64 = random.float(f64);
+        const bounded_value = lower_bound + random_value * (upper_bound - lower_bound);
         const clamped_value = math.clamp(bounded_value, -clamped_max_value, clamped_max_value);
         try uncompressed_values.append(clamped_value);
     }

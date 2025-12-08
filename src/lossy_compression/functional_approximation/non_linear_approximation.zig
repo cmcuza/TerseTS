@@ -120,7 +120,7 @@ pub fn compress(
     // All function types are stored using 4 bits each, so we can pack 2 per byte.
     // This saves space in the compressed representation.
     // For it, we first calculate the number of bytes needed to store all function types.
-    const packed_len: usize = (segments_count + 1) / 2; // ceil(segments_count/2).
+    const packed_len: u64 = (segments_count + 1) / 2; // ceil(segments_count/2).
 
     // Allocates space for packed function types (2 per byte).
     var packed_function_types = try allocator.alloc(u8, packed_len);
@@ -133,7 +133,7 @@ pub fn compress(
     // Approximations are packed in order: [0,1], [2,3], ...
     for (optimal_approximation.items, 0..) |approximation, idx| {
         const code: u8 = @intCast(@intFromEnum(approximation.function_type));
-        const byte_idx: usize = idx / 2;
+        const byte_idx: u64 = idx / 2;
         const is_high_nibble: bool = (idx % 2) == 0;
         if (is_high_nibble) {
             // Store the function type in the high nibble (bits 4-7).
@@ -151,7 +151,7 @@ pub fn compress(
         // The end point is exclusive, so it indicates where the next segment starts.
         try shared_functions.appendValue(f64, segment.definition.slope, compressed_values);
         try shared_functions.appendValue(f64, segment.definition.intercept, compressed_values);
-        try shared_functions.appendValue(usize, segment.end_idx, compressed_values);
+        try shared_functions.appendValue(u64, segment.end_idx, compressed_values);
     }
 }
 
@@ -168,19 +168,16 @@ pub fn decompress(
     var offset: usize = 0; // Tracks the current position in the compressed stream.
 
     // Reads the preprocessing shift amount from the compressed stream.
-    const shift_amount = try shared_functions.readValue(f64, compressed_values[offset..]);
-    offset += @sizeOf(f64);
-
+    const shift_amount = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
     // Reads the number of segments that were used in the partitioning.
-    const num_segments: usize = try shared_functions.readValue(u64, compressed_values[offset..]);
-    offset += @sizeOf(u64);
+    const num_segments: u64 = try shared_functions.readOffsetValue(u64, compressed_values, &offset);
 
     // Read packed function types (2 per byte, low nibble = even index, high nibble = odd).
-    const type_bytes_len: usize = (num_segments + 1) / 2;
+    const type_bytes_len: u64 = (num_segments + 1) / 2;
 
     // Validate that the compressed stream contains exactly the expected number of bytes.
     // Each segment stores: 2 * f64 (slope, intercept) + usize (end_idx).
-    const bytes_per_segment = @sizeOf(f64) * 2 + @sizeOf(usize);
+    const bytes_per_segment = @sizeOf(f64) * 2 + @sizeOf(u64);
     const expected_total_bytes =
         @sizeOf(f64) + // shift_amount.
         @sizeOf(u64) + // num_segments.
@@ -207,12 +204,9 @@ pub fn decompress(
         const function_type: FunctionType = @enumFromInt(@as(u8, code));
 
         // Reads the main function parameters (slope and intercept) and end index.
-        const slope = try shared_functions.readValue(f64, compressed_values[offset..]);
-        offset += @sizeOf(f64);
-        const intercept = try shared_functions.readValue(f64, compressed_values[offset..]);
-        offset += @sizeOf(f64);
-        const end_idx: usize = try shared_functions.readValue(usize, compressed_values[offset..]);
-        offset += @sizeOf(usize);
+        const slope = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
+        const intercept = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
+        const end_idx: u64 = try shared_functions.readOffsetValue(u64, compressed_values, &offset);
 
         // Creates a segment with the inferred start index.
         const functional_approximation = FunctionalApproximation{
