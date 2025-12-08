@@ -180,6 +180,11 @@ def compress(values, method, configuration) -> bytes:
       TypeError: If `method` is not a `Method` or `values`/`configuration` have
         unsupported types.
       RuntimeError: If the native `compress` call returns a non-zero error code.
+
+    Examples:
+      >>> configuration = {"abs_error_bound": 0.1}
+      >>> compress([1.0, 2.08, 2.96], Method.SwingFilter, configuration)
+      b'\x00\xf0?\x00\x08@\x03\x00\x02'
     """
     # Validate compressor method type.
     if not isinstance(method, Method):
@@ -272,7 +277,8 @@ def decompress(values: bytes) -> List[float]:
         buffer is built before calling the native decompressor.
 
     Examples:
-      >>> blob = compress([1.0, 2.0, 3.0], Method.SwingFilter, 0.01)
+      >>> configuration = {"abs_error_bound": 0.1}
+      >>> blob = compress([1.0, 2.08, 3.96], Method.SwingFilter, configuration)
       >>> decompress(blob)
       [1.0, 2.0, 3.0]
     """
@@ -352,10 +358,10 @@ def extract(values: bytes) -> Tuple[List[int], List[float]]:
       - See TerseTS documentation for details on timestamp/coefficients layouts.
 
     Examples:
-      >>> blob = compress([1.0, 2.0, 3.0], Method.SwingFilter, 0.01)
-      >>> ts, coeffs = extract(blob)
-      >>> isinstance(ts, list) and isinstance(coeffs, list)
-      True
+      >>> configuration = {"abs_error_bound": 0.1}
+      >>> blob = compress([1.0, 2.08, 3.96], Method.SwingFilter, configuration)
+      >>> extract(blob)
+      ([3], [1.0, 3.0])
     """
     if not isinstance(values, (bytes, bytearray, memoryview)):
         raise TypeError("extract(values): values must be bytes, bytearray, or memoryview")
@@ -399,36 +405,74 @@ def extract(values: bytes) -> Tuple[List[int], List[float]]:
         
 
 def rebuild(timestamps, coefficients, method: Method) -> bytes:
-    """Rebuild a compressed TerseTS buffer from timestamps and coefficients.
+    """Rebuild a compressed TerseTS payload from extracted components.
 
-    This function assembles a compressed payload from its internal
-    representation, using the specified compression method.
-    - **Zero-copy path**: If NumPy is installed, input arrays are mapped
-      directly for efficient native calls.
-    - **Copy path**: Python lists/tuples are copied into contiguous arrays.
+    This function is the inverse of :func:`extract` and constructs a valid
+    binary payload from the method-specific arrays `timestamps` and
+    `coefficients`. The resulting `bytes` object is identical in format to
+    what :func:`compress` would produce for the same method. 
+    
+    The meaning and required structure of `timestamps` and `coefficients`
+    depend on the  selected compression method. 
+    
+    The native library performs structural validation and will return an error 
+    if the arrays do not satisfy the invariants of the target `method`. 
+    
+    When NumPy is installed, the function uses a zero-copy view of both input arrays 
+    (if they are C-contiguous and of the correct dtype), making this significantly 
+    faster for large buffers. Otherwise, it falls back to building temporary ctypes arrays.
 
     Args:
-      timestamps: Sequence of ints (`numpy.ndarray[uintp]` or `list`/`tuple[int]`).
-      coefficients: Sequence of floats (`numpy.ndarray[float64]` or `list`/`tuple[float]`).
-      method: Compression method as a `Method` enum value.
+      timestamps: Method-dependent integer metadata. May be a NumPy array of
+        dtype `np.uintp` (C-contiguous) or a Python `list` / `tuple` of
+        Python integers.
+
+      coefficients: Method-dependent floating-point coefficients. May be a
+        NumPy array of dtype `float64` (C-contiguous) or a Python
+        `list` / `tuple` of floats.
+
+      method: A `Method` enum value selecting the target compressor.
+        Each method has specific structural constraints on how `timestamps`
+        and `coefficients` must be organized.
 
     Returns:
-      Compressed payload as `bytes`.
+      A `bytes` object containing the rebuilt compressed payload. The
+      returned buffer is owned by Python and is safe to store or reuse.
 
     Raises:
-      TypeError: If inputs are not valid types or method is not a `Method`.
-      RuntimeError: If the native `rebuild` call fails (non-zero error code).
+      TypeError:
+        * If `method` is not a `Method` enum value.
+        * If `timestamps` is not an ndarray/list/tuple of valid integers.
+        * If `coefficients` is not an ndarray/list/tuple of floats.
+        * If NumPy arrays do not match required dtypes.
+
+      RuntimeError:
+        If the native `rebuild` call fails. This typically indicates:
+          * timestamp/coefficients lengths do not match the expectations of
+            the selected method,
+          * invalid or out-of-range function-type codes,
+          * missing end indices,
+          * leftover or insufficient metadata,
+          * or a corrupted or inconsistent structure.
 
     Notes:
-      - Input layouts must match the expectations for the selected method.
-      - See TerseTS documentation for details on timestamp/coefficients layouts.
-
+      - This function does *not* attempt to infer or repair method invariants.
+        The caller is fully responsible for providing correct and consistent
+        arrays for the chosen compression method.
+      - Altering, reordering, or truncating timestamps without understanding
+        the method semantics can produce compressed buffers that fail during
+        decompression.
+      - NumPy-based zero-copy input significantly improves performance but
+        still requires the arrays to be C-contiguous and of the correct dtype.
+      - The returned `bytes` object is detached from the underlying Zig memory.
+    
     Examples:
-      >>> blob = compress([1.0, 2.0, 3.0], Method.SwingFilter, 0.01)
+      >>> configuration = {"abs_error_bound": 0.1}
+      >>> blob = compress([1.0, 2.08, 3.96], Method.SwingFilter, configuration)
       >>> ts, coeffs = extract(blob)
       >>> rebuilt = rebuild(ts, coeffs, Method.SwingFilter)
-      >>> isinstance(rebuilt, bytes)
-      True
+      >>> decompress(rebuilt)
+      [1.0, 2.0, 3.0]
     """
     if type(method) is not Method:
         available = ", ".join(m.name for m in Method)
@@ -471,7 +515,6 @@ def rebuild(timestamps, coefficients, method: Method) -> bytes:
         if err != 0:
             raise RuntimeError(f"rebuild failed: {err}")
 
-        # Return Python-owned bytes (safe to keep)
         return string_at(compressed_values.data, compressed_values.len)
     finally:
         __library.freeCompressedValues(byref(compressed_values))
