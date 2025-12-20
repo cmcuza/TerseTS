@@ -64,11 +64,11 @@ export fn compress(
         configuration_slice,
     ) catch |err| return errorToInt(err);
 
-    // Convert the ArrayList into an owned slice with exact length.
-    // This call allocates a new buffer sized precisely to `len` and transfers ownership
-    // of the data from the ArrayList to the caller.
-    // Without this step, freeing later with `len` instead of `capacity` would corrupt the allocator.
-    const data_slice = compressed_values.toOwnedSlice() catch |err| return errorToInt(err);
+    // Convert the ArrayList into an owned slice with exact length. This call allocates a new buffer
+    // sized precisely to `len` and transfers ownership of the data from the ArrayList to the
+    // caller. Without this step, freeing later with `len` instead of `capacity` would corrupt the
+    // allocator.
+    const data_slice = compressed_values.toOwnedSlice(allocator) catch |err| return errorToInt(err);
 
     compressed_values_array.data = data_slice.ptr;
     compressed_values_array.len = data_slice.len;
@@ -93,11 +93,11 @@ export fn decompress(
         compressed_values,
     ) catch |err| return errorToInt(err);
 
-    // Convert the ArrayList into an owned slice with exact length.
-    // This call allocates a new buffer sized precisely to `len` and transfers ownership
-    // of the data from the ArrayList to the caller.
-    // Without this step, freeing later with `len` instead of `capacity` would corrupt the allocator.
-    const data_slice = decompressed_values.toOwnedSlice() catch |err| return errorToInt(err);
+    // Convert the ArrayList into an owned slice with exact length. This call allocates a new buffer
+    // sized precisely to `len` and transfers ownership of the data from the ArrayList to the
+    // caller. Without this step, freeing later with `len` instead of `capacity` would corrupt the
+    // allocator.
+    const data_slice = decompressed_values.toOwnedSlice(allocator) catch |err| return errorToInt(err);
 
     decompressed_values_array.data = data_slice.ptr;
     decompressed_values_array.len = data_slice.len;
@@ -147,6 +147,8 @@ fn errorToInt(err: Error) i32 {
         Error.EmptyConvexHull => return 8,
         Error.EmptyQueue => return 9,
         Error.ByteStreamError => return 10,
+        Error.WriteFailed => return 11,
+        Error.NoSpaceLeft => return 12,
     }
 }
 

@@ -25,6 +25,7 @@ const mem = std.mem;
 const math = std.math;
 const time = std.time;
 const ArrayList = std.ArrayList;
+const Allocator = mem.Allocator;
 
 const tersets = @import("../../tersets.zig");
 const configuration = @import("../../configuration.zig");
@@ -54,7 +55,7 @@ const testing = std.testing;
 /// `AggregateError` type otherwise an `InvalidConfiguration` error is return. If any other
 /// error occurs during the execution of the method, it is returned.
 pub fn compress(
-    allocator: mem.Allocator,
+    allocator: Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
     method_configuration: []const u8,
@@ -69,9 +70,9 @@ pub fn compress(
 
     // If we have 2 or fewer points, we store them without compression.
     if (uncompressed_values.len <= 2) {
-        try shared_functions.appendValue(f64, uncompressed_values[0], compressed_values);
-        try shared_functions.appendValue(f64, uncompressed_values[1], compressed_values);
-        try shared_functions.appendValue(usize, 1, compressed_values);
+        try shared_functions.appendValue(allocator, f64, uncompressed_values[0], compressed_values);
+        try shared_functions.appendValue(allocator, f64, uncompressed_values[1], compressed_values);
+        try shared_functions.appendValue(allocator, usize, 1, compressed_values);
         return;
     }
 
@@ -174,9 +175,9 @@ pub fn compress(
         const seg_start = heap.items[index].seg_start;
         const seg_end = heap.items[index].seg_end;
         // Append the start value, the end index, and the end value to the compressed representation.
-        try shared_functions.appendValue(f64, uncompressed_values[seg_start], compressed_values);
-        try shared_functions.appendValue(f64, uncompressed_values[seg_end], compressed_values);
-        try shared_functions.appendValue(usize, seg_end, compressed_values);
+        try shared_functions.appendValue(allocator, f64, uncompressed_values[seg_start], compressed_values);
+        try shared_functions.appendValue(allocator, f64, uncompressed_values[seg_end], compressed_values);
+        try shared_functions.appendValue(allocator, usize, seg_end, compressed_values);
     }
 
     return;
@@ -184,7 +185,7 @@ pub fn compress(
 
 /// Decompress `compressed_values` produced by "Bottom-Up". The function writes the result to
 /// `decompressed_values`. If an error occurs it is returned.
-pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList(f64)) Error!void {
+pub fn decompress(allocator: Allocator, compressed_values: []const u8, decompressed_values: *ArrayList(f64)) Error!void {
     // The compressed representation is composed of three values: (start_value, end_value, end_time)
     // all of type 64-bit float, except end_time which is usize.
     if (compressed_values.len % 24 != 0) return Error.UnsupportedInput;
@@ -209,25 +210,25 @@ pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList
             const intercept = start_point.value - slope *
                 @as(f64, @floatFromInt(start_point.time));
 
-            try decompressed_values.append(start_point.value);
+            try decompressed_values.append(allocator, start_point.value);
             var current_timestamp: usize = start_point.time + 1;
 
             // Interpolate the values between the start and end points of the current segment.
             while (current_timestamp < end_point.time) : (current_timestamp += 1) {
                 const y: f64 = slope * @as(f64, @floatFromInt(current_timestamp)) + intercept;
-                try decompressed_values.append(y);
+                try decompressed_values.append(allocator, y);
             }
-            try decompressed_values.append(end_point.value);
+            try decompressed_values.append(allocator, end_point.value);
             first_timestamp = current_timestamp + 1;
         } else {
             // If the start and end points are one point apart,
             // append the start point and end points directly.
-            try decompressed_values.append(start_point.value);
+            try decompressed_values.append(allocator, start_point.value);
 
             // Append the end point only if it is different from the start point.
             // This is to avoid duplicates in the decompressed values.
             if (start_point.time != end_point.time) {
-                try decompressed_values.append(end_point.value);
+                try decompressed_values.append(allocator, end_point.value);
             }
 
             first_timestamp += 2;

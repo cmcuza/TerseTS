@@ -26,10 +26,13 @@ const math = std.math;
 const mem = std.mem;
 const io = std.io;
 const testing = std.testing;
+const Writer = std.io.Writer;
 const ArrayList = std.ArrayList;
 const Allocator = mem.Allocator;
 
 const tersets = @import("../../tersets.zig");
+const shared_structs = @import("../../utilities/shared_structs.zig");
+const BitWriter = shared_structs.BitWriter;
 const configuration = @import("../../configuration.zig");
 const Method = tersets.Method;
 const Error = tersets.Error;
@@ -64,17 +67,17 @@ pub fn compress(
     }
 
     // Append the minimum value to the header of the compressed values.
-    try shared_functions.appendValue(f64, min_val, compressed_values);
+    try shared_functions.appendValue(allocator, f64, min_val, compressed_values);
 
     // All values will map to the closest bucket based on the bucket_size.
     const bucket_size: f64 = shared_functions.createQuantizationBucket(error_bound);
 
     // Append the minimum value to the header of the compressed values.
-    try shared_functions.appendValue(f64, bucket_size, compressed_values);
+    try shared_functions.appendValue(allocator, f64, bucket_size, compressed_values);
 
     //Intermediate quantized values.
-    var quantized_values = ArrayList(u64).init(allocator);
-    defer quantized_values.deinit();
+    var quantized_values = ArrayList(u64).empty;
+    defer quantized_values.deinit(allocator);
 
     const u64_min_value: u64 = shared_functions.floatBitsOrdered(min_val);
 
@@ -93,7 +96,7 @@ pub fn compress(
             // Fixed-width bucket quantization with rounding.
             quantized_value = @intFromFloat(@round((value - min_val) / bucket_size));
         }
-        try quantized_values.append(quantized_value);
+        try quantized_values.append(allocator, quantized_value);
     }
 
     // Step 5: Bit-pack quantized values using fixed-length header scheme.
@@ -102,7 +105,8 @@ pub fn compress(
     const large_limit = 0xFFFFFFFF; // Fits in 32 bits.
 
     // Bit-wise packing with fixed-length header.
-    var bit_writer = io.bitWriter(.little, compressed_values.writer());
+    var stream = io.fixedBufferStream(compressed_values.items);
+    var bit_writer = shared_structs.bitWriter(.little, stream.writer());
 
     for (quantized_values.items) |val| {
         if (val <= small_limit) {
@@ -130,6 +134,7 @@ pub fn compress(
 /// Decompress `compressed_values` produced by "Bucket Quantization" and "Bit-Packing". The function
 /// writes the result to `decompressed_values`. If an error occurs it is returned.
 pub fn decompress(
+    allocator: Allocator,
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
 ) Error!void {
@@ -142,7 +147,7 @@ pub fn decompress(
 
     // Create a bit reader from remaining bytes.
     var stream = io.fixedBufferStream(compressed_values[16..]);
-    var bit_reader = io.bitReader(.little, stream.reader());
+    var bit_reader = shared_structs.bitReader(.little, stream.reader());
     var decompressed_value: f64 = 0.0;
 
     // Convert min_val to its ordered bit representation.
@@ -191,7 +196,7 @@ pub fn decompress(
             // Reconstruct value from quantized_value and append to decompressed_value.
             decompressed_value = min_val + @as(f64, @floatFromInt(quantized_value)) * bucket_size;
         }
-        try decompressed_values.append(decompressed_value);
+        try decompressed_values.append(allocator, decompressed_value);
     }
 }
 

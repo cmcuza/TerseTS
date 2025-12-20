@@ -25,6 +25,7 @@ const mem = std.mem;
 const math = std.math;
 const time = std.time;
 const ArrayList = std.ArrayList;
+const Allocator = mem.Allocator;
 
 const tersets = @import("../../tersets.zig");
 const configuration = @import("../../configuration.zig");
@@ -49,7 +50,7 @@ const testing = std.testing;
 /// `AggregateError` type otherwise an `InvalidConfiguration` error is return. If any other
 /// error occurs during the execution of the method, it is returned.
 pub fn compress(
-    allocator: mem.Allocator,
+    allocator: Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
     method_configuration: []const u8,
@@ -74,9 +75,9 @@ pub fn compress(
         {}
 
         // Store the segment's start value, end index, and end value in the compressed output.
-        try shared_functions.appendValue(f64, uncompressed_values[seg_start], compressed_values);
-        try shared_functions.appendValue(f64, uncompressed_values[seg_end - 1], compressed_values);
-        try shared_functions.appendValue(usize, seg_end - 1, compressed_values);
+        try shared_functions.appendValue(allocator, f64, uncompressed_values[seg_start], compressed_values);
+        try shared_functions.appendValue(allocator, f64, uncompressed_values[seg_end - 1], compressed_values);
+        try shared_functions.appendValue(allocator, usize, seg_end - 1, compressed_values);
 
         // Move to the next segment.
         seg_start = seg_end;
@@ -90,15 +91,15 @@ pub fn compress(
     // value for the last point (if needed) has negligible impact on the compression ratio,
     // since it only occurs once per time series (if at all), regardless of the input size.
     if (seg_start == uncompressed_values.len - 1) {
-        try shared_functions.appendValue(f64, uncompressed_values[seg_start], compressed_values);
-        try shared_functions.appendValue(f64, uncompressed_values[seg_start], compressed_values);
-        try shared_functions.appendValue(usize, seg_start, compressed_values);
+        try shared_functions.appendValue(allocator, f64, uncompressed_values[seg_start], compressed_values);
+        try shared_functions.appendValue(allocator, f64, uncompressed_values[seg_start], compressed_values);
+        try shared_functions.appendValue(allocator, usize, seg_start, compressed_values);
     }
 }
 
 /// Decompress `compressed_values` produced by "Sliding Window". The function writes the result to
 /// `decompressed_values`. If an error occurs it is returned.
-pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList(f64)) Error!void {
+pub fn decompress(allocator: Allocator, compressed_values: []const u8, decompressed_values: *ArrayList(f64)) Error!void {
     // The compressed representation is composed of three values: (start_value, end_value, end_time)
     // all of type 64-bit float, except end_time which is usize.
     if (compressed_values.len % 24 != 0) return Error.UnsupportedInput;
@@ -122,25 +123,25 @@ pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList
             const slope = (end_point.value - start_point.value) / duration;
             const intercept = start_point.value;
 
-            try decompressed_values.append(start_point.value);
+            try decompressed_values.append(allocator, start_point.value);
             var current_timestamp: usize = start_point.time + 1;
 
             // Interpolate the values between the start and end points of the current segment.
             while (current_timestamp < end_point.time) : (current_timestamp += 1) {
                 const scaled_time = @as(f64, @floatFromInt(current_timestamp - start_point.time));
                 const y: f64 = slope * scaled_time + intercept;
-                try decompressed_values.append(y);
+                try decompressed_values.append(allocator, y);
             }
-            try decompressed_values.append(end_point.value);
+            try decompressed_values.append(allocator, end_point.value);
             first_timestamp = current_timestamp + 1;
         } else {
             // If the start and end points are the distance 1,
             // append the start point and end points directly.
-            try decompressed_values.append(start_point.value);
+            try decompressed_values.append(allocator, start_point.value);
             // Check wheter the point is the same. If so, then we are at the end of the time series.
             // Thus, do not insert the end point. Otherwise, insert the end point.
             if (start_point.time != end_point.time) {
-                try decompressed_values.append(end_point.value);
+                try decompressed_values.append(allocator, end_point.value);
                 first_timestamp += 2;
             } else {
                 // If the start and end points are the same, we are at the end of the time series.
@@ -187,8 +188,8 @@ test "sliding-window can compress and decompress bounded values with zero error 
     const allocator = testing.allocator;
     const error_bound: f32 = 0.0;
 
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
+    var uncompressed_values = ArrayList(f64).empty;
+    defer uncompressed_values.deinit(allocator);
 
     try tester.generateBoundedRandomValues(
         &uncompressed_values,
@@ -225,8 +226,8 @@ test "sliding-window can compress and decompress bounded values with zero error 
 test "sliding-window cannot compress and decompress nan values" {
     const allocator = testing.allocator;
     const uncompressed_values = [3]f64{ 343.0, math.nan(f64), 520.0 };
-    var compressed_values = std.ArrayList(u8).init(allocator);
-    compressed_values.deinit();
+    var compressed_values = std.ArrayList(u8).empty;
+    compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ { "aggregate_error_type": "rmse", "aggregate_error_bound": 0.1 }
@@ -252,8 +253,8 @@ test "sliding-window cannot compress and decompress nan values" {
 test "sliding-window cannot compress and decompress unbounded values" {
     const allocator = testing.allocator;
     const uncompressed_values = [3]f64{ 343.0, 1e20, 520.0 };
-    var compressed_values = std.ArrayList(u8).init(allocator);
-    compressed_values.deinit();
+    var compressed_values = std.ArrayList(u8).empty;
+    compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ { "aggregate_error_type": "rmse", "aggregate_error_bound": 0.1 }
@@ -280,12 +281,12 @@ test "sliding-window compress and decompress random lines and random error bound
     const allocator = testing.allocator;
     const random = tester.getDefaultRandomGenerator();
 
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
+    var uncompressed_values = ArrayList(f64).empty;
+    defer uncompressed_values.deinit(allocator);
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
 
     const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0.01, 1e6, undefined);
 
@@ -305,7 +306,7 @@ test "sliding-window compress and decompress random lines and random error bound
         method_configuration,
     );
 
-    try decompress(compressed_values.items, &decompressed_values);
+    try decompress(allocator, compressed_values.items, &decompressed_values);
 
     // Check if the decompressed values have the same lenght as the compressed ones.
     try testing.expectEqual(uncompressed_values.items.len, decompressed_values.items.len);
@@ -343,8 +344,8 @@ test "check sliding window configuration parsing" {
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, 28.0, 3.0 };
 
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"aggregate_error_type": "rmse", "aggregate_error_bound": 0.3}

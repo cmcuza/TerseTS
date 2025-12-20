@@ -63,6 +63,7 @@ pub fn compressMidrange(
         if ((nextMaximum - nextMinimum) > 2 * error_bound) {
             const compressed_value: f64 = @floatCast((maximum + minimum) / 2);
             try shared_functions.appendValueAndIndexToArrayList(
+                allocator,
                 compressed_value,
                 index,
                 compressed_values,
@@ -78,6 +79,7 @@ pub fn compressMidrange(
 
     const compressed_value: f64 = @floatCast((maximum + minimum) / 2);
     try shared_functions.appendValueAndIndexToArrayList(
+        allocator,
         compressed_value,
         index,
         compressed_values,
@@ -120,6 +122,7 @@ pub fn compressMean(
 
         if ((nextMaximum - nextAverage > error_bound) or (nextAverage - nextMinimum > error_bound)) {
             try shared_functions.appendValueAndIndexToArrayList(
+                allocator,
                 @floatCast(average),
                 index,
                 compressed_values,
@@ -138,6 +141,7 @@ pub fn compressMean(
     }
 
     try shared_functions.appendValueAndIndexToArrayList(
+        allocator,
         @floatCast(average),
         index,
         compressed_values,
@@ -148,6 +152,7 @@ pub fn compressMean(
 /// "Poor Man’s Compression - Mean". The function writes the result to `decompressed_values`.
 /// If an error occurs it is returned.
 pub fn decompress(
+    allocator: Allocator,
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
 ) Error!void {
@@ -162,7 +167,7 @@ pub fn decompress(
         const value = compressed_values_and_index[compressed_index];
         const index: usize = @bitCast(compressed_values_and_index[compressed_index + 1]);
         for (uncompressed_index..index) |_| {
-            try decompressed_values.append(value);
+            try decompressed_values.append(allocator, value);
         }
         uncompressed_index = index;
     }

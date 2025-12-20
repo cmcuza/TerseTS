@@ -23,6 +23,7 @@ const math = std.math;
 const time = std.time;
 const testing = std.testing;
 const ArrayList = std.ArrayList;
+const Allocator = mem.Allocator;
 
 const tersets = @import("../../tersets.zig");
 const configuration = @import("../../configuration.zig");
@@ -49,7 +50,7 @@ const tester = @import("../../tester.zig");
 /// is expected to be of `AreaUnderCurveError` type otherwise an `InvalidConfiguration` error is return.
 /// If any other error occurs during the execution of the method, it is returned.
 pub fn compress(
-    allocator: mem.Allocator,
+    allocator: Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
     method_configuration: []const u8,
@@ -64,9 +65,9 @@ pub fn compress(
 
     // If we have 2 or fewer points, store them without compression.
     if (uncompressed_values.len <= 2) {
-        try shared_functions.appendValue(f64, uncompressed_values[0], compressed_values);
-        try shared_functions.appendValue(f64, uncompressed_values[1], compressed_values);
-        try shared_functions.appendValue(usize, 1, compressed_values);
+        try shared_functions.appendValue(allocator, f64, uncompressed_values[0], compressed_values);
+        try shared_functions.appendValue(allocator, f64, uncompressed_values[1], compressed_values);
+        try shared_functions.appendValue(allocator, usize, 1, compressed_values);
         return;
     }
 
@@ -163,11 +164,11 @@ pub fn compress(
     std.mem.sort(PointArea, heap.items[0..heap.len], {}, PointArea.firstThan);
 
     // Output compressed series: first point, then (index, value) pairs.
-    try shared_functions.appendValue(f64, uncompressed_values[0], compressed_values);
+    try shared_functions.appendValue(allocator, f64, uncompressed_values[0], compressed_values);
     for (1..heap.len) |index| {
         const point_index = heap.items[index].index;
-        try shared_functions.appendValue(f64, uncompressed_values[point_index], compressed_values);
-        try shared_functions.appendValue(usize, point_index, compressed_values);
+        try shared_functions.appendValue(allocator, f64, uncompressed_values[point_index], compressed_values);
+        try shared_functions.appendValue(allocator, usize, point_index, compressed_values);
     }
 
     return;
@@ -175,7 +176,7 @@ pub fn compress(
 
 /// Decompress `compressed_values` produced by "Visvalingam-Whyatt" and write the
 /// result to `decompressed_values`. If an error occurs it is returned.
-pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList(f64)) Error!void {
+pub fn decompress(allocator: Allocator, compressed_values: []const u8, decompressed_values: *ArrayList(f64)) Error!void {
     // The compressed representation is composed of two values after getting the first since all
     // segments are connected. Therefore, the condition checks that after the first value, the rest
     // of the values are in pairs (value, index) and that they are all of type 64-bit float.
@@ -187,7 +188,7 @@ pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList
 
     // Extract the start point from the compressed representation.
     var start_point: DiscretePoint = .{ .time = 0, .value = compressed_lines_and_index[0] };
-    try decompressed_values.append(start_point.value);
+    try decompressed_values.append(allocator, start_point.value);
 
     // We need to create a segment for the linear function.
     var slope: f64 = undefined;
@@ -210,10 +211,10 @@ pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList
             // Interpolate the values between the start and end points of the current segment.
             while (current_timestamp < end_point.time) : (current_timestamp += 1) {
                 const y: f64 = slope * @as(f64, @floatFromInt(current_timestamp)) + intercept;
-                try decompressed_values.append(y);
+                try decompressed_values.append(allocator, y);
             }
         }
-        try decompressed_values.append(end_point.value);
+        try decompressed_values.append(allocator, end_point.value);
 
         // The start point of the next segment is the end point of the current segment.
         start_point = end_point;

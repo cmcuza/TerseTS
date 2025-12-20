@@ -23,6 +23,7 @@
 const std = @import("std");
 const mem = std.mem;
 const ArrayList = std.ArrayList;
+const Allocator = mem.Allocator;
 const testing = std.testing;
 const shared_structs = @import("../utilities/shared_structs.zig");
 const LinearFunction = shared_structs.LinearFunction;
@@ -245,13 +246,13 @@ pub const ConvexPolygon = struct {
     // Index of the first valid segment in the lower bound vertex list.
     lower_bound_start: usize,
     // Allocator for memory management.
-    allocator: mem.Allocator,
+    allocator: Allocator,
 
     // Initializes an empty convex polygon with the given `allocator`.
-    pub fn init(allocator: mem.Allocator) ConvexPolygon {
+    pub fn init(allocator: Allocator) ConvexPolygon {
         return ConvexPolygon{
-            .upper_bound_lines = ArrayList(BorderLine).init(allocator),
-            .lower_bound_lines = ArrayList(BorderLine).init(allocator),
+            .upper_bound_lines = ArrayList(BorderLine).empty,
+            .lower_bound_lines = ArrayList(BorderLine).empty,
             .upper_bound_start = 0,
             .lower_bound_start = 0,
             .allocator = allocator,
@@ -259,9 +260,9 @@ pub const ConvexPolygon = struct {
     }
 
     // Releases all allocated memory used by the ConvexPolygon `self`.
-    pub fn deinit(self: *ConvexPolygon) void {
-        self.upper_bound_lines.deinit();
-        self.lower_bound_lines.deinit();
+    pub fn deinit(self: *ConvexPolygon, allocator: Allocator) void {
+        self.upper_bound_lines.deinit(allocator);
+        self.lower_bound_lines.deinit(allocator);
     }
 
     /// Updates the ConvexPolygon `self` with `new_upper_bound` and `new_lower_bound`, updating the
@@ -272,13 +273,14 @@ pub const ConvexPolygon = struct {
     /// by lower, then clip by upper (O’Rourke online step). If an error occurs, it is returned.
     pub fn update(
         self: *ConvexPolygon,
+        allocator: Allocator,
         new_upper_bound: BorderLine,
         new_lower_bound: BorderLine,
     ) !bool {
         // Case 1: Empty polygon, seed with the two lines.
         if (self.isEmpty()) {
-            try self.upper_bound_lines.append(new_upper_bound);
-            try self.lower_bound_lines.append(new_lower_bound);
+            try self.upper_bound_lines.append(allocator, new_upper_bound);
+            try self.lower_bound_lines.append(allocator, new_lower_bound);
             self.upper_bound_start = 0;
             self.lower_bound_start = 0;
             return true;
@@ -312,11 +314,11 @@ pub const ConvexPolygon = struct {
             self.upper_bound_lines.clearRetainingCapacity();
             self.lower_bound_lines.clearRetainingCapacity();
 
-            try self.upper_bound_lines.append(upper_start);
-            try self.upper_bound_lines.append(upper_end);
+            try self.upper_bound_lines.append(allocator, upper_start);
+            try self.upper_bound_lines.append(allocator, upper_end);
 
-            try self.lower_bound_lines.append(lower_start);
-            try self.lower_bound_lines.append(lower_end);
+            try self.lower_bound_lines.append(allocator, lower_start);
+            try self.lower_bound_lines.append(allocator, lower_end);
 
             self.upper_bound_start = 0;
             self.lower_bound_start = 0;
@@ -343,9 +345,9 @@ pub const ConvexPolygon = struct {
                     clip_info.new_upper_line.evaluateAtStart(),
                     clip_info.new_lower_line.evaluateAtStart(),
                 );
-                try self.lower_bound_lines.resize(self.lower_bound_start + clip_info.lower_index_offset);
-                try self.lower_bound_lines.append(clip_info.new_lower_line);
-                try self.lower_bound_lines.append(bridge_lower);
+                try self.lower_bound_lines.resize(allocator, self.lower_bound_start + clip_info.lower_index_offset);
+                try self.lower_bound_lines.append(allocator, clip_info.new_lower_line);
+                try self.lower_bound_lines.append(allocator, bridge_lower);
             },
         }
 
@@ -360,9 +362,9 @@ pub const ConvexPolygon = struct {
                     clip_info.new_upper_line.evaluateAtEnd(),
                     clip_info.new_lower_line.evaluateAtEnd(),
                 );
-                try self.upper_bound_lines.resize(self.upper_bound_start + clip_info.upper_index_offset);
-                try self.upper_bound_lines.append(clip_info.new_upper_line);
-                try self.upper_bound_lines.append(bridge_upper);
+                try self.upper_bound_lines.resize(allocator, self.upper_bound_start + clip_info.upper_index_offset);
+                try self.upper_bound_lines.append(allocator, clip_info.new_upper_line);
+                try self.upper_bound_lines.append(allocator, bridge_upper);
 
                 // Advance the lower-chain start and replace that segment.
                 self.lower_bound_start += clip_info.lower_index_offset;

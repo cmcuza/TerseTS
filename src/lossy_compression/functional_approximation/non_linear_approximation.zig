@@ -100,10 +100,10 @@ pub fn compress(
     defer if (preprocessing.shift_amount != 0.0) allocator.free(preprocessing.shifted_data);
 
     // Stores the preprocessing information - shift amount is always written (0.0 indicates no shift).
-    try shared_functions.appendValue(f64, preprocessing.shift_amount, compressed_values);
+    try shared_functions.appendValue(allocator, f64, preprocessing.shift_amount, compressed_values);
 
-    var optimal_approximation = ArrayList(FunctionalApproximation).init(allocator);
-    defer optimal_approximation.deinit();
+    var optimal_approximation = ArrayList(FunctionalApproximation).empty;
+    defer optimal_approximation.deinit(allocator);
 
     // Partitions the time series using dynamic programming to find the optimal segmentation.
     try findOptimalFunctionalApproximation(
@@ -115,7 +115,7 @@ pub fn compress(
 
     const segments_count = optimal_approximation.items.len;
     // Store the number of segments used in the partitioning.
-    try shared_functions.appendValue(u32, @intCast(segments_count), compressed_values);
+    try shared_functions.appendValue(allocator, u32, @intCast(segments_count), compressed_values);
 
     // All function types are stored using 4 bits each, so we can pack 2 per byte.
     // This saves space in the compressed representation.
@@ -144,21 +144,21 @@ pub fn compress(
         }
     }
 
-    try compressed_values.appendSlice(packed_function_types);
+    try compressed_values.appendSlice(allocator, packed_function_types);
 
     for (optimal_approximation.items) |segment| {
         // Writes the two main function parameters (slope and intercept) and the end point.
         // The end point is exclusive, so it indicates where the next segment starts.
-        try shared_functions.appendValue(f64, segment.definition.slope, compressed_values);
-        try shared_functions.appendValue(f64, segment.definition.intercept, compressed_values);
-        try shared_functions.appendValue(usize, segment.end_idx, compressed_values);
+        try shared_functions.appendValue(allocator, f64, segment.definition.slope, compressed_values);
+        try shared_functions.appendValue(allocator, f64, segment.definition.intercept, compressed_values);
+        try shared_functions.appendValue(allocator, usize, segment.end_idx, compressed_values);
     }
 }
 
 /// Decompress `compressed_values` produced by "NeaTS". The function writes the result to
 /// `decompressed_values`. If an error occurs it is returned.
 pub fn decompress(
-    allocator: mem.Allocator,
+    allocator: Allocator,
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
 ) Error!void {
@@ -193,8 +193,8 @@ pub fn decompress(
     const packed_function_types = compressed_values[offset .. offset + type_bytes_len];
     offset += type_bytes_len;
 
-    var optimal_approximation = ArrayList(FunctionalApproximation).init(allocator);
-    defer optimal_approximation.deinit();
+    var optimal_approximation = ArrayList(FunctionalApproximation).empty;
+    defer optimal_approximation.deinit(allocator);
 
     var current_start_idx: usize = 0; // Tracks the inferred start index for sequential segments.
     for (0..num_segments) |segment_idx| { // Iterates through each segment.
@@ -225,7 +225,7 @@ pub fn decompress(
             },
         };
 
-        try optimal_approximation.append(functional_approximation);
+        try optimal_approximation.append(allocator, functional_approximation);
 
         // Updates the start index for the next segment (segments are contiguous).
         current_start_idx = end_idx;
@@ -239,7 +239,7 @@ pub fn decompress(
             // that the function parameters align with the mathematical formulation used during
             // compression and constraint generation.
             const value = try functional_approximation.evaluate(@as(f64, @floatFromInt(idx + 1)));
-            try decompressed_values.append(value);
+            try decompressed_values.append(allocator, value);
         }
     }
 
@@ -294,7 +294,7 @@ const FunctionalApproximation = struct {
 /// shifted data array (or the original array if no shift is needed).`shift_amount` is the
 /// calculated shift amount (0.0 if no shift is needed).
 fn shiftValues(
-    allocator: mem.Allocator,
+    allocator: Allocator,
     values: []const f64,
     error_bound: f32,
 ) !struct {
@@ -348,7 +348,7 @@ fn calculateShiftAmount(uncompressed_data: []const f64, error_bound: f32) !f64 {
 /// the convex polygon, dynamic programming arrays, and FunctionalApproximation arrays.
 /// If an error occurs, it is returned.
 fn findOptimalFunctionalApproximation(
-    allocator: mem.Allocator,
+    allocator: Allocator,
     uncompressed_data: []const f64,
     error_bound: f32,
     optimal_approximation: *ArrayList(FunctionalApproximation),
@@ -357,7 +357,7 @@ fn findOptimalFunctionalApproximation(
 
     // Initializes the convex polygon representing the feasible parameter region.
     var polygon = convex_polygon.ConvexPolygon.init(allocator);
-    defer polygon.deinit();
+    defer polygon.deinit(allocator);
 
     // Allocates dynamic programming arrays for the shortest path algorithm.
     var distances = try allocator.alloc(usize, n + 1);
@@ -400,6 +400,7 @@ fn findOptimalFunctionalApproximation(
                 // Finds the longest approximation that can be done with function_type
                 // starting at the current position.
                 const functional_approximation = try computeApproximation(
+                    allocator,
                     &polygon,
                     uncompressed_data,
                     current_position,
@@ -435,7 +436,7 @@ fn findOptimalFunctionalApproximation(
     var current_position = n;
     while (current_position != 0) {
         const approximation = previous_approximation[current_position];
-        try optimal_approximation.append(approximation.?);
+        try optimal_approximation.append(allocator, approximation.?);
         // Move to the start of the current segment.
         current_position = approximation.?.start_idx;
     }
@@ -451,6 +452,7 @@ fn findOptimalFunctionalApproximation(
 /// The `polygon` parameter is used to maintain the feasible region of parameters.
 /// If an error occurs, it is returned.
 fn computeApproximation(
+    allocator: Allocator,
     polygon: *convex_polygon.ConvexPolygon,
     uncompressed_data: []const f64,
     start_idx: usize,
@@ -509,6 +511,7 @@ fn computeApproximation(
 
         // Intersects the new constraints with the existing feasible region.
         const intercept = try polygon.update(
+            allocator,
             new_upper_line,
             new_lower_line,
         );

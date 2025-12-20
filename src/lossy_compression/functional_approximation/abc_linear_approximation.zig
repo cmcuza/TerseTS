@@ -25,6 +25,7 @@ const mem = std.mem;
 const time = std.time;
 const rand = std.Random;
 const ArrayList = std.ArrayList;
+const Allocator = mem.Allocator;
 
 const tersets = @import("../../tersets.zig");
 const tester = @import("../../tester.zig");
@@ -49,7 +50,7 @@ const ConvexHull = @import("../../utilities/convex_hull.zig").ConvexHull;
 /// `InvalidConfiguration` error is return. If any other error occurs during the execution
 /// of the method, it is returned.
 pub fn compress(
-    allocator: mem.Allocator,
+    allocator: Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
     method_configuration: []const u8,
@@ -66,14 +67,14 @@ pub fn compress(
 
     // The algorithm uses a convex hull to store a reduce set of significant points.
     var convex_hull = try ConvexHull.init(allocator);
-    defer convex_hull.deinit();
+    defer convex_hull.deinit(allocator);
 
     var current_segment_start: usize = 0;
     while (current_segment_start < uncompressed_values.len - 1) {
         var last_valid_line: ?LinearFunction = null;
 
         // Insert the first point in the convex hull.
-        try convex_hull.add(.{ .time = current_segment_start, .value = uncompressed_values[current_segment_start] });
+        try convex_hull.add(allocator, .{ .time = current_segment_start, .value = uncompressed_values[current_segment_start] });
 
         // Create a index to grow iterate over the time series from the current segment start.
         var index_over_segment = current_segment_start + 1;
@@ -83,7 +84,7 @@ pub fn compress(
         while (index_over_segment < uncompressed_values.len) : (index_over_segment += 1) {
             // Section III-A, Step 1: Computing the Convex Hull.
             // Add next point to convex hull for current segment.
-            try convex_hull.add(.{ .time = index_over_segment, .value = uncompressed_values[index_over_segment] });
+            try convex_hull.add(allocator, .{ .time = index_over_segment, .value = uncompressed_values[index_over_segment] });
 
             // Section III-A, Step 2-3: Find A, B, C and compute the solution line.
             // Try to compute the best fitting line using current convex hull points.
@@ -107,28 +108,33 @@ pub fn compress(
             // If there are only two points in the segment, store then directly to avoid numerical issues.
             if (current_segment_start + 1 == last_valid_end) {
                 try shared_functions.appendValue(
+                    allocator,
                     f64,
                     uncompressed_values[current_segment_start],
                     compressed_values,
                 );
                 try shared_functions.appendValue(
+                    allocator,
                     f64,
                     uncompressed_values[last_valid_end],
                     compressed_values,
                 );
             } else {
                 try shared_functions.appendValue(
+                    allocator,
                     f64,
                     @floatCast(valid_line.slope),
                     compressed_values,
                 );
                 try shared_functions.appendValue(
+                    allocator,
                     f64,
                     @floatCast(valid_line.intercept),
                     compressed_values,
                 );
             }
             try shared_functions.appendValue(
+                allocator,
                 usize,
                 last_valid_end,
                 compressed_values,
@@ -136,16 +142,19 @@ pub fn compress(
         } else {
             // If the the last valid line is not valid, then store the uncompressed values directly.
             try shared_functions.appendValue(
+                allocator,
                 f64,
                 uncompressed_values[current_segment_start],
                 compressed_values,
             );
             try shared_functions.appendValue(
+                allocator,
                 f64,
                 uncompressed_values[last_valid_end],
                 compressed_values,
             );
             try shared_functions.appendValue(
+                allocator,
                 usize,
                 last_valid_end,
                 compressed_values,
@@ -164,15 +173,16 @@ pub fn compress(
         const slope: f64 = 0.0;
         const intercept = value;
 
-        try shared_functions.appendValue(f64, slope, compressed_values);
-        try shared_functions.appendValue(f64, intercept, compressed_values);
-        try shared_functions.appendValue(usize, current_segment_start, compressed_values);
+        try shared_functions.appendValue(allocator, f64, slope, compressed_values);
+        try shared_functions.appendValue(allocator, f64, intercept, compressed_values);
+        try shared_functions.appendValue(allocator, usize, current_segment_start, compressed_values);
     }
 }
 
 /// Decompress `compressed_values` produced by "ABCLinearApproximation". The algorithm writes the
 /// result to `decompressed_values`. If an error occurs it is returned.
 pub fn decompress(
+    allocator: Allocator,
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
 ) Error!void {
@@ -192,11 +202,11 @@ pub fn decompress(
             for (segment_start..segment_end + 1) |t| {
                 const x = @as(f64, @floatFromInt(t));
                 const y = slope * x + intercept;
-                try decompressed_values.append(y);
+                try decompressed_values.append(allocator, y);
             }
         } else {
-            try decompressed_values.append(slope);
-            try decompressed_values.append(intercept);
+            try decompressed_values.append(allocator, slope);
+            try decompressed_values.append(allocator, intercept);
         }
         segment_start = segment_end + 1;
     }
@@ -206,7 +216,7 @@ pub fn decompress(
 /// A and B points form a segment (AB) on the lower or upper hull. The C point is found on
 /// the opposite hull with maximum deviation, projected vertically into the segment AB.
 /// The `allocator` is used to create a AutoHashMap to control which point has been visited.
-pub fn findABCOptimalSegment(convex_hull: *ConvexHull, allocator: mem.Allocator) Error!LinearFunction {
+pub fn findABCOptimalSegment(convex_hull: *ConvexHull, allocator: Allocator) Error!LinearFunction {
     const len = convex_hull.len();
 
     // Initialize first side l1 = (p0, p1).
@@ -366,27 +376,27 @@ test "abc compressor identifies correct ABC points in the convex hull of a bigge
     var uncompressed_values = ArrayList(f64).init(allocator);
     defer uncompressed_values.deinit();
 
-    try uncompressed_values.append(3);
-    try uncompressed_values.append(2);
-    try uncompressed_values.append(3.5);
-    try uncompressed_values.append(5);
-    try uncompressed_values.append(3);
-    try uncompressed_values.append(4);
-    try uncompressed_values.append(4);
-    try uncompressed_values.append(3);
-    try uncompressed_values.append(4.5);
-    try uncompressed_values.append(3.5);
-    try uncompressed_values.append(2.5);
-    try uncompressed_values.append(2.5);
-    try uncompressed_values.append(3.5);
-    try uncompressed_values.append(2.5);
-    try uncompressed_values.append(2.5);
-    try uncompressed_values.append(2.5);
-    try uncompressed_values.append(3);
-    try uncompressed_values.append(3);
-    try uncompressed_values.append(3);
-    try uncompressed_values.append(3);
-    try uncompressed_values.append(2.8);
+    try uncompressed_values.append(allocator, 3);
+    try uncompressed_values.append(allocator, 2);
+    try uncompressed_values.append(allocator, 3.5);
+    try uncompressed_values.append(allocator, 5);
+    try uncompressed_values.append(allocator, 3);
+    try uncompressed_values.append(allocator, 4);
+    try uncompressed_values.append(allocator, 4);
+    try uncompressed_values.append(allocator, 3);
+    try uncompressed_values.append(allocator, 4.5);
+    try uncompressed_values.append(allocator, 3.5);
+    try uncompressed_values.append(allocator, 2.5);
+    try uncompressed_values.append(allocator, 2.5);
+    try uncompressed_values.append(allocator, 3.5);
+    try uncompressed_values.append(allocator, 2.5);
+    try uncompressed_values.append(allocator, 2.5);
+    try uncompressed_values.append(allocator, 2.5);
+    try uncompressed_values.append(allocator, 3);
+    try uncompressed_values.append(allocator, 3);
+    try uncompressed_values.append(allocator, 3);
+    try uncompressed_values.append(allocator, 3);
+    try uncompressed_values.append(allocator, 2.8);
 
     var compressed_values = ArrayList(u8).init(allocator);
     defer compressed_values.deinit();
@@ -429,7 +439,7 @@ test "abc compressor compresses and decompresses constant signal" {
     const number_elements: usize = tester.generateBoundRandomInteger(usize, 100, 150, undefined);
 
     for (0..number_elements) |_| {
-        try uncompressed_values.append(constant_value);
+        try uncompressed_values.append(allocator, constant_value);
     }
 
     try tester.testCompressAndDecompress(

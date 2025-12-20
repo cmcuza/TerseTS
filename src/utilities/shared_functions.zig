@@ -16,6 +16,7 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const io = std.io;
 const math = std.math;
 const ArrayList = std.ArrayList;
 const tersets = @import("../tersets.zig");
@@ -24,6 +25,7 @@ const Error = tersets.Error;
 const testing = std.testing;
 
 const shared_structs = @import("shared_structs.zig");
+const BitWriter = shared_structs.BitWriter;
 
 /// Computes the Root-Mean-Squared-Errors (RMSE) for a segment of the `uncompressed_values`.
 /// This function calculates the error between the actual values and the predicted values
@@ -58,16 +60,16 @@ pub fn computeRMSE(uncompressed_values: []const f64, seg_start: usize, seg_end: 
 }
 
 /// Append `value` of `type` determined at compile time to `compressed_values`.
-pub fn appendValue(comptime T: type, value: T, compressed_values: *ArrayList(u8)) !void {
+pub fn appendValue(allocator: Allocator, comptime T: type, value: T, compressed_values: *ArrayList(u8)) !void {
     // Compile-time type check
     switch (@TypeOf(value)) {
         u64, i64, f64, usize => {
             const value_as_bytes: [8]u8 = @bitCast(value);
-            try compressed_values.appendSlice(value_as_bytes[0..]);
+            try compressed_values.appendSlice(allocator, value_as_bytes[0..]);
         },
         u32, i32, f32 => {
             const value_as_bytes: [4]u8 = @bitCast(value);
-            try compressed_values.appendSlice(value_as_bytes[0..]);
+            try compressed_values.appendSlice(allocator, value_as_bytes[0..]);
         },
         else => @compileError("Unsupported type for append value function"),
     }
@@ -75,14 +77,15 @@ pub fn appendValue(comptime T: type, value: T, compressed_values: *ArrayList(u8)
 
 /// Append `compressed_value` and `index` to `compressed_values`.
 pub fn appendValueAndIndexToArrayList(
+    allocator: Allocator,
     compressed_value: f64,
     index: usize,
     compressed_values: *ArrayList(u8),
 ) !void {
     const valueAsBytes: [8]u8 = @bitCast(compressed_value);
-    try compressed_values.appendSlice(valueAsBytes[0..]);
+    try compressed_values.appendSlice(allocator, valueAsBytes[0..]);
     const indexAsBytes: [8]u8 = @bitCast(index); // No -1 due to 0 indexing.
-    try compressed_values.appendSlice(indexAsBytes[0..]);
+    try compressed_values.appendSlice(allocator, indexAsBytes[0..]);
 }
 
 /// Read a value of type `T` from `values` starting at `*offset`, advancing `*offset` by `@sizeOf(T)`.
@@ -216,7 +219,9 @@ pub fn decodeZigZag(value: u64) i64 {
 /// encoded data. The function returns an `ArrayList(u8)` containing the encoded data, or an error
 /// if the input is unsupported or if memory allocation fails.
 pub fn encodeEliasGamma(values: []const u64, encoded_values: *ArrayList(u8)) !void {
-    var bit_writer = std.io.bitWriter(.big, encoded_values.writer());
+    var stream = io.fixedBufferStream(encoded_values.items);
+    var bit_writer = shared_structs.bitWriter(.little, stream.writer());
+
     for (values) |value| {
         if (value == 0) {
             // Elias Gamma encoding is not defined for zero.
@@ -240,12 +245,13 @@ pub fn encodeEliasGamma(values: []const u64, encoded_values: *ArrayList(u8)) !vo
 /// meaning it was not encoded using Elias Gamma encoder or corrupted. Any other memory related
 /// error is also returned.
 pub fn decodeEliasGamma(
+    allocator: Allocator,
     compressed_values: []const u8,
     decoded_values: *ArrayList(u64),
 ) !void {
     // Create bit reader over full byte slice.
     var stream = std.io.fixedBufferStream(compressed_values);
-    var bit_reader = std.io.bitReader(.big, stream.reader());
+    var bit_reader = shared_structs.bitReader(.big, stream.reader());
 
     while (true) {
         // Count leading zeros.
@@ -266,7 +272,7 @@ pub fn decodeEliasGamma(
 
         // Read the value bits.
         if (leading_bits_number == 0) {
-            try decoded_values.append(1);
+            try decoded_values.append(allocator, 1);
         } else {
             const suffix: u64 = bit_reader.readBitsNoEof(u64, leading_bits_number) catch |err| {
                 // If we cannot read all k bits, the stream is malformed.
@@ -277,7 +283,7 @@ pub fn decodeEliasGamma(
             };
             // Combine leading 1 bit with suffix to form the decoded value.
             const value: u64 = (@as(u64, 1) << @intCast(leading_bits_number)) | suffix;
-            try decoded_values.append(value);
+            try decoded_values.append(allocator, value);
         }
     }
 }
@@ -423,7 +429,7 @@ test "decodeEliasGamma can encode and decode complex values correctly" {
             default_random,
         );
 
-        try uncompressed_values.append(value);
+        try uncompressed_values.append(allocator, value);
     }
 
     var encoded_values = ArrayList(u8).init(allocator);
