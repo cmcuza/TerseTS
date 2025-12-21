@@ -333,15 +333,15 @@ test "vw compress and decompress with zero error bound" {
     const allocator = testing.allocator;
 
     // Output buffer.
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
+    var uncompressed_values = ArrayList(f64).empty;
+    defer uncompressed_values.deinit(allocator);
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
     const error_bound: f32 = 0.0;
 
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0, 1000000, random);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, 0, 1000000, random);
 
     const method_configuration =
         \\ {"area_under_curve_error": 0.0}
@@ -354,7 +354,7 @@ test "vw compress and decompress with zero error bound" {
         &compressed_values,
         method_configuration,
     );
-    try decompress(compressed_values.items, &decompressed_values);
+    try decompress(allocator, compressed_values.items, &decompressed_values);
 
     try testing.expect(shared_functions.isWithinErrorBound(
         uncompressed_values.items,
@@ -370,10 +370,10 @@ test "vw compress and compress with known result" {
     const uncompressed_values: []const f64 = &[_]f64{ 1.0, 1.5, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0 };
 
     // Output buffer.
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"area_under_curve_error": 2.5}
@@ -386,7 +386,7 @@ test "vw compress and compress with known result" {
         &compressed_values,
         method_configuration,
     );
-    try decompress(compressed_values.items, &decompressed_values);
+    try decompress(allocator, compressed_values.items, &decompressed_values);
 
     // Check if the decompressed values have the same lenght as the compressed ones.
     try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
@@ -407,15 +407,15 @@ test "vw compress and compress with random data" {
     const allocator = testing.allocator;
 
     // Output buffer.
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
+    var uncompressed_values = ArrayList(f64).empty;
+    defer uncompressed_values.deinit(allocator);
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
     const error_bound: f32 = random.float(f32);
 
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0, 1, random);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, 0, 1, random);
 
     const method_configuration = try std.fmt.allocPrint(
         allocator,
@@ -431,7 +431,7 @@ test "vw compress and compress with random data" {
         &compressed_values,
         method_configuration,
     );
-    try decompress(compressed_values.items, &decompressed_values);
+    try decompress(allocator, compressed_values.items, &decompressed_values);
 
     // Check if the decompressed values have the same lenght as the compressed ones.
     try testing.expectEqual(uncompressed_values.items.len, decompressed_values.items.len);
@@ -462,8 +462,8 @@ test "check vw configuration parsing" {
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, 28.0, 3.0 };
 
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"area_under_curve_error": 0.3}

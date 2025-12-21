@@ -357,7 +357,7 @@ fn findOptimalFunctionalApproximation(
 
     // Initializes the convex polygon representing the feasible parameter region.
     var polygon = convex_polygon.ConvexPolygon.init(allocator);
-    defer polygon.deinit(allocator);
+    defer polygon.deinit();
 
     // Allocates dynamic programming arrays for the shortest path algorithm.
     var distances = try allocator.alloc(usize, n + 1);
@@ -400,7 +400,6 @@ fn findOptimalFunctionalApproximation(
                 // Finds the longest approximation that can be done with function_type
                 // starting at the current position.
                 const functional_approximation = try computeApproximation(
-                    allocator,
                     &polygon,
                     uncompressed_data,
                     current_position,
@@ -452,7 +451,6 @@ fn findOptimalFunctionalApproximation(
 /// The `polygon` parameter is used to maintain the feasible region of parameters.
 /// If an error occurs, it is returned.
 fn computeApproximation(
-    allocator: Allocator,
     polygon: *convex_polygon.ConvexPolygon,
     uncompressed_data: []const f64,
     start_idx: usize,
@@ -511,7 +509,6 @@ fn computeApproximation(
 
         // Intersects the new constraints with the existing feasible region.
         const intercept = try polygon.update(
-            allocator,
             new_upper_line,
             new_lower_line,
         );
@@ -641,8 +638,8 @@ test "non linear approximator cannot compress NaN values" {
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, math.nan(f64), 3.0 };
 
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"abs_error_bound": 0.1}
@@ -670,8 +667,8 @@ test "non linear approximator cannot compress inf values" {
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, math.inf(f64), 3.0 };
 
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"abs_error_bound": 0.1}
@@ -704,8 +701,8 @@ test "non linear approximator cannot compress f64 with reduced precision" {
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, 1e17, 3.0 };
 
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"abs_error_bound": 0.1}
@@ -736,8 +733,8 @@ test "check non linear approximator configuration parsing" {
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, 28.0, 3.0 };
 
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"abs_error_bound": 0.1}

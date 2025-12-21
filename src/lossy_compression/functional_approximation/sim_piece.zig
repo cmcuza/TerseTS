@@ -565,7 +565,7 @@ test "hashmap can map f64 to segment metadata array list" {
     defer {
         var iterator = f64_metadata_hash_map.iterator();
         while (iterator.next()) |entry| {
-            entry.value_ptr.*.deinit();
+            entry.value_ptr.*.deinit(allocator);
         }
         f64_metadata_hash_map.deinit();
     }
@@ -635,11 +635,11 @@ test "sim-piece can compress, decompress and merge many segments with positive e
     const allocator = testing.allocator;
     const error_bound = tester.generateBoundedRandomValue(f32, 0.5, 3, undefined);
 
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
+    var uncompressed_values = ArrayList(f64).empty;
+    defer uncompressed_values.deinit(allocator);
 
     for (0..20) |_| {
-        try tester.generateBoundedRandomValues(&uncompressed_values, 0, 10, undefined);
+        try tester.generateBoundedRandomValues(allocator, &uncompressed_values, 0, 10, undefined);
     }
 
     try tester.testCompressAndDecompress(
@@ -656,8 +656,8 @@ test "sim-piece cannot compress NaN values" {
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, math.nan(f64), 3.0 };
 
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"abs_error_bound": 0.1}
@@ -685,8 +685,8 @@ test "sim-piece cannot compress inf values" {
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, math.inf(f64), 3.0 };
 
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"abs_error_bound": 0.1}
@@ -714,8 +714,8 @@ test "sim-piece cannot compress f64 with reduced precision" {
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, 1e17, 3.0 };
 
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"abs_error_bound": 0.1}
@@ -746,8 +746,8 @@ test "check simpiece configuration parsing" {
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, 28.0, 3.0 };
 
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"abs_error_bound": 0.1}

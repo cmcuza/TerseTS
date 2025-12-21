@@ -249,8 +249,8 @@ test "check pmc-mean configuration parsing" {
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, 29.0, 3.0 };
 
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"abs_error_bound": 0.1}
@@ -273,8 +273,8 @@ test "check pmc-midrange configuration parsing" {
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, 29.0, 3.0 };
 
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"abs_error_bound": 0.1}

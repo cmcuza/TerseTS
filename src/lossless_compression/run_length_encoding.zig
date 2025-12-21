@@ -114,8 +114,8 @@ test "rle can always compress and decompress" {
 test "run length encoding compresses repeated values" {
     const allocator = testing.allocator;
 
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
+    var uncompressed_values = ArrayList(f64).empty;
+    defer uncompressed_values.deinit(allocator);
 
     // Generate a random number of `distinct_elements` that will be repeated a random number of times
     // to test that RLE can compress repeated values.
@@ -141,16 +141,16 @@ test "run length encoding compresses repeated values" {
 
     const method_configuration = "{}";
 
-    const compressed_values = try tersets.compress(
+    var compressed_values = try tersets.compress(
         allocator,
         uncompressed_values.items,
         Method.RunLengthEncoding,
         method_configuration,
     );
-    defer compressed_values.deinit();
+    defer compressed_values.deinit(allocator);
 
-    const decompressed_values = try tersets.decompress(allocator, compressed_values.items);
-    defer decompressed_values.deinit();
+    var decompressed_values = try tersets.decompress(allocator, compressed_values.items);
+    defer decompressed_values.deinit(allocator);
 
     try testing.expect(shared_functions.isWithinErrorBound(
         uncompressed_values.items,
@@ -167,8 +167,8 @@ test "check rle configuration parsing" {
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, 29.0, 3.0 };
 
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {}

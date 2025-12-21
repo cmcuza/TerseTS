@@ -284,7 +284,7 @@ pub fn compressSlideFilter(
         error_bound;
 
     var convex_hull = try ConvexHull.init(allocator);
-    defer convex_hull.deinit(allocator);
+    defer convex_hull.deinit();
 
     // Initialize the interception point between the upper and lower bounds. The point will be
     // defined as part of the method's logic, thus now it is undefined.
@@ -303,8 +303,8 @@ pub fn compressSlideFilter(
         .end_point = .{ .time = 1, .value = uncompressed_values[1] },
     };
 
-    try convex_hull.add(allocator, current_segment.start_point);
-    try convex_hull.add(allocator, current_segment.end_point);
+    try convex_hull.add(current_segment.start_point);
+    try convex_hull.add(current_segment.end_point);
 
     updateSlideLinearFunction(
         current_segment,
@@ -407,8 +407,8 @@ pub fn compressSlideFilter(
                 updateSlideLinearFunction(current_segment, &lower_bound, -adjusted_error_bound);
 
                 convex_hull.clean();
-                try convex_hull.add(allocator, current_segment.start_point);
-                try convex_hull.add(allocator, current_segment.end_point);
+                try convex_hull.add(current_segment.start_point);
+                try convex_hull.add(current_segment.end_point);
 
                 current_timestamp += 1;
             } else {
@@ -421,7 +421,7 @@ pub fn compressSlideFilter(
             current_segment.end_point.time = current_timestamp;
             current_segment.end_point.value = uncompressed_values[current_timestamp];
 
-            try convex_hull.add(allocator, current_segment.end_point);
+            try convex_hull.add(current_segment.end_point);
 
             // The new upper bound can be found on the upper hull. Lemma (4.3).
             for (convex_hull.getUpperHullExceptLast()) |hull_point| {
@@ -1012,8 +1012,8 @@ test "check swing configuration parsing" {
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, 28.0, 3.0 };
 
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"abs_error_bound": 0.1}
@@ -1036,8 +1036,8 @@ test "check slide configuration parsing" {
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, 28.0, 3.0 };
 
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"abs_error_bound": 0.1}
@@ -1060,8 +1060,8 @@ test "check swing-disc configuration parsing" {
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, 28.0, 3.0 };
 
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"abs_error_bound": 0.1}

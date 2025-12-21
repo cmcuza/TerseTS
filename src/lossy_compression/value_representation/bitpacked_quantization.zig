@@ -220,8 +220,8 @@ test "bitpacked quantization can compress and decompress bounded values" {
 test "bitpacked quantization cannot compress and decompress nan values" {
     const allocator = testing.allocator;
     const uncompressed_values = [3]f64{ 343.0, math.nan(f64), 520.0 };
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"abs_error_bound": 0.1}
@@ -247,8 +247,8 @@ test "bitpacked quantization cannot compress and decompress nan values" {
 test "bitpacked quantization cannot compress and decompress unbounded values" {
     const allocator = testing.allocator;
     const uncompressed_values = [3]f64{ 343.0, 1e20, 520.0 };
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"abs_error_bound": 0.1}
@@ -275,14 +275,14 @@ test "bitpacked quantization can compress and decompress bounded values at diffe
     const allocator = testing.allocator;
     const error_bound = tester.generateBoundedRandomValue(f32, 0, 1e3, undefined);
 
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
+    var uncompressed_values = ArrayList(f64).empty;
+    defer uncompressed_values.deinit(allocator);
 
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1, 1, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e2, 1e2, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e4, 1e4, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e6, 1e6, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e8, 1e8, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1, 1, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e2, 1e2, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e4, 1e4, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e6, 1e6, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e8, 1e8, undefined);
 
     try tester.testCompressAndDecompress(
         allocator,
@@ -297,15 +297,15 @@ test "bitpacked quantization can compress and decompress with zero error bound a
     const allocator = testing.allocator;
     const error_bound = 0;
 
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
+    var uncompressed_values = ArrayList(f64).empty;
+    defer uncompressed_values.deinit(allocator);
 
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1, 1, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e2, 1e2, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e4, 1e4, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e6, 1e6, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e8, 1e8, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e14, 1e14, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1, 1, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e2, 1e2, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e4, 1e4, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e6, 1e6, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e8, 1e8, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e14, 1e14, undefined);
 
     try tester.testCompressAndDecompress(
         allocator,
@@ -326,20 +326,20 @@ test "bitpacked quantization always reduces size of time series" {
         undefined,
     )) * 0.1;
 
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
+    var uncompressed_values = ArrayList(f64).empty;
+    defer uncompressed_values.deinit(allocator);
 
     // Generate 500 random values within different ranges. Even if some values require 8 bytes
     // to be stored, the quantization should reduce the size of the time series since some
     // values require less than 8 bytes to be stored after quantization.
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1, 1, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e2, 1e2, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e4, 1e4, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e6, 1e6, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e8, 1e8, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1, 1, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e2, 1e2, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e4, 1e4, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e6, 1e6, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e8, 1e8, undefined);
 
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration = try std.fmt.allocPrint(
         allocator,
@@ -367,8 +367,8 @@ test "check bit-quantization configuration parsing" {
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, 29.0, 3.0 };
 
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"abs_error_bound": 0.1}

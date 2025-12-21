@@ -67,14 +67,14 @@ pub fn compress(
 
     // The algorithm uses a convex hull to store a reduce set of significant points.
     var convex_hull = try ConvexHull.init(allocator);
-    defer convex_hull.deinit(allocator);
+    defer convex_hull.deinit();
 
     var current_segment_start: usize = 0;
     while (current_segment_start < uncompressed_values.len - 1) {
         var last_valid_line: ?LinearFunction = null;
 
         // Insert the first point in the convex hull.
-        try convex_hull.add(allocator, .{ .time = current_segment_start, .value = uncompressed_values[current_segment_start] });
+        try convex_hull.add(.{ .time = current_segment_start, .value = uncompressed_values[current_segment_start] });
 
         // Create a index to grow iterate over the time series from the current segment start.
         var index_over_segment = current_segment_start + 1;
@@ -84,7 +84,7 @@ pub fn compress(
         while (index_over_segment < uncompressed_values.len) : (index_over_segment += 1) {
             // Section III-A, Step 1: Computing the Convex Hull.
             // Add next point to convex hull for current segment.
-            try convex_hull.add(allocator, .{ .time = index_over_segment, .value = uncompressed_values[index_over_segment] });
+            try convex_hull.add(.{ .time = index_over_segment, .value = uncompressed_values[index_over_segment] });
 
             // Section III-A, Step 2-3: Find A, B, C and compute the solution line.
             // Try to compute the best fitting line using current convex hull points.
@@ -373,8 +373,8 @@ test "abc compressor identifies correct ABC points in the convex hull of a bigge
     const allocator = std.testing.allocator;
     const error_bound: f32 = 5;
 
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
+    var uncompressed_values = ArrayList(f64).empty;
+    defer uncompressed_values.deinit(allocator);
 
     try uncompressed_values.append(allocator, 3);
     try uncompressed_values.append(allocator, 2);
@@ -398,8 +398,8 @@ test "abc compressor identifies correct ABC points in the convex hull of a bigge
     try uncompressed_values.append(allocator, 3);
     try uncompressed_values.append(allocator, 2.8);
 
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration = try std.fmt.allocPrint(
         allocator,
@@ -431,8 +431,8 @@ test "abc compressor compresses and decompresses constant signal" {
     const allocator = std.testing.allocator;
     const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0, 1, undefined);
 
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
+    var uncompressed_values = ArrayList(f64).empty;
+    defer uncompressed_values.deinit(allocator);
 
     const constant_value: f64 = tester.generateBoundedRandomValue(f64, 0, 1, undefined);
 
@@ -459,8 +459,8 @@ test "check abc-convex configuration parsing" {
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, 29.0, 3.0 };
 
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"abs_error_bound": 0.1}

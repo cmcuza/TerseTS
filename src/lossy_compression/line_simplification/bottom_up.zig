@@ -365,10 +365,11 @@ test "bottom-up can compress and decompress with zero error bound" {
     const allocator = testing.allocator;
     const error_bound: f32 = 0.0;
 
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
+    var uncompressed_values = ArrayList(f64).empty;
+    defer uncompressed_values.deinit(allocator);
 
     try tester.generateBoundedRandomValues(
+        allocator,
         &uncompressed_values,
         -1e15,
         1e15,
@@ -382,16 +383,16 @@ test "bottom-up can compress and decompress with zero error bound" {
     );
     defer allocator.free(method_configuration);
 
-    const compressed_values = try tersets.compress(
+    var compressed_values = try tersets.compress(
         allocator,
         uncompressed_values.items,
         tersets.Method.BottomUp,
         method_configuration,
     );
-    defer compressed_values.deinit();
+    defer compressed_values.deinit(allocator);
 
-    const decompressed_values = try tersets.decompress(allocator, compressed_values.items);
-    defer decompressed_values.deinit();
+    var decompressed_values = try tersets.decompress(allocator, compressed_values.items);
+    defer decompressed_values.deinit(allocator);
 
     try testing.expect(shared_functions.isWithinErrorBound(
         uncompressed_values.items,
@@ -403,8 +404,8 @@ test "bottom-up can compress and decompress with zero error bound" {
 test "bottom-up cannot compress and decompress nan values" {
     const allocator = testing.allocator;
     const uncompressed_values = [3]f64{ 343.0, math.nan(f64), 520.0 };
-    var compressed_values = ArrayList(u8).init(allocator);
-    compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ { "aggregate_error_type": "rmse", "aggregate_error_bound": 0.1 }
@@ -430,8 +431,8 @@ test "bottom-up cannot compress and decompress nan values" {
 test "bottom-up cannot compress and decompress unbounded values" {
     const allocator = testing.allocator;
     const uncompressed_values = [3]f64{ 343.0, 1e20, 520.0 };
-    var compressed_values = ArrayList(u8).init(allocator);
-    compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ { "aggregate_error_type": "rmse", "aggregate_error_bound": 0.1 }
@@ -453,16 +454,16 @@ test "bottom-up random lines and random error bound compress and decompress" {
     const allocator = testing.allocator;
     const random = tester.getDefaultRandomGenerator();
 
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
+    var uncompressed_values = ArrayList(f64).empty;
+    defer uncompressed_values.deinit(allocator);
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
 
     const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0.01, 1e6, undefined);
 
-    try tester.generateRandomLinearFunctions(&uncompressed_values, random);
+    try tester.generateRandomLinearFunctions(allocator, &uncompressed_values, random);
 
     const method_configuration = try std.fmt.allocPrint(
         allocator,
@@ -478,7 +479,7 @@ test "bottom-up random lines and random error bound compress and decompress" {
         method_configuration,
     );
 
-    try decompress(compressed_values.items, &decompressed_values);
+    try decompress(allocator, compressed_values.items, &decompressed_values);
 
     // Check if the decompressed values have the same lenght as the compressed ones.
     try testing.expectEqual(uncompressed_values.items.len, decompressed_values.items.len);
@@ -515,8 +516,8 @@ test "check bottom-up configuration parsing" {
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, 28.0, 3.0 };
 
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"aggregate_error_type": "rmse", "aggregate_error_bound": 0.3}

@@ -1073,7 +1073,7 @@ test "mix-piece can compress, decompress and merge many segments with non-zero e
     for (0..20) |_| {
         // Generate floating points numbers between 0 and 10. This will generate many merged
         // segments when applying Mix-Piece.
-        try tester.generateBoundedRandomValues(&uncompressed_values, 0, 10, undefined);
+        try tester.generateBoundedRandomValues(allocator, &uncompressed_values, 0, 10, undefined);
     }
 
     try tester.testCompressAndDecompress(

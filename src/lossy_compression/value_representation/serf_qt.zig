@@ -219,12 +219,12 @@ test "serf-qt can compress and decompress within floating-point precision limits
     var uncompressed_values = ArrayList(f64).empty;
     defer uncompressed_values.deinit(allocator);
 
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1, 1, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e2, 1e2, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e4, 1e4, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e6, 1e6, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e8, 1e8, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e14, 1e14, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1, 1, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e2, 1e2, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e4, 1e4, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e6, 1e6, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e8, 1e8, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e14, 1e14, undefined);
 
     try tester.testCompressAndDecompress(
         allocator,
@@ -242,12 +242,12 @@ test "serf-qt can compress and decompress with zero error bound at different sca
     var uncompressed_values = ArrayList(f64).empty;
     defer uncompressed_values.deinit(allocator);
 
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1, 1, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e2, 1e2, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e4, 1e4, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e6, 1e6, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e8, 1e8, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e14, 1e14, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1, 1, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e2, 1e2, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e4, 1e4, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e6, 1e6, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e8, 1e8, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e14, 1e14, undefined);
 
     try tester.testCompressAndDecompress(
         allocator,
@@ -274,12 +274,12 @@ test "serf-qt always reduces size of time series" {
     // Generate 500 random values within different ranges. Even if some values require 8 bytes
     // to be stored, the quantization should reduce the size of the time series since some
     // values require less than 8 bytes to be stored after quantization.
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1, 1, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e2, 1e2, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e4, 1e4, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e6, 1e6, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e8, 1e8, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e14, 1e14, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1, 1, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e2, 1e2, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e4, 1e4, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e6, 1e6, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e8, 1e8, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e14, 1e14, undefined);
 
     var compressed_values = ArrayList(u8).empty;
     defer compressed_values.deinit(allocator);

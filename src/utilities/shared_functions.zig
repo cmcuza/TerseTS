@@ -373,8 +373,8 @@ test "encodeEliasGamma can encode simple values correctly" {
     const allocator = std.testing.allocator;
 
     const vals = [_]u64{ 15, 7, 3, 1 };
-    var encoded_values = ArrayList(u8).init(allocator);
-    defer encoded_values.deinit();
+    var encoded_values = ArrayList(u8).empty;
+    defer encoded_values.deinit(allocator);
     try encodeEliasGamma(&vals, &encoded_values);
 
     // The expected encoded values for 15, 7, 3, 1 are:
@@ -388,8 +388,8 @@ test "encodeEliasGamma cannot encode zero value" {
     const allocator = std.testing.allocator;
 
     const vals = [_]u64{ 15, 7, 0, 3, 1 };
-    var encoded_values = ArrayList(u8).init(allocator);
-    defer encoded_values.deinit();
+    var encoded_values = ArrayList(u8).empty;
+    defer encoded_values.deinit(allocator);
 
     encodeEliasGamma(&vals, &encoded_values) catch |err| {
         try testing.expect(err == Error.UnsupportedInput);
@@ -401,13 +401,13 @@ test "decodeEliasGamma can encode and decode simple values correctly" {
     const allocator = std.testing.allocator;
 
     const uncompressed_values = [_]u64{ 15, 7, 3, 1 };
-    var encoded_values = ArrayList(u8).init(allocator);
-    defer encoded_values.deinit();
+    var encoded_values = ArrayList(u8).empty;
+    defer encoded_values.deinit(allocator);
     try encodeEliasGamma(&uncompressed_values, &encoded_values);
 
-    var decoded_values = ArrayList(u64).init(allocator);
-    defer decoded_values.deinit();
-    try decodeEliasGamma(encoded_values.items, &decoded_values);
+    var decoded_values = ArrayList(u64).empty;
+    defer decoded_values.deinit(allocator);
+    try decodeEliasGamma(allocator, encoded_values.items, &decoded_values);
 
     for (decoded_values.items, 0..) |decoded_value, index| {
         try testing.expect(decoded_value == uncompressed_values[index]);
@@ -416,8 +416,8 @@ test "decodeEliasGamma can encode and decode simple values correctly" {
 
 test "decodeEliasGamma can encode and decode complex values correctly" {
     const allocator = std.testing.allocator;
-    var uncompressed_values = ArrayList(u64).init(allocator);
-    defer uncompressed_values.deinit();
+    var uncompressed_values = ArrayList(u64).empty;
+    defer uncompressed_values.deinit(allocator);
 
     const default_random = tester.getDefaultRandomGenerator();
     const number_of_tests = tester.generateNumberOfValues(default_random);
@@ -432,13 +432,13 @@ test "decodeEliasGamma can encode and decode complex values correctly" {
         try uncompressed_values.append(allocator, value);
     }
 
-    var encoded_values = ArrayList(u8).init(allocator);
-    defer encoded_values.deinit();
+    var encoded_values = ArrayList(u8).empty;
+    defer encoded_values.deinit(allocator);
     try encodeEliasGamma(uncompressed_values.items, &encoded_values);
 
-    var decoded_values = ArrayList(u64).init(allocator);
-    defer decoded_values.deinit();
-    try decodeEliasGamma(encoded_values.items, &decoded_values);
+    var decoded_values = ArrayList(u64).empty;
+    defer decoded_values.deinit(allocator);
+    try decodeEliasGamma(allocator, encoded_values.items, &decoded_values);
 
     for (decoded_values.items, 0..) |decoded_value, index| {
         try testing.expect(decoded_value == uncompressed_values.items[index]);

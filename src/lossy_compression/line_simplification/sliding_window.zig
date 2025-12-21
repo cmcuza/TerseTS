@@ -192,6 +192,7 @@ test "sliding-window can compress and decompress bounded values with zero error 
     defer uncompressed_values.deinit(allocator);
 
     try tester.generateBoundedRandomValues(
+        allocator,
         &uncompressed_values,
         -1e15,
         1e15,
@@ -205,16 +206,16 @@ test "sliding-window can compress and decompress bounded values with zero error 
     );
     defer allocator.free(configuration_json);
 
-    const compressed_values = try tersets.compress(
+    var compressed_values = try tersets.compress(
         allocator,
         uncompressed_values.items,
         tersets.Method.SlidingWindow,
         configuration_json,
     );
-    defer compressed_values.deinit();
+    defer compressed_values.deinit(allocator);
 
-    const decompressed_values = try tersets.decompress(allocator, compressed_values.items);
-    defer decompressed_values.deinit();
+    var decompressed_values = try tersets.decompress(allocator, compressed_values.items);
+    defer decompressed_values.deinit(allocator);
 
     try testing.expect(shared_functions.isWithinErrorBound(
         uncompressed_values.items,
@@ -290,7 +291,7 @@ test "sliding-window compress and decompress random lines and random error bound
 
     const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0.01, 1e6, undefined);
 
-    try tester.generateRandomLinearFunctions(&uncompressed_values, random);
+    try tester.generateRandomLinearFunctions(allocator, &uncompressed_values, random);
 
     const method_configuration = try std.fmt.allocPrint(
         allocator,
