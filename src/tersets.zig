@@ -64,8 +64,6 @@ pub const Error = error{
     EmptyConvexHull,
     EmptyQueue,
     ByteStreamError,
-    WriteFailed,
-    NoSpaceLeft,
 };
 
 /// The compression methods in TerseTS.

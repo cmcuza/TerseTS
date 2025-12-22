@@ -147,8 +147,6 @@ fn errorToInt(err: Error) i32 {
         Error.EmptyConvexHull => return 8,
         Error.EmptyQueue => return 9,
         Error.ByteStreamError => return 10,
-        Error.WriteFailed => return 11,
-        Error.NoSpaceLeft => return 12,
     }
 }
 
