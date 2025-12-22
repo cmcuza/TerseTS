@@ -105,8 +105,8 @@ pub fn compress(
     const large_limit = 0xFFFFFFFF; // Fits in 32 bits.
 
     // Bit-wise packing with fixed-length header.
-    var stream = io.fixedBufferStream(compressed_values.items);
-    var bit_writer = shared_structs.bitWriter(.little, stream.writer());
+    const writer = compressed_values.writer(allocator);
+    var bit_writer = shared_structs.bitWriter(.little, writer);
 
     for (quantized_values.items) |val| {
         if (val <= small_limit) {

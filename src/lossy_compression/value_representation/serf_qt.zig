@@ -96,7 +96,7 @@ pub fn compress(
     }
 
     // Encode the quantized values using Elias Gamma encoding.
-    try shared_functions.encodeEliasGamma(quantized_values.items, compressed_values);
+    try shared_functions.encodeEliasGamma(allocator, quantized_values.items, compressed_values);
 }
 
 /// Decompress `compressed_values` produced by "Serf-QT". The function writes the result to

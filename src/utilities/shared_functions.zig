@@ -218,9 +218,9 @@ pub fn decodeZigZag(value: u64) i64 {
 /// commonly used in data compression. The memory `allocator` is used to allocate the resulting
 /// encoded data. The function returns an `ArrayList(u8)` containing the encoded data, or an error
 /// if the input is unsupported or if memory allocation fails.
-pub fn encodeEliasGamma(values: []const u64, encoded_values: *ArrayList(u8)) !void {
-    var stream = io.fixedBufferStream(encoded_values.items);
-    var bit_writer = shared_structs.bitWriter(.little, stream.writer());
+pub fn encodeEliasGamma(allocator: Allocator, values: []const u64, encoded_values: *ArrayList(u8)) !void {
+    const writer = encoded_values.writer(allocator);
+    var bit_writer = shared_structs.bitWriter(.little, writer);
 
     for (values) |value| {
         if (value == 0) {
@@ -375,7 +375,7 @@ test "encodeEliasGamma can encode simple values correctly" {
     const vals = [_]u64{ 15, 7, 3, 1 };
     var encoded_values = ArrayList(u8).empty;
     defer encoded_values.deinit(allocator);
-    try encodeEliasGamma(&vals, &encoded_values);
+    try encodeEliasGamma(allocator, &vals, &encoded_values);
 
     // The expected encoded values for 15, 7, 3, 1 are:
     // at encoded_values.items[0] -> 00011110 == 30
@@ -391,7 +391,7 @@ test "encodeEliasGamma cannot encode zero value" {
     var encoded_values = ArrayList(u8).empty;
     defer encoded_values.deinit(allocator);
 
-    encodeEliasGamma(&vals, &encoded_values) catch |err| {
+    encodeEliasGamma(allocator, &vals, &encoded_values) catch |err| {
         try testing.expect(err == Error.UnsupportedInput);
         return;
     };
@@ -403,7 +403,7 @@ test "decodeEliasGamma can encode and decode simple values correctly" {
     const uncompressed_values = [_]u64{ 15, 7, 3, 1 };
     var encoded_values = ArrayList(u8).empty;
     defer encoded_values.deinit(allocator);
-    try encodeEliasGamma(&uncompressed_values, &encoded_values);
+    try encodeEliasGamma(allocator, &uncompressed_values, &encoded_values);
 
     var decoded_values = ArrayList(u64).empty;
     defer decoded_values.deinit(allocator);
@@ -434,7 +434,7 @@ test "decodeEliasGamma can encode and decode complex values correctly" {
 
     var encoded_values = ArrayList(u8).empty;
     defer encoded_values.deinit(allocator);
-    try encodeEliasGamma(uncompressed_values.items, &encoded_values);
+    try encodeEliasGamma(allocator, uncompressed_values.items, &encoded_values);
 
     var decoded_values = ArrayList(u64).empty;
     defer decoded_values.deinit(allocator);
