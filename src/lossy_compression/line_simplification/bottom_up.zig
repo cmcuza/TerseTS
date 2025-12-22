@@ -373,7 +373,7 @@ test "bottom-up can compress and decompress with zero error bound" {
         &uncompressed_values,
         -1e15,
         1e15,
-        undefined,
+        null,
     );
 
     const method_configuration = try std.fmt.allocPrint(
@@ -461,7 +461,7 @@ test "bottom-up random lines and random error bound compress and decompress" {
     var decompressed_values = ArrayList(f64).empty;
     defer decompressed_values.deinit(allocator);
 
-    const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0.01, 1e6, undefined);
+    const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0.01, 1e6, null);
 
     try tester.generateRandomLinearFunctions(allocator, &uncompressed_values, random);
 

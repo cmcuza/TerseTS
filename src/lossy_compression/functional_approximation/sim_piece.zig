@@ -633,13 +633,13 @@ test "sim-piece can compress, decompress and merge many segments with positive e
     // merging behavior. This justifies the use of these ranges: small error bounds create more
     // segments, and a wide value range increases the chance of segment boundaries.
     const allocator = testing.allocator;
-    const error_bound = tester.generateBoundedRandomValue(f32, 0.5, 3, undefined);
+    const error_bound = tester.generateBoundedRandomValue(f32, 0.5, 3, null);
 
     var uncompressed_values = ArrayList(f64).empty;
     defer uncompressed_values.deinit(allocator);
 
     for (0..20) |_| {
-        try tester.generateBoundedRandomValues(allocator, &uncompressed_values, 0, 10, undefined);
+        try tester.generateBoundedRandomValues(allocator, &uncompressed_values, 0, 10, null);
     }
 
     try tester.testCompressAndDecompress(

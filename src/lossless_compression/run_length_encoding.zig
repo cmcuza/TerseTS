@@ -123,16 +123,16 @@ test "run length encoding compresses repeated values" {
         usize,
         tester.global_at_least,
         tester.global_at_most,
-        undefined,
+        null,
     );
 
     for (0..distinct_elements) |_| {
-        const random_value = tester.generateRandomValue(undefined);
+        const random_value = tester.generateRandomValue(null);
         const repeat: usize = tester.generateBoundRandomInteger(
             usize,
             tester.global_at_least,
             tester.global_at_most,
-            undefined,
+            null,
         );
         for (0..repeat) |_| {
             try uncompressed_values.append(allocator, random_value);

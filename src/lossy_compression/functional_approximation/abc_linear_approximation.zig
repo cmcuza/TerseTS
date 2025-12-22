@@ -429,14 +429,14 @@ test "abc compressor identifies correct ABC points in the convex hull of a bigge
 
 test "abc compressor compresses and decompresses constant signal" {
     const allocator = std.testing.allocator;
-    const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0, 1, undefined);
+    const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0, 1, null);
 
     var uncompressed_values = ArrayList(f64).empty;
     defer uncompressed_values.deinit(allocator);
 
-    const constant_value: f64 = tester.generateBoundedRandomValue(f64, 0, 1, undefined);
+    const constant_value: f64 = tester.generateBoundedRandomValue(f64, 0, 1, null);
 
-    const number_elements: usize = tester.generateBoundRandomInteger(usize, 100, 150, undefined);
+    const number_elements: usize = tester.generateBoundRandomInteger(usize, 100, 150, null);
 
     for (0..number_elements) |_| {
         try uncompressed_values.append(allocator, constant_value);

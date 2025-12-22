@@ -196,7 +196,7 @@ test "sliding-window can compress and decompress bounded values with zero error 
         &uncompressed_values,
         -1e15,
         1e15,
-        undefined,
+        null,
     );
 
     const configuration_json = try std.fmt.allocPrint(
@@ -289,7 +289,7 @@ test "sliding-window compress and decompress random lines and random error bound
     var decompressed_values = ArrayList(f64).empty;
     defer decompressed_values.deinit(allocator);
 
-    const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0.01, 1e6, undefined);
+    const error_bound: f32 = tester.generateBoundedRandomValue(f32, 0.01, 1e6, null);
 
     try tester.generateRandomLinearFunctions(allocator, &uncompressed_values, random);
 
