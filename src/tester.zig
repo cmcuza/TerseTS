@@ -663,7 +663,7 @@ pub fn generateFiniteRandomValues(allocator: Allocator, uncompressed_values: *Ar
     while (index < generateNumberOfValues(random)) {
         // rand can only generate f64 values in the range [0, 1), thus using u64.
         const random_value = @as(f64, @bitCast(random.int(u64)));
-        // Online add finite values.
+        // Only add finite values.
         if (std.math.isFinite(random_value)) {
             try uncompressed_values.append(allocator, random_value);
             index += 1;

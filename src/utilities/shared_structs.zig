@@ -175,7 +175,7 @@ pub fn BitWriter(comptime endian: std.builtin.Endian, comptime Writer: type) typ
             self.addBits(@truncate(in), @intCast(in_count));
         }
 
-        //convenience funciton for adding bits to the buffer
+        //convenience function for adding bits to the buffer
         //in the appropriate position based on endianess
         fn addBits(self: *@This(), bits: u8, num: u4) void {
             if (num == 8) self.bits = bits else switch (endian) {
@@ -219,7 +219,7 @@ pub fn bitWriter(comptime endian: std.builtin.Endian, writer: anytype) BitWriter
 /// Zig's standard library is released under the MIT license. A new `BitReader` has not yet been
 /// added to master. To make it as explicit as possible that this code is copied from Zig's standard
 /// library, no attempt to make it consistent with TerseTS has been made.
-fn BitReader(comptime endian: std.builtin.Endian, comptime Reader: type) type {
+pub fn BitReader(comptime endian: std.builtin.Endian, comptime Reader: type) type {
     return struct {
         reader: Reader,
         bits: u8 = 0,
