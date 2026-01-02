@@ -203,12 +203,12 @@ pub fn BitWriter(comptime endian: std.builtin.Endian, comptime Writer: type) typ
     };
 }
 
-// Helper function to create a `BitWriter` with a specific type. `BitWriter` was removed in Zig
-// 0.15.1. Thus, it was copied from Zig's standard library as suggested in GitHub PR 24614 "Sorry,
-// you will have to copy the old code into your application, or use a third party package." Zig's
-// standard library is released under the MIT license. To make it as explicit as possible that this
-// code is copied from Zig's standard library, no attempt to make it consistent with TerseTS has
-// been made.
+/// Helper function to create a `BitWriter` with a specific type. `BitWriter` was removed in Zig
+/// 0.15.1. Thus, it was copied from Zig's standard library as suggested in GitHub PR 24614 "Sorry,
+/// you will have to copy the old code into your application, or use a third party package." Zig's
+/// standard library is released under the MIT license. To make it as explicit as possible that this
+/// code is copied from Zig's standard library, no attempt to make it consistent with TerseTS has
+/// been made.
 pub fn bitWriter(comptime endian: std.builtin.Endian, writer: anytype) BitWriter(endian, @TypeOf(writer)) {
     return .{ .writer = writer };
 }
@@ -363,12 +363,12 @@ pub fn BitReader(comptime endian: std.builtin.Endian, comptime Reader: type) typ
     };
 }
 
-// Helper function to create a `BitReader` with a specific type. `BitReader` was removed in Zig
-// 0.15.1. Thus, it was copied from Zig's standard library as suggested in GitHub PR 24614 "Sorry,
-// you will have to copy the old code into your application, or use a third party package." Zig's
-// standard library is released under the MIT license. To make it as explicit as possible that this
-// code is copied from Zig's standard library, no attempt to make it consistent with TerseTS has
-// been made.
+/// Helper function to create a `BitReader` with a specific type. `BitReader` was removed in Zig
+/// 0.15.1. Thus, it was copied from Zig's standard library as suggested in GitHub PR 24614 "Sorry,
+/// you will have to copy the old code into your application, or use a third party package." Zig's
+/// standard library is released under the MIT license. To make it as explicit as possible that this
+/// code is copied from Zig's standard library, no attempt to make it consistent with TerseTS has
+/// been made.
 pub fn bitReader(comptime endian: std.builtin.Endian, reader: anytype) BitReader(endian, @TypeOf(reader)) {
     return .{ .reader = reader };
 }

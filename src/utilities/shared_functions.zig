@@ -250,7 +250,7 @@ pub fn decodeEliasGamma(
     decoded_values: *ArrayList(u64),
 ) !void {
     // Create bit reader over full byte slice.
-    var stream = std.io.fixedBufferStream(compressed_values);
+    var stream = io.fixedBufferStream(compressed_values);
     var bit_reader = shared_structs.bitReader(.big, stream.reader());
 
     while (true) {

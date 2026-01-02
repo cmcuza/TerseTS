@@ -15,7 +15,6 @@
 //! Provides a Zig API for TerseTS.
 
 const std = @import("std");
-const Writer = std.io.Writer;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
