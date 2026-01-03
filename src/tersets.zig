@@ -96,14 +96,14 @@ pub fn compress(
     method: Method,
     configuration: []const u8,
 ) Error!ArrayList(u8) {
-    var compressed_values = ArrayList(u8).init(allocator);
+    var compressed_values = ArrayList(u8).empty;
 
     // If the input is one or zero elements, just store them uncompressed disregarding
     // the compression method.
     if (uncompressed_values.len < 2) {
         if (uncompressed_values.len == 1) {
             const value_as_bytes: [8]u8 = @bitCast(uncompressed_values[0]);
-            try compressed_values.appendSlice(value_as_bytes[0..]);
+            try compressed_values.appendSlice(allocator, value_as_bytes[0..]);
             return compressed_values;
         }
         // The `uncompressed_values` is empty.
@@ -248,7 +248,7 @@ pub fn compress(
             );
         },
     }
-    try compressed_values.append(@intFromEnum(method));
+    try compressed_values.append(allocator, @intFromEnum(method));
     return compressed_values;
 }
 
@@ -261,12 +261,12 @@ pub fn decompress(
 ) Error!ArrayList(f64) {
     if (compressed_values.len == 0) return Error.CorruptedCompressedData;
 
-    var decompressed_values = ArrayList(f64).init(allocator);
+    var decompressed_values = ArrayList(f64).empty;
 
     // Handle the trivial case of one element.
     if (compressed_values.len == 8) {
         const value: f64 = @bitCast(compressed_values[0..8].*);
-        try decompressed_values.append(value);
+        try decompressed_values.append(allocator, value);
         return decompressed_values;
     }
 
@@ -279,13 +279,13 @@ pub fn decompress(
 
     switch (method) {
         .PoorMansCompressionMidrange, .PoorMansCompressionMean => {
-            try poor_mans_compression.decompress(compressed_values_slice, &decompressed_values);
+            try poor_mans_compression.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .SwingFilter => {
-            try swing_slide_filter.decompressSwingFilter(compressed_values_slice, &decompressed_values);
+            try swing_slide_filter.decompressSwingFilter(allocator, compressed_values_slice, &decompressed_values);
         },
         .SwingFilterDisconnected, .SlideFilter => {
-            try swing_slide_filter.decompressSlideFilter(compressed_values_slice, &decompressed_values);
+            try swing_slide_filter.decompressSlideFilter(allocator, compressed_values_slice, &decompressed_values);
         },
         .SimPiece => {
             try sim_piece.decompress(allocator, compressed_values_slice, &decompressed_values);
@@ -294,28 +294,28 @@ pub fn decompress(
             try mix_piece.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .PiecewiseConstantHistogram => {
-            try piecewise_histogram.decompressPWCH(compressed_values_slice, &decompressed_values);
+            try piecewise_histogram.decompressPWCH(allocator, compressed_values_slice, &decompressed_values);
         },
         .PiecewiseLinearHistogram => {
-            try piecewise_histogram.decompressPWLH(compressed_values_slice, &decompressed_values);
+            try piecewise_histogram.decompressPWLH(allocator, compressed_values_slice, &decompressed_values);
         },
         .ABCLinearApproximation => {
-            try abc_linear_approximation.decompress(compressed_values_slice, &decompressed_values);
+            try abc_linear_approximation.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .VisvalingamWhyatt => {
-            try vw.decompress(compressed_values_slice, &decompressed_values);
+            try vw.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .SlidingWindow => {
-            try sliding_window.decompress(compressed_values_slice, &decompressed_values);
+            try sliding_window.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .BottomUp => {
-            try bottom_up.decompress(compressed_values_slice, &decompressed_values);
+            try bottom_up.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .RunLengthEncoding => {
-            try rle_enconding.decompress(compressed_values_slice, &decompressed_values);
+            try rle_enconding.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .BitPackedQuantization => {
-            try bitpacked_quantization.decompress(compressed_values_slice, &decompressed_values);
+            try bitpacked_quantization.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .NonLinearApproximation => {
             try non_linear_approximation.decompress(allocator, compressed_values_slice, &decompressed_values);

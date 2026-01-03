@@ -56,11 +56,11 @@ pub fn compress(
     const bucket_size: f64 = shared_functions.createQuantizationBucket(error_bound);
 
     // Append the minimum value to the header of the compressed values.
-    try shared_functions.appendValue(f64, bucket_size, compressed_values);
+    try shared_functions.appendValue(allocator, f64, bucket_size, compressed_values);
 
     //Intermediate quantized values.
-    var quantized_values = ArrayList(u64).init(allocator);
-    defer quantized_values.deinit();
+    var quantized_values = ArrayList(u64).empty;
+    defer quantized_values.deinit(allocator);
 
     // Assume the first value is zero for simplicity (Section 4.1).
     var previous_value: f64 = 0.0;
@@ -92,11 +92,11 @@ pub fn compress(
             previous_value = predict_value;
         }
 
-        try quantized_values.append(encoded_value);
+        try quantized_values.append(allocator, encoded_value);
     }
 
     // Encode the quantized values using Elias Gamma encoding.
-    try shared_functions.encodeEliasGamma(quantized_values.items, compressed_values);
+    try shared_functions.encodeEliasGamma(allocator, quantized_values.items, compressed_values);
 }
 
 /// Decompress `compressed_values` produced by "Serf-QT". The function writes the result to
@@ -113,11 +113,12 @@ pub fn decompress(
     // Read bucket_size from the header.
     const bucket_size: f64 = @bitCast(compressed_values[0..8].*);
 
-    var decoded_quantized_values = ArrayList(u64).init(allocator);
-    defer decoded_quantized_values.deinit();
+    var decoded_quantized_values = ArrayList(u64).empty;
+    defer decoded_quantized_values.deinit(allocator);
 
     // Decode the Elias Gamma encoded quantized values.
     try shared_functions.decodeEliasGamma(
+        allocator,
         compressed_values[8..compressed_values.len],
         &decoded_quantized_values,
     );
@@ -135,7 +136,7 @@ pub fn decompress(
             decompressed_value = previous_val + un_zigzag_value * bucket_size;
             previous_val = decompressed_value;
         }
-        try decompressed_values.append(decompressed_value);
+        try decompressed_values.append(allocator, decompressed_value);
     }
 }
 
@@ -158,8 +159,8 @@ test "serf-qt can compress and decompress bounded values" {
 test "serf-qt cannot compress and decompress nan values" {
     const allocator = testing.allocator;
     const uncompressed_values = [3]f64{ 343.0, math.nan(f64), 520.0 };
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"abs_error_bound": 0.1}
@@ -187,8 +188,8 @@ test "serf-qt cannot compress and decompress values exceeding floating-point pre
     // A value exceeding floating-point precision limits refers to a number that cannot be
     // accurately represented using f64 due to its magnitude, such as 1e20.
     const uncompressed_values = [3]f64{ 343.0, 1e20, 520.0 };
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"abs_error_bound": 0.1}
@@ -213,17 +214,17 @@ test "serf-qt cannot compress and decompress values exceeding floating-point pre
 
 test "serf-qt can compress and decompress within floating-point precision limits at different scales" {
     const allocator = testing.allocator;
-    const error_bound = tester.generateBoundedRandomValue(f32, 0, 1e3, undefined);
+    const error_bound = tester.generateBoundedRandomValue(f32, 0, 1e3, null);
 
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
+    var uncompressed_values = ArrayList(f64).empty;
+    defer uncompressed_values.deinit(allocator);
 
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1, 1, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e2, 1e2, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e4, 1e4, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e6, 1e6, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e8, 1e8, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e14, 1e14, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1, 1, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e2, 1e2, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e4, 1e4, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e6, 1e6, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e8, 1e8, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e14, 1e14, null);
 
     try tester.testCompressAndDecompress(
         allocator,
@@ -238,15 +239,15 @@ test "serf-qt can compress and decompress with zero error bound at different sca
     const allocator = testing.allocator;
     const error_bound = 0;
 
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
+    var uncompressed_values = ArrayList(f64).empty;
+    defer uncompressed_values.deinit(allocator);
 
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1, 1, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e2, 1e2, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e4, 1e4, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e6, 1e6, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e8, 1e8, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e14, 1e14, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1, 1, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e2, 1e2, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e4, 1e4, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e6, 1e6, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e8, 1e8, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e14, 1e14, null);
 
     try tester.testCompressAndDecompress(
         allocator,
@@ -264,24 +265,24 @@ test "serf-qt always reduces size of time series" {
         f32,
         1e1,
         1e3,
-        undefined,
+        null,
     )) * 0.1;
 
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
+    var uncompressed_values = ArrayList(f64).empty;
+    defer uncompressed_values.deinit(allocator);
 
     // Generate 500 random values within different ranges. Even if some values require 8 bytes
     // to be stored, the quantization should reduce the size of the time series since some
     // values require less than 8 bytes to be stored after quantization.
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1, 1, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e2, 1e2, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e4, 1e4, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e6, 1e6, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e8, 1e8, undefined);
-    try tester.generateBoundedRandomValues(&uncompressed_values, -1e14, 1e14, undefined);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1, 1, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e2, 1e2, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e4, 1e4, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e6, 1e6, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e8, 1e8, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e14, 1e14, null);
 
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration = try std.fmt.allocPrint(
         allocator,
@@ -309,8 +310,8 @@ test "check serf-qt configuration parsing" {
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, 29.0, 3.0 };
 
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"abs_error_bound": 0.1}

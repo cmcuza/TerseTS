@@ -50,29 +50,29 @@ pub fn compress(
     var current_value: f64 = uncompressed_values[0];
 
     // Append the first value to the compressed values.
-    try shared_functions.appendValue(f64, uncompressed_values[0], compressed_values);
+    try shared_functions.appendValue(allocator, f64, uncompressed_values[0], compressed_values);
 
     for (uncompressed_values) |value| {
         if (value == current_value) {
             counter += 1;
         } else {
             // Append the count of the previous value.
-            try shared_functions.appendValue(usize, counter, compressed_values);
+            try shared_functions.appendValue(allocator, usize, counter, compressed_values);
             // Reset for the new value.
             current_value = value;
             counter = 1;
             // Append the new value.
-            try shared_functions.appendValue(f64, value, compressed_values);
+            try shared_functions.appendValue(allocator, f64, value, compressed_values);
         }
     }
 
     // Append the count of the last value.
-    try shared_functions.appendValue(usize, counter, compressed_values);
+    try shared_functions.appendValue(allocator, usize, counter, compressed_values);
 }
 
 /// Decompress `compressed_values` produced by "Run-Length-Encoding" and write the
 /// result to `decompressed_values`. If an error occurs it is returned.
-pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList(f64)) Error!void {
+pub fn decompress(allocator: Allocator, compressed_values: []const u8, decompressed_values: *ArrayList(f64)) Error!void {
     if (compressed_values.len % 16 != 0) return Error.UnsupportedInput;
 
     const compressed_representation = mem.bytesAsSlice(f64, compressed_values);
@@ -84,7 +84,7 @@ pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList
 
         // Append the value `count` times to the decompressed values.
         for (0..count) |_| {
-            try decompressed_values.append(value);
+            try decompressed_values.append(allocator, value);
         }
     }
 }
@@ -114,8 +114,8 @@ test "rle can always compress and decompress" {
 test "run length encoding compresses repeated values" {
     const allocator = testing.allocator;
 
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
+    var uncompressed_values = ArrayList(f64).empty;
+    defer uncompressed_values.deinit(allocator);
 
     // Generate a random number of `distinct_elements` that will be repeated a random number of times
     // to test that RLE can compress repeated values.
@@ -123,34 +123,34 @@ test "run length encoding compresses repeated values" {
         usize,
         tester.global_at_least,
         tester.global_at_most,
-        undefined,
+        null,
     );
 
     for (0..distinct_elements) |_| {
-        const random_value = tester.generateRandomValue(undefined);
+        const random_value = tester.generateRandomValue(null);
         const repeat: usize = tester.generateBoundRandomInteger(
             usize,
             tester.global_at_least,
             tester.global_at_most,
-            undefined,
+            null,
         );
         for (0..repeat) |_| {
-            try uncompressed_values.append(random_value);
+            try uncompressed_values.append(allocator, random_value);
         }
     }
 
     const method_configuration = "{}";
 
-    const compressed_values = try tersets.compress(
+    var compressed_values = try tersets.compress(
         allocator,
         uncompressed_values.items,
         Method.RunLengthEncoding,
         method_configuration,
     );
-    defer compressed_values.deinit();
+    defer compressed_values.deinit(allocator);
 
-    const decompressed_values = try tersets.decompress(allocator, compressed_values.items);
-    defer decompressed_values.deinit();
+    var decompressed_values = try tersets.decompress(allocator, compressed_values.items);
+    defer decompressed_values.deinit(allocator);
 
     try testing.expect(shared_functions.isWithinErrorBound(
         uncompressed_values.items,
@@ -167,8 +167,8 @@ test "check rle configuration parsing" {
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, 29.0, 3.0 };
 
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {}

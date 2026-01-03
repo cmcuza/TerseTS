@@ -92,6 +92,7 @@ pub fn compressPWCH(
     for (0..histogram.len()) |index| {
         var bucket: Bucket = histogram.at(index);
         try shared_functions.appendValueAndIndexToArrayList(
+            allocator,
             bucket.computeConstantApproximation(),
             bucket.end + 1,
             compressed_values,
@@ -146,20 +147,21 @@ pub fn compressPWLH(
             const begin_value: f64 = slope * x_init + intercept;
             const end_value: f64 = slope * x_end + linear_approximation.intercept;
 
-            try shared_functions.appendValue(f64, begin_value, compressed_values);
-            try shared_functions.appendValue(f64, end_value, compressed_values);
+            try shared_functions.appendValue(allocator, f64, begin_value, compressed_values);
+            try shared_functions.appendValue(allocator, f64, end_value, compressed_values);
         } else {
-            try shared_functions.appendValue(f64, uncompressed_values[bucket.begin], compressed_values);
-            try shared_functions.appendValue(f64, uncompressed_values[bucket.end], compressed_values);
+            try shared_functions.appendValue(allocator, f64, uncompressed_values[bucket.begin], compressed_values);
+            try shared_functions.appendValue(allocator, f64, uncompressed_values[bucket.end], compressed_values);
         }
 
-        try shared_functions.appendValue(usize, bucket.end + 1, compressed_values);
+        try shared_functions.appendValue(allocator, usize, bucket.end + 1, compressed_values);
     }
 }
 
 /// Decompress `compressed_values` produced by "Piecewise Constant Histogram" and write the result
 /// to `decompressed_values`. If an error occurs it is returned.
 pub fn decompressPWCH(
+    allocator: Allocator,
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
 ) Error!void {
@@ -175,7 +177,7 @@ pub fn decompressPWCH(
         const value = compressed_values_and_index[compressed_index];
         const index: usize = @bitCast(compressed_values_and_index[compressed_index + 1]);
         for (uncompressed_index..index) |_| {
-            try decompressed_values.append(value);
+            try decompressed_values.append(allocator, value);
         }
         uncompressed_index = index;
     }
@@ -184,6 +186,7 @@ pub fn decompressPWCH(
 /// Decompress `compressed_values` produced by "PWLH" and write the result to `decompressed_values`.
 /// If an error occurs it is returned.
 pub fn decompressPWLH(
+    allocator: Allocator,
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
 ) Error!void {
@@ -218,18 +221,18 @@ pub fn decompressPWLH(
                 linear_approximation.slope = 0.0;
                 linear_approximation.intercept = current_segment.start_point.value;
             }
-            try decompressed_values.append(current_segment.start_point.value);
+            try decompressed_values.append(allocator, current_segment.start_point.value);
             var current_timestamp: usize = current_segment.start_point.time + 1;
             while (current_timestamp < current_segment.end_point.time) : (current_timestamp += 1) {
                 const y: f64 = @floatCast(linear_approximation.slope *
                     @as(f64, @floatFromInt(current_timestamp)) +
                     linear_approximation.intercept);
-                try decompressed_values.append(y);
+                try decompressed_values.append(allocator, y);
             }
-            try decompressed_values.append(current_segment.end_point.value);
+            try decompressed_values.append(allocator, current_segment.end_point.value);
             first_timestamp = current_timestamp + 1;
         } else {
-            try decompressed_values.append(current_segment.start_point.value);
+            try decompressed_values.append(allocator, current_segment.start_point.value);
             first_timestamp += 1;
         }
     }
@@ -257,7 +260,7 @@ const Bucket = struct {
     convex_hull: ConvexHull,
 
     /// Initialize the bucket with the given indices and min/max values.
-    pub fn init(begin: usize, end: usize, min_val: f64, max_val: f64, allocator: mem.Allocator) !Bucket {
+    pub fn init(allocator: Allocator, begin: usize, end: usize, min_val: f64, max_val: f64) !Bucket {
         return Bucket{
             .begin = begin,
             .end = end,
@@ -319,12 +322,12 @@ fn compareMergeError(_: void, error_1: MergeError, error_2: MergeError) math.Ord
 const Histogram = struct {
     const Self = @This();
 
-    // Enum to determine the approximation type.
-    approximation: Approximation,
     // Memory allocator for the convex hull in the buckets.
-    allocator: mem.Allocator,
+    allocator: Allocator,
     // Target number of buckets.
     maximum_buckets: u32,
+    // Enum to determine the approximation type.
+    approximation: Approximation,
     // List of current buckets.
     buckets: ArrayList(Bucket),
     // Priority queue of merge errors.
@@ -339,12 +342,12 @@ const Histogram = struct {
     /// parameter can be thought of as fixing a minimum compression ratio that users wants to achieve.
     /// The `minMerge` function will then find the optimal histogram under this constraint.
     /// For example, if `maximum_buckets=|N|/2`, then the compression ratio will be at least 2x.
-    pub fn init(allocator: mem.Allocator, maximum_buckets: u32, approximation: Approximation) !Histogram {
+    pub fn init(allocator: Allocator, maximum_buckets: u32, approximation: Approximation) !Histogram {
         return Histogram{
-            .approximation = approximation,
             .allocator = allocator,
             .maximum_buckets = maximum_buckets,
-            .buckets = ArrayList(Bucket).init(allocator),
+            .approximation = approximation,
+            .buckets = ArrayList(Bucket).empty,
             .merge_queue = try HashedPriorityQueue(
                 MergeError,
                 void,
@@ -360,18 +363,18 @@ const Histogram = struct {
         for (self.buckets.items) |*bucket| {
             bucket.deinit();
         }
-        self.buckets.deinit();
+        self.buckets.deinit(self.allocator);
         self.merge_queue.deinit();
     }
 
     /// Insert a new value into the histogram.
     pub fn insert(self: *Self, index: usize, value: f64) !void {
         // Create a new bucket for the incoming value with start and end at 'index'.
-        var bucket: Bucket = try Bucket.init(index, index, value, value, self.allocator);
+        var bucket: Bucket = try Bucket.init(self.allocator, index, index, value, value);
 
         try bucket.convex_hull.add(.{ .time = index, .value = value });
 
-        try self.buckets.append(bucket);
+        try self.buckets.append(self.allocator, bucket);
 
         if (self.buckets.items.len > 1) {
             const bucket_last_index: usize = self.buckets.items.len - 1;
@@ -653,14 +656,14 @@ test "Fixed cluster number with random values for PWCH" {
     };
 
     // Collect all data points.
-    var data_points = ArrayList(f64).init(allocator);
-    defer data_points.deinit();
+    var data_points = ArrayList(f64).empty;
+    defer data_points.deinit(allocator);
 
     // Generate random values for each cluster.
     for (cluster_ranges) |cluster| {
         for (0..cluster.count) |_| {
             const value = tester.generateBoundedRandomValue(f64, cluster.min, cluster.max, random);
-            try data_points.append(value);
+            try data_points.append(allocator, value);
         }
     }
 
@@ -674,8 +677,8 @@ test "Fixed cluster number with random values for PWCH" {
     }
 
     // Build the expected histogram by iterating over cluster_ranges.
-    var expected_histogram = ArrayList(Bucket).init(allocator);
-    defer expected_histogram.deinit();
+    var expected_histogram = ArrayList(Bucket).empty;
+    defer expected_histogram.deinit(allocator);
 
     var convex_hull: ConvexHull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
@@ -689,7 +692,7 @@ test "Fixed cluster number with random values for PWCH" {
             .max_val = cluster.max,
             .convex_hull = convex_hull,
         };
-        try expected_histogram.append(bucket);
+        try expected_histogram.append(allocator, bucket);
         current_begin += cluster.count;
     }
 
@@ -714,8 +717,8 @@ test "Random clusters, elements per cluster and values for PWCH" {
         min: f64,
         max: f64,
         count: usize,
-    }).init(allocator);
-    defer cluster_ranges.deinit();
+    }).empty;
+    defer cluster_ranges.deinit(allocator);
 
     const min_value: f64 = -1e6;
     const cluster_width: f64 = tester.generateBoundedRandomValue(f64, 100, 1000, random);
@@ -735,7 +738,7 @@ test "Random clusters, elements per cluster and values for PWCH" {
         const cluster_max = cluster_min + cluster_width;
         const count: usize = random.uintLessThan(usize, max_counts_per_cluster) + 10;
         // Append the cluster to cluster_ranges.
-        try cluster_ranges.append(.{
+        try cluster_ranges.append(allocator, .{
             .min = cluster_min,
             .max = cluster_max,
             .count = count,
@@ -744,14 +747,14 @@ test "Random clusters, elements per cluster and values for PWCH" {
     }
 
     // Collect all data points.
-    var data_points = ArrayList(f64).init(allocator);
-    defer data_points.deinit();
+    var data_points = ArrayList(f64).empty;
+    defer data_points.deinit(allocator);
 
     // Generate random values for each cluster.
     for (cluster_ranges.items) |cluster| {
         for (0..cluster.count) |_| {
             const value = tester.generateBoundedRandomValue(f64, cluster.min, cluster.max, random);
-            try data_points.append(value);
+            try data_points.append(allocator, value);
         }
     }
 
@@ -765,8 +768,8 @@ test "Random clusters, elements per cluster and values for PWCH" {
     }
 
     // Build the expected histogram by iterating over cluster_ranges.
-    var expected_histogram = ArrayList(Bucket).init(allocator);
-    defer expected_histogram.deinit();
+    var expected_histogram = ArrayList(Bucket).empty;
+    defer expected_histogram.deinit(allocator);
 
     var convex_hull: ConvexHull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
@@ -780,7 +783,7 @@ test "Random clusters, elements per cluster and values for PWCH" {
             .max_val = cluster.max,
             .convex_hull = convex_hull,
         };
-        try expected_histogram.append(bucket);
+        try expected_histogram.append(allocator, bucket);
         current_begin += cluster.count;
     }
 
@@ -813,14 +816,14 @@ test "Compute simple linear approximation merge error with known results" {
     var histogram = try Histogram.init(allocator, 2, .linear);
     defer histogram.deinit();
 
-    try histogram.buckets.append(.{
+    try histogram.buckets.append(allocator, .{
         .begin = 0,
         .end = 0,
         .min_val = 0,
         .max_val = 0,
         .convex_hull = convex_hull_one,
     });
-    try histogram.buckets.append(.{
+    try histogram.buckets.append(allocator, .{
         .begin = 0,
         .end = 0,
         .min_val = 0,
@@ -852,14 +855,14 @@ test "Compute divergent linear approximation merge error with known results" {
     var histogram = try Histogram.init(allocator, 2, .linear);
     defer histogram.deinit();
 
-    try histogram.buckets.append(.{
+    try histogram.buckets.append(allocator, .{
         .begin = 0,
         .end = 0,
         .min_val = 0,
         .max_val = 0,
         .convex_hull = convex_hull_one,
     });
-    try histogram.buckets.append(.{
+    try histogram.buckets.append(allocator, .{
         .begin = 0,
         .end = 0,
         .min_val = 0,
@@ -920,8 +923,8 @@ test "check PWCH configuration parsing" {
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, 28.0, 3.0 };
 
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"histogram_bins_number": 10}
@@ -944,8 +947,8 @@ test "check PWLH configuration parsing" {
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, 28.0, 3.0 };
 
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"histogram_bins_number": 10}
