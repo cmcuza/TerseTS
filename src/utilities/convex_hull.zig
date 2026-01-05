@@ -24,6 +24,7 @@ const mem = std.mem;
 const math = std.math;
 const ArrayList = std.ArrayList;
 const testing = std.testing;
+const Allocator = std.mem.Allocator;
 
 const tersets = @import("../tersets.zig");
 const Error = tersets.Error;
@@ -48,29 +49,29 @@ const HullType = enum(i8) { upperHull, lowerHull };
 /// Convex Hull formed by an upper and lower hull. The hulls are formed by the input data with
 /// discrete time axis thus, the ConvexHull is always represented by `DiscretePoint`.
 pub const ConvexHull = struct {
+    allocator: Allocator,
     lower_hull: ArrayList(DiscretePoint),
     upper_hull: ArrayList(DiscretePoint),
-    allocator: mem.Allocator,
 
     // Initialize the container with a given `allocator`.
-    pub fn init(allocator: mem.Allocator) !ConvexHull {
+    pub fn init(allocator: Allocator) !ConvexHull {
         return ConvexHull{
-            .lower_hull = ArrayList(DiscretePoint).init(allocator),
-            .upper_hull = ArrayList(DiscretePoint).init(allocator),
             .allocator = allocator,
+            .lower_hull = ArrayList(DiscretePoint).empty,
+            .upper_hull = ArrayList(DiscretePoint).empty,
         };
     }
 
     // Deinitialize the container and free the allocated memory.
     pub fn deinit(self: *ConvexHull) void {
-        self.lower_hull.deinit();
-        self.upper_hull.deinit();
+        self.lower_hull.deinit(self.allocator);
+        self.upper_hull.deinit(self.allocator);
     }
 
     /// Add a new `point` to the convex hull.
     pub fn add(self: *ConvexHull, point: DiscretePoint) !void {
-        try addToHull(&self.upper_hull, Turn.right, point);
-        try addToHull(&self.lower_hull, Turn.left, point);
+        try addToHull(self.allocator, &self.upper_hull, Turn.right, point);
+        try addToHull(self.allocator, &self.lower_hull, Turn.left, point);
     }
 
     /// Invalidates all element pointers in the upper and lower hull. The capacity is preserved.
@@ -199,8 +200,8 @@ pub const ConvexHull = struct {
     pub fn merge(self: *ConvexHull, other: *ConvexHull, merged: ?*ConvexHull) !void {
         // Add points from `self` to `merged` if non-in-place.
         if (merged) |m| {
-            const self_points = try self.getAllPointsSorted();
-            defer self_points.deinit(); // Free sorted points when done.
+            var self_points = try self.getAllPointsSorted();
+            defer self_points.deinit(self.allocator); // Free sorted points when done.
             for (self_points.items) |point| {
                 try m.add(point);
             }
@@ -216,8 +217,8 @@ pub const ConvexHull = struct {
 
         // Special case: if `target` has only one point, transfer points from `other`.
         if (target.len() == 1) {
-            const other_points = try other.getAllPointsSorted();
-            defer other_points.deinit(); // Free sorted points when done.
+            var other_points = try other.getAllPointsSorted();
+            defer other_points.deinit(self.allocator); // Free sorted points when done.
             for (other_points.items) |point| {
                 try target.add(point);
             }
@@ -241,13 +242,13 @@ pub const ConvexHull = struct {
         // Add points to the target upper hull from the right-most point
         // of the `other`'s upper hull tangent.
         for (upper_tangent.hull_two_idx..other.upper_hull.items.len) |i| {
-            try target.upper_hull.append(other.upper_hull.items[i]);
+            try target.upper_hull.append(self.allocator, other.upper_hull.items[i]);
         }
 
         // Add points to the target lower hull from the right-most point
         // of the `other`'s lower hull tangent.
         for (lower_tangent.hull_two_idx..other.lower_hull.items.len) |i| {
-            try target.lower_hull.append(other.lower_hull.items[i]);
+            try target.lower_hull.append(self.allocator, other.lower_hull.items[i]);
         }
     }
 
@@ -327,10 +328,10 @@ pub const ConvexHull = struct {
         );
 
         for (self.lower_hull.items) |item| {
-            try hull.append(item);
+            try hull.append(self.allocator, item);
         }
         for (1..self.upper_hull.items.len - 1) |i| {
-            try hull.append(self.upper_hull.items[i]);
+            try hull.append(self.allocator, self.upper_hull.items[i]);
         }
         return hull;
     }
@@ -356,25 +357,25 @@ pub const ConvexHull = struct {
 
             if (lower_point.time <= upper_point.time) {
                 // Add the point from the lower hull.
-                try all_points.append(lower_point);
+                try all_points.append(self.allocator, lower_point);
                 lower_idx += 1;
             } else {
                 // Add the point from the upper hull.
-                try all_points.append(upper_point);
+                try all_points.append(self.allocator, upper_point);
                 upper_idx += 1;
             }
         }
 
         // Append remaining points from the lower hull, if any.
         while (lower_idx < self.lower_hull.items.len) {
-            try all_points.append(self.lower_hull.items[lower_idx]);
+            try all_points.append(self.allocator, self.lower_hull.items[lower_idx]);
             lower_idx += 1;
         }
 
         // Append remaining points from the upper hull, if any. Since the first and final element are
         // repeated, we start `upper_idx=1` and only loop until `self.upper_hull.items.len - 1`.
         while (upper_idx < self.upper_hull.items.len - 1) {
-            try all_points.append(self.upper_hull.items[upper_idx]);
+            try all_points.append(self.allocator, self.upper_hull.items[upper_idx]);
             upper_idx += 1;
         }
 
@@ -383,10 +384,10 @@ pub const ConvexHull = struct {
 
     /// Auxiliary function to add a new `point` to a given `hull` of the convex hull. The function
     /// uses the given `turn` to correctly add the new point.
-    fn addToHull(hull: *ArrayList(DiscretePoint), turn: Turn, point: DiscretePoint) !void {
+    fn addToHull(allocator: Allocator, hull: *ArrayList(DiscretePoint), turn: Turn, point: DiscretePoint) !void {
         if (hull.items.len < 2) {
             // The first two points can be add directly.
-            try hull.append(point);
+            try hull.append(allocator, point);
         } else {
             var top: usize = hull.items.len - 1;
             // Remove the last point as long as the `turn` is not the provided.
@@ -397,7 +398,7 @@ pub const ConvexHull = struct {
             ) != turn)) : (top -= 1) {
                 _ = hull.pop();
             }
-            try hull.append(point);
+            try hull.append(allocator, point);
         }
     }
 };
@@ -595,10 +596,10 @@ fn mergeConvexHullsTestHelper(in_place: bool) !void {
 
 /// Helper function that verifies that the points in the `convex_hull` are the same as the points
 /// in `list_of_points`. This ensures that the convex hull has not been modified during operations.
-fn verifyConvexHullNotModified(convex_hull: *ConvexHull, list_of_points: *const ArrayList(DiscretePoint)) !void {
+fn verifyConvexHullNotModified(allocator: Allocator, convex_hull: *ConvexHull, list_of_points: *const ArrayList(DiscretePoint)) !void {
     // Get all points from the convex hull, sorted.
-    const convex_hull_points = try convex_hull.getAllPointsSorted();
-    defer convex_hull_points.deinit(); // Ensure the allocated memory is freed.
+    var convex_hull_points = try convex_hull.getAllPointsSorted();
+    defer convex_hull_points.deinit(allocator); // Ensure the allocated memory is freed.
 
     // Iterate over each point and compare it with the corresponding point in the list.
     for (0..convex_hull_points.items.len) |i| {
@@ -1014,8 +1015,8 @@ test "Merge not-in-place does not modify the convex hulls one and two" {
     }
 
     // Capture the state of convex_hull_one before merging.
-    const convex_hull_one_before = try convex_hull_one.getAllPointsSorted();
-    defer convex_hull_one_before.deinit();
+    var convex_hull_one_before = try convex_hull_one.getAllPointsSorted();
+    defer convex_hull_one_before.deinit(allocator);
 
     // Initialize convex_hull_two.
     var convex_hull_two = try ConvexHull.init(allocator);
@@ -1025,8 +1026,8 @@ test "Merge not-in-place does not modify the convex hulls one and two" {
     }
 
     // Capture the state of convex_hull_two before merging.
-    const convex_hull_two_before = try convex_hull_two.getAllPointsSorted();
-    defer convex_hull_two_before.deinit();
+    var convex_hull_two_before = try convex_hull_two.getAllPointsSorted();
+    defer convex_hull_two_before.deinit(allocator);
 
     // Initialize the merged convex hull.
     var convex_hull_merged = try ConvexHull.init(allocator);
@@ -1038,8 +1039,8 @@ test "Merge not-in-place does not modify the convex hulls one and two" {
     // Verify the merged convex hull satisfies its properties.
     try testConvexHullProperty(&convex_hull_merged);
 
-    try verifyConvexHullNotModified(&convex_hull_one, &convex_hull_one_before);
-    try verifyConvexHullNotModified(&convex_hull_two, &convex_hull_two_before);
+    try verifyConvexHullNotModified(allocator, &convex_hull_one, &convex_hull_one_before);
+    try verifyConvexHullNotModified(allocator, &convex_hull_two, &convex_hull_two_before);
 }
 
 test "Compute max error with known points and linear function" {
@@ -1086,13 +1087,13 @@ test "Compute max error with random points and linear function" {
     var convex_hull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
 
-    var points = ArrayList(f64).init(allocator);
-    defer points.deinit();
+    var points = ArrayList(f64).empty;
+    defer points.deinit(allocator);
 
     for (0..tester.generateNumberOfValues(random)) |i| {
         const rand_value = random.float(f64);
         try convex_hull.add(.{ .time = i, .value = rand_value });
-        try points.append(rand_value);
+        try points.append(allocator, rand_value);
     }
 
     // Define a linear function (e.g., y = 2x + 1)

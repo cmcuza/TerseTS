@@ -16,26 +16,28 @@ const std = @import("std");
 
 pub fn build(b: *std.Build) void {
 
-    // Configuration.
-    const path = b.path("src/capi.zig");
-    const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
+    // Create root module.
+    const root_module = b.createModule(.{
+        .root_source_file = b.path("src/capi.zig"),
+        .target = b.standardTargetOptions(.{}),
+        .optimize = b.standardOptimizeOption(.{}),
+    });
 
     // Task for compilation.
-    const lib = b.addSharedLibrary(.{
+    const library = b.addLibrary(.{
         .name = "tersets",
+        .root_module = root_module,
+        .linkage = .dynamic,
         .version = .{ .major = 0, .minor = 0, .patch = 1 },
-        .root_source_file = path,
-        .target = target,
-        .optimize = optimize,
     });
-    b.installArtifact(lib);
+
+    b.installArtifact(library);
 
     // Task for running tests.
     const tests = b.addTest(.{
-        .root_source_file = path,
-        .optimize = optimize,
+        .root_module = root_module,
     });
+
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&run_tests.step);

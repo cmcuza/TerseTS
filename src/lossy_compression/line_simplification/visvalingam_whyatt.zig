@@ -23,6 +23,7 @@ const math = std.math;
 const time = std.time;
 const testing = std.testing;
 const ArrayList = std.ArrayList;
+const Allocator = mem.Allocator;
 
 const tersets = @import("../../tersets.zig");
 const configuration = @import("../../configuration.zig");
@@ -49,7 +50,7 @@ const tester = @import("../../tester.zig");
 /// is expected to be of `AreaUnderCurveError` type otherwise an `InvalidConfiguration` error is return.
 /// If any other error occurs during the execution of the method, it is returned.
 pub fn compress(
-    allocator: mem.Allocator,
+    allocator: Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
     method_configuration: []const u8,
@@ -64,9 +65,9 @@ pub fn compress(
 
     // If we have 2 or fewer points, store them without compression.
     if (uncompressed_values.len <= 2) {
-        try shared_functions.appendValue(f64, uncompressed_values[0], compressed_values);
-        try shared_functions.appendValue(f64, uncompressed_values[1], compressed_values);
-        try shared_functions.appendValue(usize, 1, compressed_values);
+        try shared_functions.appendValue(allocator, f64, uncompressed_values[0], compressed_values);
+        try shared_functions.appendValue(allocator, f64, uncompressed_values[1], compressed_values);
+        try shared_functions.appendValue(allocator, usize, 1, compressed_values);
         return;
     }
 
@@ -163,11 +164,11 @@ pub fn compress(
     std.mem.sort(PointArea, heap.items[0..heap.len], {}, PointArea.firstThan);
 
     // Output compressed series: first point, then (index, value) pairs.
-    try shared_functions.appendValue(f64, uncompressed_values[0], compressed_values);
+    try shared_functions.appendValue(allocator, f64, uncompressed_values[0], compressed_values);
     for (1..heap.len) |index| {
         const point_index = heap.items[index].index;
-        try shared_functions.appendValue(f64, uncompressed_values[point_index], compressed_values);
-        try shared_functions.appendValue(usize, point_index, compressed_values);
+        try shared_functions.appendValue(allocator, f64, uncompressed_values[point_index], compressed_values);
+        try shared_functions.appendValue(allocator, usize, point_index, compressed_values);
     }
 
     return;
@@ -175,7 +176,7 @@ pub fn compress(
 
 /// Decompress `compressed_values` produced by "Visvalingam-Whyatt" and write the
 /// result to `decompressed_values`. If an error occurs it is returned.
-pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList(f64)) Error!void {
+pub fn decompress(allocator: Allocator, compressed_values: []const u8, decompressed_values: *ArrayList(f64)) Error!void {
     // The compressed representation is composed of two values after getting the first since all
     // segments are connected. Therefore, the condition checks that after the first value, the rest
     // of the values are in pairs (value, index) and that they are all of type 64-bit float.
@@ -187,7 +188,7 @@ pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList
 
     // Extract the start point from the compressed representation.
     var start_point: DiscretePoint = .{ .time = 0, .value = compressed_lines_and_index[0] };
-    try decompressed_values.append(start_point.value);
+    try decompressed_values.append(allocator, start_point.value);
 
     // We need to create a segment for the linear function.
     var slope: f64 = undefined;
@@ -210,10 +211,10 @@ pub fn decompress(compressed_values: []const u8, decompressed_values: *ArrayList
             // Interpolate the values between the start and end points of the current segment.
             while (current_timestamp < end_point.time) : (current_timestamp += 1) {
                 const y: f64 = slope * @as(f64, @floatFromInt(current_timestamp)) + intercept;
-                try decompressed_values.append(y);
+                try decompressed_values.append(allocator, y);
             }
         }
-        try decompressed_values.append(end_point.value);
+        try decompressed_values.append(allocator, end_point.value);
 
         // The start point of the next segment is the end point of the current segment.
         start_point = end_point;
@@ -332,15 +333,15 @@ test "vw compress and decompress with zero error bound" {
     const allocator = testing.allocator;
 
     // Output buffer.
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
+    var uncompressed_values = ArrayList(f64).empty;
+    defer uncompressed_values.deinit(allocator);
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
     const error_bound: f32 = 0.0;
 
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0, 1000000, random);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, 0, 1000000, random);
 
     const method_configuration =
         \\ {"area_under_curve_error": 0.0}
@@ -353,7 +354,7 @@ test "vw compress and decompress with zero error bound" {
         &compressed_values,
         method_configuration,
     );
-    try decompress(compressed_values.items, &decompressed_values);
+    try decompress(allocator, compressed_values.items, &decompressed_values);
 
     try testing.expect(shared_functions.isWithinErrorBound(
         uncompressed_values.items,
@@ -369,10 +370,10 @@ test "vw compress and compress with known result" {
     const uncompressed_values: []const f64 = &[_]f64{ 1.0, 1.5, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0 };
 
     // Output buffer.
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"area_under_curve_error": 2.5}
@@ -385,7 +386,7 @@ test "vw compress and compress with known result" {
         &compressed_values,
         method_configuration,
     );
-    try decompress(compressed_values.items, &decompressed_values);
+    try decompress(allocator, compressed_values.items, &decompressed_values);
 
     // Check if the decompressed values have the same lenght as the compressed ones.
     try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
@@ -403,15 +404,15 @@ test "vw compress and compress with random data" {
     const allocator = testing.allocator;
 
     // Output buffer.
-    var uncompressed_values = ArrayList(f64).init(allocator);
-    defer uncompressed_values.deinit();
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
-    var decompressed_values = ArrayList(f64).init(allocator);
-    defer decompressed_values.deinit();
+    var uncompressed_values = ArrayList(f64).empty;
+    defer uncompressed_values.deinit(allocator);
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
     const error_bound: f32 = random.float(f32);
 
-    try tester.generateBoundedRandomValues(&uncompressed_values, 0, 1, random);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, 0, 1, random);
 
     const method_configuration = try std.fmt.allocPrint(
         allocator,
@@ -427,7 +428,7 @@ test "vw compress and compress with random data" {
         &compressed_values,
         method_configuration,
     );
-    try decompress(compressed_values.items, &decompressed_values);
+    try decompress(allocator, compressed_values.items, &decompressed_values);
 
     // Check if the decompressed values have the same lenght as the compressed ones.
     try testing.expectEqual(uncompressed_values.items.len, decompressed_values.items.len);
@@ -458,8 +459,8 @@ test "check vw configuration parsing" {
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, 28.0, 3.0 };
 
-    var compressed_values = ArrayList(u8).init(allocator);
-    defer compressed_values.deinit();
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"area_under_curve_error": 0.3}

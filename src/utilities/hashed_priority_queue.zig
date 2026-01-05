@@ -270,8 +270,8 @@ test "add and remove min keys of simple values in HashedPriorityQueue" {
     defer queue.deinit();
 
     // Generate an ArrayList of 100 i64 elements with random values.
-    var list = ArrayList(u64).init(allocator);
-    defer list.deinit();
+    var list = ArrayList(u64).empty;
+    defer list.deinit(allocator);
 
     // Initialize a random number generator.
     const seed: u64 = @bitCast(time.milliTimestamp());
@@ -280,14 +280,14 @@ test "add and remove min keys of simple values in HashedPriorityQueue" {
     for (0..100) |_| {
         // Generate a random i64 value
         const value = @abs(@mod((rnd.random().int(i64)), 1000));
-        try list.append(value);
+        try list.append(allocator, value);
         try queue.add(value);
     }
 
     // Create a copy of the list and sort it.
-    var sorted_list = ArrayList(u64).init(allocator);
-    defer sorted_list.deinit();
-    try sorted_list.appendSlice(list.items);
+    var sorted_list = ArrayList(u64).empty;
+    defer sorted_list.deinit(allocator);
+    try sorted_list.appendSlice(allocator, list.items);
     std.mem.sort(u64, sorted_list.items, {}, comptime std.sort.asc(u64));
 
     // Remove elements from the queue and verify the order.

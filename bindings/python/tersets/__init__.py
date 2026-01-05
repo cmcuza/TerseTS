@@ -34,7 +34,6 @@ from ctypes import (
     byref,
     string_at,
     cast,
-    
 )
 
 try:
