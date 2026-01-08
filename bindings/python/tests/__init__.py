@@ -68,6 +68,12 @@ class TerseTSPythonTest(unittest.TestCase):
         configuration = {"abs_error_bound": 0.0}
         compressed = compress(uncompressed, method, configuration)
         decompressed = decompress(compressed)
+
+        if type(uncompressed) is not type(decompressed):
+            # Convert to list for comparison.
+            # This can happen if NumPy is installed and used in decompress().
+            decompressed = list(decompressed)
+
         self.assertEqual(uncompressed, decompressed)
     
     def test_extract_and_rebuild_zero_error(self):
@@ -100,6 +106,12 @@ class TerseTSPythonTest(unittest.TestCase):
         index, coefficients = extract(compressed)
         rebuilt = rebuild(index, coefficients, method)
         decompressed = decompress(rebuilt)
+
+        if type(uncompressed) is not type(decompressed):
+            # Convert to list for comparison. 
+            # This can happen if NumPy is installed and used in decompress().
+            decompressed = list(decompressed)
+
         self.assertEqual(uncompressed, decompressed)
 
 

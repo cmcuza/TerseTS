@@ -292,9 +292,17 @@ def decompress(
       [1.0, 2.0, 3.0]        # without NumPy
     """
     # Validate input type.
-    if not isinstance(values, (bytes, bytearray, memoryview)):
+    if _INSTALLED_NUMPY and isinstance(values, numpy.ndarray):
+        # Explicit NumPy support. Validate dtype and layout.
+        if values.dtype != numpy.uint8:
+            raise TypeError("decompress(values): NumPy array must have dtype=np.uint8")
+        if values.ndim != 1:
+            raise TypeError("decompress(values): NumPy array must be 1-dimensional")
+        if not values.flags["C_CONTIGUOUS"]:
+            raise TypeError("decompress(values): NumPy array must be C-contiguous")
+    elif not isinstance(values, (bytes, bytearray, memoryview)):
         raise TypeError(
-            "decompress(values): values must be bytes, bytearray, or memoryview"
+            "decompress(values): values must be bytes, bytearray, memoryview or a NumPy uint8 array"
         )
 
     # Prepare a __CompressedValues view and keep a Python reference alive during the call.
