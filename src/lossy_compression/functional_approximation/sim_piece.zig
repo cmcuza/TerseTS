@@ -61,7 +61,7 @@ pub fn compress(
     const error_bound: f32 = parsed_configuration.abs_error_bound;
 
     if (error_bound == 0.0) {
-        return Error.UnsupportedErrorBound;
+        return Error.InvalidConfiguration;
     }
     // Sim-Piece Phase 1: Compute `SegmentMetadata` for all segments that can be approximated
     // by the given `error_bound`.

@@ -81,7 +81,7 @@ pub fn compress(
     const error_bound: f32 = parsed_configuration.abs_error_bound;
 
     if (error_bound == 0.0) {
-        return Error.UnsupportedErrorBound;
+        return Error.InvalidConfiguration;
     }
 
     // Mix-Piece Phase 1: Compute segments metadata.

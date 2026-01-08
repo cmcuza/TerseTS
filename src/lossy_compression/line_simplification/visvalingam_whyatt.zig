@@ -399,10 +399,7 @@ test "vw compress and compress with known result" {
 }
 
 test "vw compress and compress with random data" {
-    // Initialize a random number generator.
-    const seed: u64 = @bitCast(time.milliTimestamp());
-    var prng = std.Random.DefaultPrng.init(seed);
-    const random = prng.random();
+    const random = tester.getDefaultRandomGenerator();
 
     const allocator = testing.allocator;
 

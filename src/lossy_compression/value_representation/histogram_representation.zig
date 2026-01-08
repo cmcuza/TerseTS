@@ -73,7 +73,7 @@ pub fn compressPWCH(
     const maximum_buckets: u32 = parsed_configuration.histogram_bins_number;
 
     if (maximum_buckets <= 1)
-        return Error.UnsupportedErrorBound;
+        return Error.InvalidConfiguration;
 
     var histogram = try Histogram.init(
         allocator,
@@ -121,7 +121,7 @@ pub fn compressPWLH(
     const maximum_buckets: u32 = parsed_configuration.histogram_bins_number;
 
     if (maximum_buckets <= 1.0) {
-        return Error.UnsupportedErrorBound;
+        return Error.InvalidConfiguration;
     }
 
     var histogram = try Histogram.init(allocator, maximum_buckets, .linear);

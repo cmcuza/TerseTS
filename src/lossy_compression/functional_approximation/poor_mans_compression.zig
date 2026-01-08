@@ -111,9 +111,6 @@ pub fn compressMean(
 
     const error_bound: f32 = parsed_configuration.abs_error_bound;
 
-    if (error_bound < 0)
-        return Error.UnsupportedErrorBound;
-
     for (uncompressed_values) |value| {
         const nextMinimum = @min(value, minimum);
         const nextMaximum = @max(value, maximum);

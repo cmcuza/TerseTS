@@ -22,3 +22,5 @@ __pycache__
 build
 zig-out
 dist
+# Ignore generated source files
+binding/binding/src/ 

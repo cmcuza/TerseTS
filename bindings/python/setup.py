@@ -101,10 +101,15 @@ class ZigBuildExt(build_ext):
 
         # Zig generates files that are not needed and can be removed.
         if sys.platform == "darwin" or sys.platform == "linux":
-            os.remove(self.get_ext_fullpath(ext.name) + ".o")
+            path_to_file = self.get_ext_fullpath(ext.name) + ".o"
+            if os.path.exists(path_to_file):
+                os.remove(path_to_file)
+
         elif sys.platform == "win32":
             for name in ["capi.lib", "tersets.pdb", "tersets.pyd.obj"]:
-                os.remove(os.path.join(self.build_lib, name))
+                path_to_file = os.path.join(self.build_lib, name)
+                if os.path.exists(path_to_file):
+                    os.remove(path_to_file)
 
     def get_ext_filename(self, ext_name):
         # Removes the CPython part of ext_name as the library is not linked to
