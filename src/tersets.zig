@@ -41,9 +41,8 @@ const piecewise_histogram = @import(
 const bitpacked_quantization = @import(
     "lossy_compression/value_representation/bitpacked_quantization.zig",
 );
-const serqt = @import(
-    "lossy_compression/value_representation/serf_qt.zig",
-);
+const serqt = @import("lossy_compression/value_representation/serf_qt.zig");
+const buff = @import("lossy_compression/value_representation/bounded_fast_floats.zig");
 
 // Import line simplification methods.
 const vw = @import("lossy_compression/line_simplification/visvalingam_whyatt.zig");
@@ -84,6 +83,7 @@ pub const Method = enum {
     RunLengthEncoding,
     NonLinearApproximation,
     SerfQT,
+    BitPackedBUFF,
 };
 
 /// Compress `uncompressed_values` using `method` and its `configuration` and returns the results
@@ -247,6 +247,14 @@ pub fn compress(
                 configuration,
             );
         },
+        .BitPackedBUFF => {
+            try buff.compressBitPackedBUFF(
+                allocator,
+                uncompressed_values,
+                // &compressed_values,
+                configuration,
+            );
+        },
     }
     try compressed_values.append(allocator, @intFromEnum(method));
     return compressed_values;
@@ -322,6 +330,9 @@ pub fn decompress(
         },
         .SerfQT => {
             try serqt.decompress(allocator, compressed_values_slice, &decompressed_values);
+        },
+        .BitPackedBUFF => {
+            return Error.UnknownMethod;
         },
     }
 
