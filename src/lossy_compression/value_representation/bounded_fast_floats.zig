@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Implmentation of the method BUFF (BoUnded Fast Float) from the paper
+//! Implementation of the method BUFF (BoUnded Fast Float) from the paper
 //! "Liu, C., Jiang, H., Paparrizos, J., & Elmore, A. J."
 //! Decomposed bounded floats for fast compression and queries.
 //! Proceedings of the VLDB Endowment, 14(11), 2586-2598 (2021).
@@ -48,11 +48,11 @@ const tester = @import("../../tester.zig");
 const Error = tersets.Error;
 const Method = tersets.Method;
 
-/// Target precision lookout table from Table 2 in the paper. Each entry corresponds to the
+/// Target precision lookup table from Table 2 in the paper. Each entry corresponds to the
 /// number of bits needed in the fractional part to achieve the specified decimal digit precision.
 /// Index 0 corresponds to 1 decimal digit precision, index 1 to 2 decimal digits, and so on.
 /// Up to 10 decimal digits of precision are supported.
-const target_precision_lookout: [10]u6 = .{ 5, 8, 11, 15, 18, 21, 25, 28, 31, 35 };
+const target_precision_lookup: [10]u6 = .{ 5, 8, 11, 15, 18, 21, 25, 28, 31, 35 };
 
 /// Normalization factor for converting fractional part to f64.
 const normalization_factor: f64 = math.pow(f64, 2.0, 53.0);
@@ -62,7 +62,7 @@ const mantissa_bits: u6 = 52; // mantissa bits.
 const total_fractional_bits: u6 = 53; // 53 bits for 1.F.
 const exponent_bias: i32 = 1023; // Bias for f64 exponent.
 
-/// Fixed-point representation structure. The structure hold the `sign`, `integer_part`,
+/// Fixed-point representation structure. The structure holds the `sign`, `integer_part`,
 /// and `fractional_part` of the fixed-point number.
 const FixedPointRepresentation = struct {
     sign: u8, // 0 or 1.
@@ -109,7 +109,7 @@ pub fn compressBitPackedBUFF(
     var minimum_integer_part: u64 = std.math.maxInt(u64);
 
     const decoded_target_precision: u6 =
-        target_precision_lookout[parsed_configuration.target_precision - 1];
+        target_precision_lookup[parsed_configuration.target_precision - 1];
 
     // Number of bits to drop from the fractional part based on target precision.
     const bits_to_drop: u6 = 53 - decoded_target_precision;
@@ -137,7 +137,7 @@ pub fn compressBitPackedBUFF(
     var delta_encoded_integer_parts: ArrayList(u64) = ArrayList(u64).empty;
     defer delta_encoded_integer_parts.deinit(allocator);
 
-    // Apply delta and zigzag encoding for later bitpacking the interger parts.
+    // Apply delta and zigzag encoding for later bitpacking the integer parts.
     // Find the maximum number of bits needed to encode the integer part.
     var maximum_number_of_bits_needed: u8 = 0;
     for (1..fixed_point_representation_array.items.len) |index| {
@@ -154,6 +154,11 @@ pub fn compressBitPackedBUFF(
             maximum_number_of_bits_needed,
             shared_functions.bitsNeededUnsigned(encoded_delta_integer_part),
         );
+    }
+
+    // Ensure we never use a bit-width of 0 when there are deltas to encode.
+    if (delta_encoded_integer_parts.items.len > 0 and maximum_number_of_bits_needed == 0) {
+        maximum_number_of_bits_needed = 1;
     }
 
     // Prepare the header information:
@@ -249,6 +254,12 @@ pub fn decompressBitPackedBUFF(
     // 4) minimum integer part (u64).
     // 5) first value (fixed-point representation).
     const decoded_target_precision: u8 = compressed_values[0];
+
+    if (decoded_target_precision == 0 or decoded_target_precision > 53) {
+        // Invalid target precision in the header.
+        return Error.CorruptedCompressedData;
+    }
+
     const maximum_number_of_bits_needed_for_integers: u8 = compressed_values[1];
     const number_of_values: u32 = @bitCast(compressed_values[2..6].*);
     const minimum_integer_part: u64 = @bitCast(compressed_values[6..14].*);
@@ -474,7 +485,7 @@ test "decompose and reconstruct f64 array to fixed point representation at a kno
     const test_values: [6]f64 = .{ 0.125, 12.375, -0.1, 0.0, 3.14159, -256.75 };
 
     const target_precision: u8 = 5;
-    const bits_to_drop: u6 = 53 - target_precision_lookout[target_precision - 1];
+    const bits_to_drop: u6 = 53 - target_precision_lookup[target_precision - 1];
 
     for (test_values) |value| {
         const result = try decomposeF64ToFixedPointRepresentation(value);
@@ -507,7 +518,7 @@ test "decompose and reconstruct f64 array to fixed point representation at a kno
     );
 
     const target_precision: u8 = tester.generateBoundRandomInteger(u8, 1, 10, null);
-    const bits_to_drop: u6 = 53 - target_precision_lookout[target_precision - 1];
+    const bits_to_drop: u6 = 53 - target_precision_lookup[target_precision - 1];
 
     for (uncompressed_values.items) |value| {
         const result = try decomposeF64ToFixedPointRepresentation(value);

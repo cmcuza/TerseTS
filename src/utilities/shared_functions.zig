@@ -331,7 +331,7 @@ pub fn createQuantizationBucket(error_bound: f32) f64 {
 /// 00 is 8 bits, 01 is 16 bits, 10 is 32 bits, and 11 is 64 bits. This encoding reduces the total
 /// number of bits when most values are small. The `WriterType` is the type of the underlying writer
 /// used by `bit_writer`. `bit_writer` is a pointer to the initialized `BitWriter` that receives the
-/// encoded bits. The function returns a error if any occurrs.
+/// encoded bits. The function returns an error if any occurrs.
 pub fn bitpackU64(
     comptime WriterType: type,
     value: u64,
