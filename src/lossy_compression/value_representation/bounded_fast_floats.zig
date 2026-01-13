@@ -39,6 +39,7 @@ const Allocator = std.mem.Allocator;
 
 const tersets = @import("../../tersets.zig");
 const shared_functions = @import("../../utilities/shared_functions.zig");
+const shared_structs = @import("../../utilities/shared_structs.zig");
 const configuration = @import("../../configuration.zig");
 const tester = @import("../../tester.zig");
 
@@ -75,7 +76,7 @@ const FixedPointRepresentation = struct {
 pub fn compressBitPackedBUFF(
     allocator: Allocator,
     uncompressed_values: []const f64,
-    compressed_values: ArrayList(u8),
+    compressed_values: *ArrayList(u8),
     method_configuration: []const u8,
 ) Error!void {
     const parsed_configuration = try configuration.parse(
@@ -117,8 +118,27 @@ pub fn compressBitPackedBUFF(
         }
     }
 
-    // Apply delta and bitpacking encoding of the interger parts.
+    // Reduce the integer parts by the minimum integer part.
+    for (fixed_point_representation_array.items) |*fixed_point_representation| {
+        fixed_point_representation.integer_part -= minimum_integer_part;
+    }
 
+    const writer = compressed_values.writer(allocator);
+    var bit_writer = shared_structs.bitWriter(.little, writer);
+
+    // Apply delta and bitpacking encoding of the interger parts.
+    for (1..fixed_point_representation_array.items.len) |index| {
+        const current_element = fixed_point_representation_array.items[index].integer_part;
+        const previous_element = fixed_point_representation_array.items[index - 1].integer_part;
+
+        const delta_integer_part: u64 = current_element - previous_element;
+
+        shared_functions.bitpackU64(
+            shared_structs.BitWriter(.little, writer),
+            delta_integer_part,
+            &bit_writer,
+        );
+    }
 }
 
 /// Decomposes a f64 `value` into its fixed-point representation. The function returns a

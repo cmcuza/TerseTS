@@ -251,7 +251,7 @@ pub fn compress(
             try buff.compressBitPackedBUFF(
                 allocator,
                 uncompressed_values,
-                // &compressed_values,
+                &compressed_values,
                 configuration,
             );
         },

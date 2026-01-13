@@ -322,6 +322,40 @@ pub fn createQuantizationBucket(error_bound: f32) f64 {
     return @floatCast(1.998 * error_bound);
 }
 
+/// Write a u64 `value` with `bit_writer` to a bit stream using a compact bit-packed encoding scheme.
+/// The encoding uses 2 header bits to indicate how many bits are required to represent `value`:
+/// 00 is 8 bits, 01 is 16 bits, 10 is 32 bits, and 11 is 64 bits. This encoding reduces the total
+/// number of bits when most values are small. The `WriterType` is the type of the underlying writer
+/// used by `bit_writer`. `bit_writer` is a pointer to the initialized `BitWriter` that receives the
+/// encoded bits. The function returns a error if any occurrs.
+pub fn bitpackU64(
+    comptime WriterType: type,
+    value: u64,
+    bit_writer: *BitWriter(.little, WriterType),
+) !void {
+    if (value <= 0xFF) { // 8-bits.
+        // Header: 00.
+        try bit_writer.writeBits(@as(u1, 0b0), 1);
+        try bit_writer.writeBits(@as(u1, 0b0), 1);
+        try bit_writer.writeBits(@as(u8, @intCast(value)), 8);
+    } else if (value <= 0xFFFF) { // 16-bits.
+        // Header: 01.
+        try bit_writer.writeBits(@as(u1, 0b0), 1);
+        try bit_writer.writeBits(@as(u1, 0b1), 1);
+        try bit_writer.writeBits(@as(u16, @intCast(value)), 16);
+    } else if (value <= 0xFFFFFFFF) { // 32-bits.
+        // Header: 10.
+        try bit_writer.writeBits(@as(u1, 0b1), 1);
+        try bit_writer.writeBits(@as(u1, 0b0), 1);
+        try bit_writer.writeBits(@as(u32, @intCast(value)), 32);
+    } else { // 64-bits (no compression).
+        // Header: 11.
+        try bit_writer.writeBits(@as(u1, 0b1), 1);
+        try bit_writer.writeBits(@as(u1, 0b1), 1);
+        try bit_writer.writeBits(@as(u64, value), 64);
+    }
+}
+
 test "zigzag can encode and decode small signed integers correctly" {
     const default_random = tester.getDefaultRandomGenerator();
     const number_of_tests = tester.generateNumberOfValues(default_random);
