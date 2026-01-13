@@ -332,7 +332,11 @@ pub fn decompress(
             try serqt.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .BitPackedBUFF => {
-            return Error.UnknownMethod;
+            try buff.decompressBitPackedBUFF(
+                allocator,
+                compressed_values_slice,
+                &decompressed_values,
+            );
         },
     }
 

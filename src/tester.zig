@@ -814,13 +814,15 @@ pub fn generateBoundedRandomValues(
     const random = resolveRandom(random_opt);
 
     for (0..generateNumberOfValues(random)) |_| {
-        // generate f64 values in the range [0, 1).
-        const bounded_value = lower_bound + (upper_bound - lower_bound);
+        // Generate a random f64 value in the range [0, 1).
+        const rand_value = random.float(f64);
+        // Scale and shift the random value to the desired range [lower_bound, upper_bound).
+        const bounded_value = lower_bound + (upper_bound - lower_bound) * rand_value;
+        // Clamp the value to ensure it is within the valid range.
         const clamped_value = math.clamp(bounded_value, -clamped_max_value, clamped_max_value);
         try uncompressed_values.append(allocator, clamped_value);
     }
 }
-
 /// Generate a random number of `f64` values following a linear function with random slope
 /// and intercept, and add them to `uncompressed_values`. The noise added to each value is
 /// a random value in the range [-0.5%, 0.5%] times the absolute value. The generated
