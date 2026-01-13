@@ -92,23 +92,28 @@ pub fn compressBitPackedBUFF(
         return Error.InvalidConfiguration;
     }
 
-    var fixed_point_representation_array = try ArrayList(FixedPointRepresentation).initCapacity(
-        allocator,
-        uncompressed_values.len,
-    );
+    var fixed_point_representation_array =
+        try ArrayList(FixedPointRepresentation).initCapacity(
+            allocator,
+            uncompressed_values.len,
+        );
     defer fixed_point_representation_array.deinit(allocator);
 
     // Track minimum integer part for optimizations explained in Section 3.1.2.
     var minimum_integer_part: u64 = std.math.maxInt(u64);
+
+    const decoded_target_precision: u6 =
+        target_precision_lookout[parsed_configuration.target_precision - 1];
+
+    // Number of bits to drop from the fractional part based on target precision.
+    const bits_to_drop: u6 = 53 - decoded_target_precision;
 
     // Decompose each value into a fixed point representation. Truncate the fractional
     // part based on the target precision and update the minimum integer part.
     for (uncompressed_values) |value| {
         var fixed_point_representation = try decomposeF64ToFixedPointRepresentation(value);
         // Apply the target precision by truncating the fractional part.
-        const truncated_fractional_part: u64 =
-            (fixed_point_representation.fractional_part >>
-                (total_fractional_bits - target_precision_lookout[parsed_configuration.target_precision - 1]));
+        const truncated_fractional_part: u64 = fixed_point_representation.fractional_part >> bits_to_drop;
         fixed_point_representation.fractional_part = truncated_fractional_part;
 
         try fixed_point_representation_array.append(allocator, fixed_point_representation);
@@ -123,22 +128,92 @@ pub fn compressBitPackedBUFF(
         fixed_point_representation.integer_part -= minimum_integer_part;
     }
 
+    var delta_encoded_integer_parts: ArrayList(u64) = ArrayList(u64).empty;
+    defer delta_encoded_integer_parts.deinit(allocator);
+
+    // Apply delta and zigzag encoding for later bitpacking the interger parts.
+    // Find the maximum number of bits needed to encode the integer part.
+    var maximum_number_of_bits_needed: u8 = 0;
+    for (1..fixed_point_representation_array.items.len) |index| {
+        const current_element: i64 = @intCast(fixed_point_representation_array.items[index].integer_part);
+        const previous_element: i64 = @intCast(fixed_point_representation_array.items[index - 1].integer_part);
+
+        const delta_integer_part: i64 = current_element - previous_element;
+
+        // Apply zigzag encoding to negative deltas.
+        const encoded_delta_integer_part = shared_functions.encodeZigZag(delta_integer_part);
+        try delta_encoded_integer_parts.append(allocator, encoded_delta_integer_part);
+
+        maximum_number_of_bits_needed = @max(
+            maximum_number_of_bits_needed,
+            shared_functions.bitsNeededUnsigned(encoded_delta_integer_part),
+        );
+    }
+
+    // Prepare the header information:
+    // 1) decoded target precision (u8).
+    // 2) maximum number of bits needed for integer part (u8).
+    // 3) number of values (u64).
+    // 4) minimum integer part (u64).
+    // 5) first value (fixed-point representation).
+    try shared_functions.appendValue(
+        allocator,
+        u8,
+        decoded_target_precision,
+        compressed_values,
+    );
+
+    try shared_functions.appendValue(
+        allocator,
+        u8,
+        maximum_number_of_bits_needed,
+        compressed_values,
+    );
+    try shared_functions.appendValue(
+        allocator,
+        u64,
+        @as(u64, uncompressed_values.len),
+        compressed_values,
+    );
+    try shared_functions.appendValue(
+        allocator,
+        u64,
+        minimum_integer_part,
+        compressed_values,
+    );
+
+    // Store the first value's fixed-point representation.
+    // Starting with the integer part.
+    const first_fixed_point_representation = fixed_point_representation_array.items[0];
+    try shared_functions.appendValue(
+        allocator,
+        u64,
+        first_fixed_point_representation.integer_part,
+        compressed_values,
+    );
+
+    // Prepare the bit writer for compressed output. From now on, we write using only the bit writer.
     const writer = compressed_values.writer(allocator);
     var bit_writer = shared_structs.bitWriter(.little, writer);
 
-    // Apply delta and bitpacking encoding of the interger parts.
+    // Write the first value's fractional part and sign.
+    try bit_writer.writeBits(
+        first_fixed_point_representation.fractional_part,
+        decoded_target_precision,
+    );
+    try bit_writer.writeBits(@as(u1, @intCast(first_fixed_point_representation.sign)), 1);
+
+    // Apply bitpacking encoding for the rest of the values.
     for (1..fixed_point_representation_array.items.len) |index| {
-        const current_element = fixed_point_representation_array.items[index].integer_part;
-        const previous_element = fixed_point_representation_array.items[index - 1].integer_part;
+        const fixed_point_representation = fixed_point_representation_array.items[index];
+        const encoded_delta_integer_part: u64 = delta_encoded_integer_parts.items[index - 1];
 
-        const delta_integer_part: u64 = current_element - previous_element;
-
-        shared_functions.bitpackU64(
-            shared_structs.BitWriter(.little, writer),
-            delta_integer_part,
-            &bit_writer,
-        );
+        try bit_writer.writeBits(encoded_delta_integer_part, maximum_number_of_bits_needed);
+        try bit_writer.writeBits(fixed_point_representation.fractional_part, decoded_target_precision);
+        try bit_writer.writeBits(@as(u1, @intCast(fixed_point_representation.sign)), 1);
     }
+
+    try bit_writer.flushBits();
 }
 
 /// Decomposes a f64 `value` into its fixed-point representation. The function returns a
@@ -359,4 +434,35 @@ test "decompose and reconstruct f64 array to fixed point representation at a kno
 
         try testing.expectApproxEqAbs(truncated_reconstructed_value, value, tolerance);
     }
+}
+
+test "buff bitpacked can compress with expected results" {
+    const allocator: Allocator = testing.allocator;
+    var uncompressed_values: ArrayList(f64) = ArrayList(f64).empty;
+    defer uncompressed_values.deinit(allocator);
+
+    try tester.generateDefaultBoundedValues(
+        allocator,
+        &uncompressed_values,
+        tester.getDefaultRandomGenerator(),
+    );
+
+    var compressed_values: ArrayList(u8) = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    const method_configuration =
+        \\ { "target_precision": 3 }
+    ;
+
+    try compressBitPackedBUFF(
+        allocator,
+        uncompressed_values.items,
+        &compressed_values,
+        method_configuration,
+    );
+
+    // print all compressed value
+    // for (compressed_values.items) |byte| {
+    //     std.debug.print("Byte {x}\n", .{byte});
+    // }
 }

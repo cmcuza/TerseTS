@@ -106,7 +106,10 @@ pub fn parse(
             if (parsed_value.aggregate_error_bound < 0)
                 return error.InvalidConfiguration;
         },
-        TargetPrecision => {}, // No validation needed for target precision.
+        TargetPrecision => {
+            if (parsed_value.target_precision <= 0)
+                return error.InvalidConfiguration;
+        },
         EmptyConfiguration => {},
         else => return error.InvalidConfiguration,
     }

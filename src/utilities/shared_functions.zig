@@ -71,6 +71,10 @@ pub fn appendValue(allocator: Allocator, comptime T: type, value: T, compressed_
             const value_as_bytes: [4]u8 = @bitCast(value);
             try compressed_values.appendSlice(allocator, value_as_bytes[0..]);
         },
+        u8, i8 => {
+            const value_as_bytes: [1]u8 = @bitCast(value);
+            try compressed_values.appendSlice(allocator, value_as_bytes[0..]);
+        },
         else => @compileError("Unsupported type for append value function"),
     }
 }
@@ -354,6 +358,14 @@ pub fn bitpackU64(
         try bit_writer.writeBits(@as(u1, 0b1), 1);
         try bit_writer.writeBits(@as(u64, value), 64);
     }
+}
+
+/// Returns the number of bits needed to represent the given unsigned `value`. If `value` is 0, the
+/// function returns 0. This function uses the count leading zeros (clz) intrinsic to efficiently
+/// calculate the bit width.
+pub fn bitsNeededUnsigned(value: u64) u8 {
+    if (value == 0) return 0;
+    return @intCast(64 - @clz(value));
 }
 
 test "zigzag can encode and decode small signed integers correctly" {
