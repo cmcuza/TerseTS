@@ -15,6 +15,9 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
+    // Paths to external libraries.
+    const pocketfft_path = b.path("lib/pocketfft");
+    const pocketfft_c_path = b.path("lib/pocketfft/pocketfft.c");
 
     // Create root module.
     const root_module = b.createModule(.{
@@ -31,12 +34,21 @@ pub fn build(b: *std.Build) void {
         .version = .{ .major = 0, .minor = 0, .patch = 1 },
     });
 
+    library.addIncludePath(pocketfft_path);
+    library.addCSourceFile(.{ .file = pocketfft_c_path, .flags = &.{"-std=c99"} });
+    library.linkLibC();
+
     b.installArtifact(library);
 
     // Task for running tests.
     const tests = b.addTest(.{
         .root_module = root_module,
     });
+
+    // Add PocketFFT also for test builds
+    tests.addIncludePath(pocketfft_path);
+    tests.addCSourceFile(.{ .file = pocketfft_c_path, .flags = &.{"-std=c99"} });
+    tests.linkLibC();
 
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run library tests");

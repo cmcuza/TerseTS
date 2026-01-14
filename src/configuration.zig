@@ -58,6 +58,13 @@ pub const AreaUnderCurveError = struct {
     area_under_curve_error: f32,
 };
 
+/// Configuration for domain transformation methods like DFT and DWT.
+/// The number of coefficients refers to the number of coefficients to retain.
+/// Example: { "number_of_coefficients": 10 }
+pub const DomainTransformation = struct {
+    number_of_coefficients: u32,
+};
+
 /// Empty configuration for methods that do not require any parameters.
 pub const EmptyConfiguration = struct {};
 
@@ -101,6 +108,10 @@ pub fn parse(
                 return error.InvalidConfiguration;
         },
         EmptyConfiguration => {},
+        DomainTransformation => {
+            if (parsed_value.number_of_coefficients < 0)
+                return error.InvalidConfiguration;
+        },
         else => return error.InvalidConfiguration,
     }
     return parsed_value;
