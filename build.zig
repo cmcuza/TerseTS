@@ -45,11 +45,6 @@ pub fn build(b: *std.Build) void {
         .root_module = root_module,
     });
 
-    // Add PocketFFT also for test builds
-    tests.addIncludePath(pocketfft_path);
-    tests.addCSourceFile(.{ .file = pocketfft_c_path, .flags = &.{"-std=c99"} });
-    tests.linkLibC();
-
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&run_tests.step);
