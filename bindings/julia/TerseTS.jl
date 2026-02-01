@@ -16,16 +16,65 @@
 
 module TerseTS
 
-function __init__()
+@enum Method begin
+    PoorMansCompressionMidrange   = 0
+    PoorMansCompressionMean       = 1
+    SwingFilter                   = 2
+    SwingFilterDisconnected       = 3
+    SlideFilter                   = 4
+    SimPiece                      = 5
+    PiecewiseConstantHistogram    = 6
+    PiecewiseLinearHistogram      = 7
+    ABCLinearApproximation        = 8
+    VisvalingamWhyatt             = 9
+    SlidingWindow                 = 10
+    BottomUp                      = 11
+    MixPiece                      = 12
+    BitPackedQuantization         = 13
+    RunLengthEncoding             = 14
+    NonLinearApproximation        = 15
+    SerfQT                        = 16
+end
+
+struct UncompressedValues
+    data::Ptr{Float64}
+    len::Csize_t
+end
+
+struct CompressedValues
+    data::Ptr{UInt8}
+    len::Csize_t
+end
+
+function find_library()
     if  Sys.isapple()
-        print("Hello Mac")
+        println("Hello Mac")
     elseif Sys.isunix()
-        print("Hello Unix")
+        println("Hello Unix")
     elseif Sys.iswindows()
-        print("Hello Windowos")
+        println("Hello Windowos")
+        library_name = "tersets.dll"
     else
         error("Could not find TerseTS: looked '*{library_name}' in {library_folder}")
     end
+
+    "/home/kejser/Projects/2023-TerseTS/TerseTS/zig-out/lib/"
+end
+
+function compress()
+end
+
+function decompress()
+end
+
+function freeCompressedValues()
+end
+
+function freeUncompressedValues()
+end
+
+function __init__()
+    find_library()
 end
 
 end
