@@ -58,6 +58,12 @@ pub const AreaUnderCurveError = struct {
     area_under_curve_error: f32,
 };
 
+/// Configuration for methods that restrict the precision of floating-point values.
+/// Example: { "target_precision": 4 }, this means 4 decimal digits of precision.
+pub const TargetPrecision = struct {
+    target_precision: u8,
+};
+
 /// Empty configuration for methods that do not require any parameters.
 pub const EmptyConfiguration = struct {};
 
@@ -98,6 +104,10 @@ pub fn parse(
         },
         AggregateError => {
             if (parsed_value.aggregate_error_bound < 0)
+                return error.InvalidConfiguration;
+        },
+        TargetPrecision => {
+            if (parsed_value.target_precision <= 0)
                 return error.InvalidConfiguration;
         },
         EmptyConfiguration => {},
