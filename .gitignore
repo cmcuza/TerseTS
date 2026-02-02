@@ -21,6 +21,6 @@ tersets.egg-info
 __pycache__
 build
 zig-out
-dist
-# Ignore generated source files
 binding/binding/src/ 
+bindings/python/dist
+bindings/rust/target
