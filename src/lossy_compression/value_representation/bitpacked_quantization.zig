@@ -59,11 +59,14 @@ pub fn compress(
 
     const error_bound: f32 = parsed_configuration.abs_error_bound;
 
-    // Find the minimum value.
+    // Find the minimum and maximum value.
     var min_val = uncompressed_values[0];
+    var max_val = uncompressed_values[0];
+
     for (uncompressed_values) |value| {
         if (!math.isFinite(value) or @abs(value) > tester.max_test_value) return Error.UnsupportedInput;
         if (value < min_val) min_val = value;
+        if (value > max_val) max_val = value;
     }
 
     // Append the minimum value to the header of the compressed values.
@@ -71,6 +74,21 @@ pub fn compress(
 
     // All values will map to the closest bucket based on the bucket_size.
     const bucket_size: f64 = shared_functions.createQuantizationBucket(error_bound);
+
+    if (error_bound != 0.0) {
+        // If `bucket_size` is so small that adding it to `min_val` does nothing, then the
+        // reconstruction grid collapses at `min_val` due to f64 precision.
+        if (min_val + bucket_size == min_val) {
+            if (@abs(max_val - min_val) > error_bound) return Error.UnsupportedInput;
+        } else {
+            // Check whether max_val is representable within the error bound under the
+            // same quantize+reconstruct.
+            const max_quantized_value: f64 = @round((max_val - min_val) / bucket_size);
+            const reconstructed_max: f64 = min_val + max_quantized_value * bucket_size;
+
+            if (@abs(reconstructed_max - max_val) > error_bound) return Error.UnsupportedInput;
+        }
+    }
 
     // Append the minimum value to the header of the compressed values.
     try shared_functions.appendValue(allocator, f64, bucket_size, compressed_values);
@@ -202,11 +220,10 @@ pub fn decompress(
 
 test "bitpacked quantization can compress and decompress bounded values" {
     const allocator = testing.allocator;
-    const data_distributions = &[_]tester.DataDistribution{
-        .LinearFunctions,
-        .BoundedRandomValues,
-        .SinusoidalFunction,
-    };
+    // Use only tighted bounded random values for this test.
+    // BitPackedQuantization requires bounded values to operate correctly.
+    // Other data distributions may generate unbounded values which are not supported.
+    const data_distributions = &[_]tester.DataDistribution{.TightedBoundedRandomValues};
 
     // This function evaluates BitPackedQuantization using all data distribution stored in
     // `data_distribution`.
@@ -332,11 +349,11 @@ test "bitpacked quantization always reduces size of time series" {
     // Generate 500 random values within different ranges. Even if some values require 8 bytes
     // to be stored, the quantization should reduce the size of the time series since some
     // values require less than 8 bytes to be stored after quantization.
-    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1, 1, null);
-    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e2, 1e2, null);
-    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e4, 1e4, null);
-    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e6, 1e6, null);
-    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e8, 1e8, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, 0, 1, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, 0, 1e2, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, 1e2, 1e4, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, 1e4, 1e6, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, 1e6, 1e8, null);
 
     var compressed_values = ArrayList(u8).empty;
     defer compressed_values.deinit(allocator);

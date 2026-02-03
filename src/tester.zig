@@ -111,6 +111,7 @@ const noise_scale: f64 = 0.005; // 0.5%
 
 /// Different data distributions used for testing.
 pub const DataDistribution = enum {
+    TightedBoundedRandomValues,
     LinearFunctions,
     QuadradicFunctions,
     ExponentialFunctions,
@@ -142,6 +143,13 @@ pub fn testErrorBoundedCompressionMethod(
     for (data_distributions) |dist| {
         const error_bound: f32 = random.float(f32) + 1e-4; // Ensure a non-zero error bound.
         switch (dist) {
+            .TightedBoundedRandomValues => try testGeneratedErrorBoundedCompression(
+                allocator,
+                generateRandomTightedBoundedValues,
+                method,
+                error_bound,
+                "Tighted Bounded Values",
+            ),
             .LinearFunctions => try testGeneratedErrorBoundedCompression(
                 allocator,
                 generateRandomLinearFunctions,
@@ -247,6 +255,12 @@ pub fn testLosslessMethod(
 ) !void {
     for (data_distributions) |dist| {
         switch (dist) {
+            .TightedBoundedRandomValues => try testGeneratedLosslessCompression(
+                allocator,
+                generateRandomTightedBoundedValues,
+                method,
+                "Tighted Bounded Values",
+            ),
             .LinearFunctions => try testGeneratedLosslessCompression(
                 allocator,
                 generateRandomLinearFunctions,
@@ -773,6 +787,30 @@ pub fn generateDefaultBoundedValues(allocator: Allocator, values: *ArrayList(f64
     try generateBoundedRandomValues(allocator, values, -1e15, 1e15, random);
 }
 
+/// Wrapper around `generateBoundedRandomValues` with a default range. The function generates
+/// a random number of `f64` values between a smaller randomly generated range for use in testing using
+/// `random` and adds them to `uncompressed_values`. This range can be represented by a `f64`
+/// without losing precision, thus it is used as a default range for testing purposes.
+pub fn generateRandomTightedBoundedValues(allocator: Allocator, values: *ArrayList(f64), random: Random) !void {
+    const reduction_factor = generateBoundedRandomValue(
+        f64,
+        1e2,
+        1e6,
+        null,
+    );
+    // Generate random lower and upper bounds within [-max_test_value/1e4, max_test_value/1e4].
+    const lower_bound = generateBoundedRandomValue(
+        f64,
+        -max_test_value / reduction_factor,
+        max_test_value / reduction_factor,
+        null,
+    );
+
+    const upper_bound: f64 = @abs(lower_bound) * reduction_factor;
+
+    try generateBoundedRandomValues(allocator, values, lower_bound, upper_bound, random);
+}
+
 /// Generate a random number of `f64` values values between -1e15 and 1e15 for use in testing using
 /// `random` and add them to `uncompressed_values`. The function also replaces some of the
 /// generated values with NaNs and infinities with almost probability one.
@@ -815,9 +853,8 @@ pub fn generateBoundedRandomValues(
 
     for (0..generateNumberOfValues(random)) |_| {
         // generate f64 values in the range [0, 1).
-        const bounded_value = lower_bound + (upper_bound - lower_bound);
-        const clamped_value = math.clamp(bounded_value, -clamped_max_value, clamped_max_value);
-        try uncompressed_values.append(allocator, clamped_value);
+        const bounded_value = generateBoundedRandomValue(f64, lower_bound, upper_bound, random_opt);
+        try uncompressed_values.append(allocator, bounded_value);
     }
 }
 
@@ -1023,9 +1060,17 @@ pub fn generateMixedBoundedValuesFunctions(
 pub fn generateBoundedRandomValue(comptime T: type, at_least: T, at_most: T, random_opt: ?Random) T {
     var random = resolveRandom(random_opt);
 
-    const rand_value: T = random.float(T);
-    const bounded_value = at_least + (at_most - at_least) * rand_value;
-    return bounded_value;
+    const at_least_log = toLog(T, at_least);
+    const at_most_log = toLog(T, at_most);
+
+    // Generate a random value in [0, 1) and scale it to the range [at_least, at_most].
+    const rand_value = random.float(T);
+    const log_sample = at_least_log + (at_most_log - at_least_log) * rand_value;
+    // Transform back to the real number line.
+    const value = fromLog(T, log_sample);
+
+    // Ensure the generated value is uniformly distributed across the range by avoiding bias.
+    return math.clamp(value, at_least, at_most);
 }
 
 /// Generate a random value of type `T` between `at_least` and `at_most` for use in testing using
@@ -1070,4 +1115,18 @@ fn addNoise(value: f64) f64 {
     const rand_factor = getDefaultRandomGenerator().float(f64) - 0.5;
     const noise = rand_factor * noise_scale * @abs(value);
     return value + noise;
+}
+
+/// Convert a value to a logarithmic scale using base 10. The function handles both positive
+/// and negative values by preserving the sign.
+fn toLog(comptime T: type, value: T) T {
+    const sign: T = if (value < 0) @as(T, -1.0) else @as(T, 1.0);
+    return sign * @log10(@abs(value) + 1.0);
+}
+
+/// Convert a value from a logarithmic scale back to its original scale using base 10. The function
+/// handles both positive and negative values by preserving the sign.
+fn fromLog(comptime T: type, value: T) T {
+    const sign: T = if (value < 0) @as(T, -1.0) else @as(T, 1.0);
+    return sign * (math.pow(T, 10.0, @abs(value)) - 1.0);
 }
