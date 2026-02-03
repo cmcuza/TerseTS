@@ -17,7 +17,7 @@
 module TerseTS
 
 """
-Mirror TerseTS `Method` enum.
+Mirror TerseTS `Method` Enum.
 """
 @enum Method begin
     PoorMansCompressionMidrange = 0
@@ -59,18 +59,17 @@ end
 Locate the TerseTS library for this operation.
 """
 function findlibrary()
-    if Sys.isapple()
-        println("Hello Mac")
+    library_name = if Sys.isapple()
+        "libtersets.dylib"
     elseif Sys.isunix()
-        println("Hello Unix")
+        "libtersets.so"
     elseif Sys.iswindows()
-        println("Hello Windowos")
-        library_name = "tersets.dll"
+        "tersets.dll"
     else
-        error("Could not find TerseTS: looked '*{library_name}' in {library_folder}")
+        error("Only FreeBSD, Linux, macOS, and Windows is supported.")
     end
 
-    "/home/kejser/Projects/2023-TerseTS/TerseTS/zig-out/lib/libtersets.so"
+    normpath("../../zig-out/lib/") * library_name
 end
 
 """

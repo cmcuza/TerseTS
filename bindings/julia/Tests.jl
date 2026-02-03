@@ -21,8 +21,6 @@ using Test
 include("TerseTS.jl")
 
 @testset "Compress and Decompress Zero Error" begin
-
-
     uncompressed_values = [1.0, 1.0, 1.0, 1.0, 1.0]
 
     compressed_values = TerseTS.compress(
