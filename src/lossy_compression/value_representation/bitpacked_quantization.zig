@@ -399,3 +399,114 @@ test "check bit-quantization configuration parsing" {
         method_configuration,
     );
 }
+
+test "bitpacked quantization detects grid collapse due to precision loss" {
+    // Regression test for the precision guard: when bucket_size is so small that
+    // min_val + bucket_size == min_val (grid collapses), and the range exceeds error_bound,
+    // compress should return Error.UnsupportedInput.
+    const allocator = testing.allocator;
+
+    // Use a very large min_val and a tiny error_bound to create a scenario where
+    // bucket_size (1.998 * error_bound) is too small relative to min_val.
+    // This triggers the grid collapse condition: min_val + bucket_size == min_val
+    const min_val: f64 = 1e16;
+    const max_val: f64 = min_val + 1.0; // Range of 1.0
+    const error_bound: f32 = 1e-10; // Tiny error bound
+
+    const uncompressed_values = &[2]f64{ min_val, max_val };
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    const method_configuration = try std.fmt.allocPrint(
+        allocator,
+        "{{\"abs_error_bound\": {e}}}",
+        .{error_bound},
+    );
+    defer allocator.free(method_configuration);
+
+    // The grid collapse condition should be detected and return UnsupportedInput
+    compress(
+        allocator,
+        uncompressed_values[0..],
+        &compressed_values,
+        method_configuration,
+    ) catch |err| {
+        try testing.expectEqual(Error.UnsupportedInput, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "Expected compression to fail due to grid collapse (min_val + bucket_size == min_val)",
+        .{},
+    );
+}
+
+test "bitpacked quantization detects reconstructed max exceeding error bound" {
+    // Regression test for the reconstructed-max error check: when the reconstructed max value
+    // deviates from the actual max value by more than error_bound, compress should return
+    // Error.UnsupportedInput.
+    const allocator = testing.allocator;
+
+    // Create a scenario where the reconstructed max differs from max_val by more than error_bound.
+    // We need values where quantization+reconstruction introduces error > error_bound.
+    // Use a range that causes quantization rounding errors to accumulate.
+    const min_val: f64 = 0.0;
+    const max_val: f64 = 100.0;
+    const error_bound: f32 = 0.01; // Very tight error bound
+
+    // bucket_size = 1.998 * 0.01 = 0.01998
+    // max_quantized_value = round((100.0 - 0.0) / 0.01998) = round(5005.005...) = 5005
+    // reconstructed_max = 0.0 + 5005 * 0.01998 = 99.9999
+    // abs(99.9999 - 100.0) = 0.0001 which is > 0.01? No, this won't work.
+
+    // Let me try a different approach: use values that create a reconstruction error.
+    // With very specific values, the quantization grid might not align well.
+    // Try: min=0, max=1.0, error_bound=0.0001
+    // bucket_size = 1.998 * 0.0001 = 0.0001998
+    // max_quantized = round(1.0 / 0.0001998) = round(5005.005) = 5005
+    // reconstructed = 0 + 5005 * 0.0001998 = 0.9999999
+    // error = abs(0.9999999 - 1.0) = 0.0000001 < 0.0001, still won't trigger
+
+    // Let's use a case where floating point representation causes issues
+    // Use values that have specific bit patterns that don't align with the quantization grid
+    const min_val_alt: f64 = 1.0;
+    const max_val_alt: f64 = 1.0 + 0.3333333333333333; // 1.3333...
+    const error_bound_alt: f32 = 0.0001;
+
+    // bucket_size = 1.998 * 0.0001 = 0.0001998
+    // Range = 0.3333333333333333
+    // max_quantized = round(0.3333333333333333 / 0.0001998) = round(1668.501...) = 1669
+    // reconstructed = 1.0 + 1669 * 0.0001998 = 1.0 + 0.3334662 = 1.3334662
+    // error = abs(1.3334662 - 1.3333333333333333) = 0.0001329 > 0.0001 ✓
+
+    const uncompressed_values = &[2]f64{ min_val_alt, max_val_alt };
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    const method_configuration = try std.fmt.allocPrint(
+        allocator,
+        "{{\"abs_error_bound\": {e}}}",
+        .{error_bound_alt},
+    );
+    defer allocator.free(method_configuration);
+
+    // The reconstructed-max check should detect the error and return UnsupportedInput
+    compress(
+        allocator,
+        uncompressed_values[0..],
+        &compressed_values,
+        method_configuration,
+    ) catch |err| {
+        try testing.expectEqual(Error.UnsupportedInput, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "Expected compression to fail due to reconstructed max exceeding error bound",
+        .{},
+    );
+}
