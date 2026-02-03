@@ -16,6 +16,16 @@
 
 module TerseTS
 
+# TODO: Fix segmentation and garbage collection errors.
+# https://docs.julialang.org/en/v1/manual/calling-c-and-fortran-code/
+# https://docs.julialang.org/en/v1/base/c/
+
+# TODO: Make all code and tests use Julia's style guide.
+# https://docs.julialang.org/en/v1/manual/style-guide/
+
+# TODO: Format all code and tests using JuliaFormatter.jl.
+# https://domluna.github.io/JuliaFormatter.jl/stable/
+
 """
 Mirror TerseTS `Method` Enum.
 """
