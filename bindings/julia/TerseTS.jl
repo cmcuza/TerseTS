@@ -93,6 +93,7 @@ function compress(
         method::Method,
         configuration::Cstring,
     )::Cint
+
     if tersets_error != 0
         throw("compress failed: $tersets_error")
     end
@@ -119,6 +120,7 @@ function decompress(compressed_values::AbstractVector{UInt8})
         compressed_values_struct::Ref{CompressedValues},
         uncompressed_values_struct::Ref{UncompressedValues},
     )::Cint
+
     if tersets_error != 0
         throw("decompress failed: $tersets_error")
     end
