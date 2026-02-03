@@ -54,9 +54,13 @@ jobs:
       run: gcc -Wall -Wextra tersets.h
       working-directory: bindings/c
 
-    - name: Python Run unittest
+    - name: Python Run Unittest
       run: python3 -m unittest --verbose
       working-directory: bindings/python
+
+    - name: Julia Run Unittest
+      run: julia Tests.jl
+      working-directory: bindings/julia
 
   zig_lint:
     name: Zig Lint
