@@ -17,6 +17,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
+const testing = std.testing;
 
 // Import functional approximation methods.
 const poor_mans_compression = @import(
@@ -52,6 +53,8 @@ const bottom_up = @import("lossy_compression/line_simplification/bottom_up.zig")
 const rle_enconding = @import("lossless_compression/run_length_encoding.zig");
 
 const extractors = @import("utilities/extractors.zig");
+const tester = @import("tester.zig");
+const configuration_file = @import("configuration.zig");
 
 /// The errors that can occur in TerseTS.
 pub const Error = error{
@@ -351,7 +354,7 @@ pub fn extract(
     switch (method) {
         // Both PMC methods use the same extractor.
         .PoorMansCompressionMean, .PoorMansCompressionMidrange => {
-            try extractors.extractPMC(
+            try poor_mans_compression.extract(
                 allocator,
                 compressed_values_slice,
                 timestamps,
@@ -359,7 +362,7 @@ pub fn extract(
             );
         },
         .SwingFilter => {
-            try extractors.extractSwing(
+            try swing_slide_filter.extractSwing(
                 allocator,
                 compressed_values_slice,
                 timestamps,
@@ -368,7 +371,7 @@ pub fn extract(
         },
         // Both SlideFilter and SwingFilterDisconnected use the same extractor.
         .SlideFilter, .SwingFilterDisconnected => {
-            try extractors.extractSlide(
+            try swing_slide_filter.extractSlide(
                 allocator,
                 compressed_values_slice,
                 timestamps,
@@ -376,7 +379,7 @@ pub fn extract(
             );
         },
         .ABCLinearApproximation => {
-            try extractors.extractABCLinearApproximation(
+            try abc_linear_approximation.extract(
                 allocator,
                 compressed_values_slice,
                 timestamps,
@@ -384,7 +387,7 @@ pub fn extract(
             );
         },
         .SimPiece => {
-            try extractors.extractSimPiece(
+            try sim_piece.extract(
                 allocator,
                 compressed_values_slice,
                 timestamps,
@@ -392,7 +395,7 @@ pub fn extract(
             );
         },
         .MixPiece => {
-            try extractors.extractMixPiece(
+            try mix_piece.extract(
                 allocator,
                 compressed_values_slice,
                 timestamps,
@@ -400,7 +403,7 @@ pub fn extract(
             );
         },
         .PiecewiseConstantHistogram => {
-            try extractors.extractPWCH(
+            try piecewise_histogram.extractPWCH(
                 allocator,
                 compressed_values_slice,
                 timestamps,
@@ -408,7 +411,7 @@ pub fn extract(
             );
         },
         .PiecewiseLinearHistogram => {
-            try extractors.extractPWLH(
+            try piecewise_histogram.extractPWLH(
                 allocator,
                 compressed_values_slice,
                 timestamps,
@@ -416,7 +419,7 @@ pub fn extract(
             );
         },
         .VisvalingamWhyatt => {
-            try extractors.extractVisvalingamWhyatt(
+            try vw.extract(
                 allocator,
                 compressed_values_slice,
                 timestamps,
@@ -424,7 +427,7 @@ pub fn extract(
             );
         },
         .SlidingWindow => {
-            try extractors.extractSlidingWindow(
+            try sliding_window.extract(
                 allocator,
                 compressed_values_slice,
                 timestamps,
@@ -432,7 +435,7 @@ pub fn extract(
             );
         },
         .BottomUp => {
-            try extractors.extractBottomUp(
+            try bottom_up.extract(
                 allocator,
                 compressed_values_slice,
                 timestamps,
@@ -440,7 +443,7 @@ pub fn extract(
             );
         },
         .NonLinearApproximation => {
-            try extractors.extractNonLinearApproximation(
+            try non_linear_approximation.extract(
                 allocator,
                 compressed_values_slice,
                 timestamps,
@@ -489,7 +492,7 @@ pub fn rebuild(
     switch (method) {
         // Both PMC methods use the same rebuilder.
         .PoorMansCompressionMean, .PoorMansCompressionMidrange => {
-            try extractors.rebuildPMC(
+            try poor_mans_compression.rebuild(
                 allocator,
                 timestamps,
                 coefficients,
@@ -497,7 +500,7 @@ pub fn rebuild(
             );
         },
         .SwingFilter => {
-            try extractors.rebuildSwing(
+            try swing_slide_filter.rebuildSwing(
                 allocator,
                 timestamps,
                 coefficients,
@@ -506,7 +509,7 @@ pub fn rebuild(
         },
         // Both SlideFilter and SwingFilterDisconnected use the same rebuilder.
         .SlideFilter, .SwingFilterDisconnected => {
-            try extractors.rebuildSlide(
+            try swing_slide_filter.rebuildSlide(
                 allocator,
                 timestamps,
                 coefficients,
@@ -514,7 +517,7 @@ pub fn rebuild(
             );
         },
         .ABCLinearApproximation => {
-            try extractors.rebuildABCLinearApproximation(
+            try abc_linear_approximation.rebuild(
                 allocator,
                 timestamps,
                 coefficients,
@@ -522,7 +525,7 @@ pub fn rebuild(
             );
         },
         .SimPiece => {
-            try extractors.rebuildSimPiece(
+            try sim_piece.rebuild(
                 allocator,
                 timestamps,
                 coefficients,
@@ -530,7 +533,7 @@ pub fn rebuild(
             );
         },
         .MixPiece => {
-            try extractors.rebuildMixPiece(
+            try mix_piece.rebuild(
                 allocator,
                 timestamps,
                 coefficients,
@@ -538,7 +541,7 @@ pub fn rebuild(
             );
         },
         .PiecewiseConstantHistogram => {
-            try extractors.rebuildPWCH(
+            try piecewise_histogram.rebuildPWCH(
                 allocator,
                 timestamps,
                 coefficients,
@@ -546,7 +549,7 @@ pub fn rebuild(
             );
         },
         .PiecewiseLinearHistogram => {
-            try extractors.rebuildABCLinearApproximation(
+            try piecewise_histogram.rebuildPWLH(
                 allocator,
                 timestamps,
                 coefficients,
@@ -554,7 +557,7 @@ pub fn rebuild(
             );
         },
         .SlidingWindow => {
-            try extractors.rebuildSlindingWindow(
+            try sliding_window.rebuild(
                 allocator,
                 timestamps,
                 coefficients,
@@ -562,7 +565,7 @@ pub fn rebuild(
             );
         },
         .BottomUp => {
-            try extractors.rebuildBottomUp(
+            try bottom_up.rebuild(
                 allocator,
                 timestamps,
                 coefficients,
@@ -570,7 +573,7 @@ pub fn rebuild(
             );
         },
         .VisvalingamWhyatt => {
-            try extractors.rebuildVisvalingamWhyatt(
+            try vw.rebuild(
                 allocator,
                 timestamps,
                 coefficients,
@@ -578,7 +581,7 @@ pub fn rebuild(
             );
         },
         .NonLinearApproximation => {
-            try extractors.rebuildNonLinearApproximation(
+            try non_linear_approximation.rebuild(
                 allocator,
                 timestamps,
                 coefficients,
@@ -623,4 +626,90 @@ pub fn getMaxMethodIndex() usize {
     }
 
     return max_index;
+}
+
+test "extract and rebuild works for any compression method supported" {
+    const allocator = testing.allocator;
+    const random = tester.getDefaultRandomGenerator();
+
+    // Input data
+    var uncompressed_values = ArrayList(f64).empty;
+    defer uncompressed_values.deinit(allocator);
+    try tester.generateBoundedRandomValues(
+        allocator,
+        &uncompressed_values,
+        -100,
+        100,
+        random,
+    );
+
+    // Test each method.
+    inline for (std.meta.fields(Method)) |method_field| {
+        const method: Method = @enumFromInt(method_field.value);
+
+        if (method == Method.BitPackedQuantization or
+            method == Method.SerfQT or
+            method == Method.RunLengthEncoding)
+        {
+            // These compression methods are not supported for extraction
+            // of the coefficients and time indices. This is because even small
+            // chages in the compressed representation can lead to large differences
+            // or completely inconsistent decompressed values. For example, for
+            // BitPackedQuantization, The decompression process relies on metadata
+            // (e.g., min_val, bucket_size, and quantized indices) to reconstruct the
+            // original values. If the coefficients are altered, the metadata no longer
+            // aligns with the modified data, making it impossible to map the quantized
+            // indices back to their original values. Finally, the bit-packing encodes
+            // quantized values using a fixed-length scheme. If the coefficients are
+            // modified, the bit-packed representation may no longer be valid, leading to
+            // corrupted streams or misinterpretation of the data during decompression.
+            // In case of RLE, modifying the coefficients can disrupt the run-length
+            // encoding scheme, also leading to incorrect decompression results.
+            continue;
+        }
+
+        const method_configuration = try configuration_file.defaultConfigurationBuilder(
+            allocator,
+            method,
+        );
+        defer allocator.free(method_configuration);
+
+        var compressed_values = try compress(
+            allocator,
+            uncompressed_values.items,
+            method,
+            method_configuration,
+        );
+        defer compressed_values.deinit(allocator);
+
+        var decompressed_values = try decompress(
+            allocator,
+            compressed_values.items,
+        );
+        defer decompressed_values.deinit(allocator);
+
+        // Test extract and rebuild.
+        var coefficient_values = ArrayList(f64).empty;
+        defer coefficient_values.deinit(allocator);
+        var timestamp_values = ArrayList(u64).empty;
+        defer timestamp_values.deinit(allocator);
+
+        try extract(
+            allocator,
+            compressed_values.items,
+            &timestamp_values,
+            &coefficient_values,
+        );
+
+        var rebuild_values = try rebuild(
+            allocator,
+            timestamp_values.items,
+            coefficient_values.items,
+            method,
+        );
+        defer rebuild_values.deinit(allocator);
+
+        try testing.expectEqual(rebuild_values.items.len, compressed_values.items.len);
+        try testing.expectEqualSlices(u8, rebuild_values.items, compressed_values.items);
+    }
 }

@@ -43,6 +43,9 @@ const Segment = shared_structs.Segment;
 
 const tester = @import("../../tester.zig");
 
+const extractors = @import("../../utilities/extractors.zig");
+const rebuilders = @import("../../utilities/rebuilders.zig");
+
 /// Compress `uncompressed_values` using "Visvalingam-Whyatt" simplification algorithm by keeping
 /// points whose effective area is greater than the `error_bound`. The function writes the result
 /// to `compressed_values`. The `allocator` is used to allocate memory for the HashedPriorityQueue
@@ -219,6 +222,44 @@ pub fn decompress(allocator: Allocator, compressed_values: []const u8, decompres
         // The start point of the next segment is the end point of the current segment.
         start_point = end_point;
     }
+}
+
+/// Extracts `indices` and `coefficients` from Visvalingam-Whyatt's `compressed_values`. The binary
+/// representation follows the same pattern as SwingFilter, so this function calls `extractSwing`.
+/// All structural and corruption checks are performed by the delegated function. Any loss of
+/// timestamp information can lead to failures during later decompression. The `allocator` handles
+/// the memory of the output arrays. Allocation errors are propagated.
+pub fn extract(
+    allocator: Allocator,
+    compressed_values: []const u8,
+    indices: *ArrayList(u64),
+    coefficients: *ArrayList(f64),
+) Error!void {
+    try extractors.extractCoefficientIndexTuplesWithStartCoefficient(
+        allocator,
+        compressed_values,
+        indices,
+        coefficients,
+    );
+}
+
+/// Rebuilds Visvalingam-Whyatt's `compressed_values` from the provided `indices` and `coefficients`.
+/// The representation matches SwingFilter, so the function delegates to `rebuildSwing`. All format
+/// validation and corruption checks are performed by that routine. Any loss or misalignment of
+/// indices may cause failures when decoding the rebuilt representation. The `allocator` handles
+/// the memory of the output arrays. Allocation errors are propagated.
+pub fn rebuild(
+    allocator: Allocator,
+    indices: []const u64,
+    coefficients: []const f64,
+    compressed_values: *ArrayList(u8),
+) Error!void {
+    try rebuilders.rebuildCoefficientIndexTuplesWithStartCoefficient(
+        allocator,
+        indices,
+        coefficients,
+        compressed_values,
+    );
 }
 
 /// A `PointArea` represents a point in a series and its associated effective area, which is

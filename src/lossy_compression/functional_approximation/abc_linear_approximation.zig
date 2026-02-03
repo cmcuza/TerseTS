@@ -43,6 +43,9 @@ const Segment = shared_structs.Segment;
 const shared_functions = @import("../../utilities/shared_functions.zig");
 const ConvexHull = @import("../../utilities/convex_hull.zig").ConvexHull;
 
+const extractors = @import("../../utilities/extractors.zig");
+const rebuilders = @import("../../utilities/rebuilders.zig");
+
 /// Compresses `uncompressed_values` using the "ABCLinearApproximation" algorithm under the
 /// L-inf norm. The function writes the result to `compressed_values`. The `allocator`
 /// is used to allocate memory for the convex hull and the `method_configuration` parser.
@@ -210,6 +213,44 @@ pub fn decompress(
         }
         segment_start = segment_end + 1;
     }
+}
+
+/// Extracts `indices` and `coefficients` from ConvexABC's `compressed_values`.
+/// ConvexABC uses the same representation as SlideFilter, so this function delegates to
+/// `extractSlide`. All corruption detection and validation checks are handled by
+/// that routine. Any loss or modification of timestamp information can lead to
+/// failures during decompression. Allocation errors are propagated.
+pub fn extract(
+    allocator: Allocator,
+    compressed_values: []const u8,
+    indices: *ArrayList(u64),
+    coefficients: *ArrayList(f64),
+) Error!void {
+    try extractors.extractCoefficientIndexTuplesWithStartCoefficient(
+        allocator,
+        compressed_values,
+        indices,
+        coefficients,
+    );
+}
+
+/// Rebuilds ConvexABC's `compressed_values` from the provided `indices` and
+/// `coefficients`. The format matches SlideFilter, so this function forwards
+/// to `rebuildSlide`. All structural validation and corruption checks occur
+/// inside the delegated function. Any timestamp inconsistencies may cause failures
+/// when decoding the rebuilt representation. Allocation errors are propagated.
+pub fn rebuild(
+    allocator: Allocator,
+    indices: []const u64,
+    coefficients: []const f64,
+    compressed_values: *ArrayList(u8),
+) Error!void {
+    try rebuilders.rebuildCoefficientIndexTuplesWithStartCoefficient(
+        allocator,
+        indices,
+        coefficients,
+        compressed_values,
+    );
 }
 
 // Find the optimal segment using ABC structure from the `convex_hull`. Specifically, the

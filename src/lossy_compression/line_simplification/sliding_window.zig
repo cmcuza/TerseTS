@@ -39,6 +39,8 @@ const DiscretePoint = shared_structs.DiscretePoint;
 const LinearFunction = shared_structs.LinearFunction;
 
 const tester = @import("../../tester.zig");
+const extractors = @import("../../utilities/extractors.zig");
+const rebuilders = @import("../../utilities/rebuilders.zig");
 
 const testing = std.testing;
 
@@ -150,6 +152,44 @@ pub fn decompress(allocator: Allocator, compressed_values: []const u8, decompres
             }
         }
     }
+}
+
+/// Extracts `indices` and `coefficients` from SlidingWindow's `compressed_values`. SlidingWindow
+/// follows the same triplet representation as SlideFilter, so the function forwards to `extractSlide`.
+/// All validation, including corruption detection, handlesd by that routine. Any loss of timestamp
+/// information can lead to unexpected failures during decompression. The `allocator` handles the memory
+/// of the output arrays. Allocation errors are propagated.
+pub fn extract(
+    allocator: Allocator,
+    compressed_values: []const u8,
+    indices: *ArrayList(u64),
+    coefficients: *ArrayList(f64),
+) Error!void {
+    try extractors.extractCoefficientIndexTuplesWithStartCoefficient(
+        allocator,
+        compressed_values,
+        indices,
+        coefficients,
+    );
+}
+
+/// Rebuilds SlidingWindow's `compressed_values` using the provided `indices` and `coefficients`.
+/// The representation matches SlideFilter's representation, so this function delegates to
+/// `rebuildSlide`. Structural and corruption checks are handled internally by the delegated function.
+/// Incorrect or inconsistent timestamp information may cause decompression failures. The `allocator`
+/// handles the memory allocations of the output arrays. Allocation errors are propagated.
+pub fn rebuild(
+    allocator: Allocator,
+    indices: []const u64,
+    coefficients: []const f64,
+    compressed_values: *ArrayList(u8),
+) Error!void {
+    try rebuilders.rebuildCoefficientIndexTuplesWithStartCoefficient(
+        allocator,
+        indices,
+        coefficients,
+        compressed_values,
+    );
 }
 
 /// Computes the Root-Mean-Squared-Errors (RMSE) for a segment of the `uncompressed_values`.

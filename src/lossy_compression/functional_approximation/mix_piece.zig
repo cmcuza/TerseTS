@@ -347,6 +347,251 @@ pub fn decompress(
     }
 }
 
+/// Extracts `indices` and `coefficients` from MixPiece's `compressed_values`. MixPiece consists
+/// of three parts, each beginning with a header count: (part1_count, part2_count, part3_count).
+/// These counts determine how many variable-length groups follow in each part. A `indices`
+/// ArrayList stores all counts and deltas, while a `coefficients` ArrayList stores intercepts
+/// and slopes extracted from the representation. Because MixPiece contains several nested and
+/// length-dependent structures, any loss of information on the indices, including incorrect
+/// group counts or delta values, can lead to unexpected failures during decompression. Only
+/// lightweight structural checks are performed. Deeper validation must be ensured by the caller.
+/// The required details of the encoding are documented in `src/functional_approximation/mix_piece.zig`.
+/// If the buffer does not match the expected header or runs out of data mid-structure, the function
+/// returns `Error.CorruptedCompressedData`. The `allocator` handles the memory allocations of the
+/// output arrays. Allocation errors are propagated.
+pub fn extract(
+    allocator: Allocator,
+    compressed_values: []const u8,
+    indices: *ArrayList(u64),
+    coefficients: *ArrayList(f64),
+) Error!void {
+    // Compressed representation must contain at least the 3 header fields.
+    var offset: u64 = 3 * @sizeOf(u64);
+    if (compressed_values.len < offset)
+        return Error.CorruptedCompressedData;
+
+    const header = mem.bytesAsSlice(u64, compressed_values[0..offset]);
+    const part1_count = header[0];
+    const part2_count = header[1];
+    const part3_count = header[2];
+
+    try indices.append(allocator, part1_count);
+    try indices.append(allocator, part2_count);
+    try indices.append(allocator, part3_count);
+
+    // Mix-Piece Phase 3: Populate the three data structures. Separately handle three parts.
+    // Part 1: segment groups that share the same intercept.
+    // Part 2: segment groups that don't share the same intercept but the same slope.
+    // Part 3: segment unmerged segments.
+
+    // Part 1: Intercept groups.
+    for (0..part1_count) |_| {
+        try shared_functions.ensureEnoughBytesAreAvailable(compressed_values, offset, @sizeOf(f64));
+        const intercept = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
+        try coefficients.append(allocator, intercept);
+
+        try shared_functions.ensureEnoughBytesAreAvailable(compressed_values, offset, @sizeOf(u64));
+        const slopes_count = try shared_functions.readOffsetValue(u64, compressed_values, &offset);
+        try indices.append(allocator, slopes_count);
+
+        for (0..slopes_count) |_| {
+            try shared_functions.ensureEnoughBytesAreAvailable(compressed_values, offset, @sizeOf(f64));
+            const slope = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
+            try coefficients.append(allocator, slope);
+
+            try shared_functions.ensureEnoughBytesAreAvailable(compressed_values, offset, @sizeOf(u64));
+            const indices_count = try shared_functions.readOffsetValue(u64, compressed_values, &offset);
+            try indices.append(allocator, indices_count);
+
+            for (0..indices_count) |_| {
+                try shared_functions.ensureEnoughBytesAreAvailable(compressed_values, offset, @sizeOf(u64));
+                const delta = try shared_functions.readOffsetValue(u64, compressed_values, &offset);
+                try indices.append(allocator, delta);
+            }
+        }
+    }
+
+    // Part 2: Slope groups.
+    for (0..part2_count) |_| {
+        try shared_functions.ensureEnoughBytesAreAvailable(compressed_values, offset, @sizeOf(f64));
+        const slope = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
+        try coefficients.append(allocator, slope);
+
+        try shared_functions.ensureEnoughBytesAreAvailable(compressed_values, offset, @sizeOf(u64));
+        const pair_count = try shared_functions.readOffsetValue(u64, compressed_values, &offset);
+        try indices.append(allocator, pair_count);
+
+        for (0..pair_count) |_| {
+            try shared_functions.ensureEnoughBytesAreAvailable(compressed_values, offset, @sizeOf(f64));
+            const intercept = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
+            try coefficients.append(allocator, intercept);
+
+            try shared_functions.ensureEnoughBytesAreAvailable(compressed_values, offset, @sizeOf(u64));
+            const delta = try shared_functions.readOffsetValue(u64, compressed_values, &offset);
+            try indices.append(allocator, delta);
+        }
+    }
+
+    // Part 3: Ungrouped segments.
+    for (0..part3_count) |_| {
+        try shared_functions.ensureEnoughBytesAreAvailable(compressed_values, offset, @sizeOf(f64) * 2 + @sizeOf(u64));
+
+        const slope = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
+        try coefficients.append(allocator, slope);
+
+        const intercept = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
+        try coefficients.append(allocator, intercept);
+
+        const delta = try shared_functions.readOffsetValue(u64, compressed_values, &offset);
+        try indices.append(allocator, delta);
+    }
+
+    // Final timestamp.
+    try shared_functions.ensureEnoughBytesAreAvailable(compressed_values, offset, @sizeOf(u64));
+    const final_timestamp = try shared_functions.readOffsetValue(u64, compressed_values, &offset);
+    try indices.append(allocator, final_timestamp);
+
+    // No extra data should remain.
+    if (offset != compressed_values.len)
+        return Error.CorruptedCompressedData;
+}
+
+/// Rebuilds MixPiece's `compressed_values` from the provided `indices` and `coefficients`.
+/// The `indices` array must begin with the three part counts:
+/// [part1_count, part2_count, part3_count].
+/// Based on these counts, the function reconstructs the variable-length groups for each part
+/// by consuming the arrays in the order required by MixPiece. Any loss of information on the
+/// indices, including corrupted group counts or mismatched delta sequences, may cause unexpected
+/// failures during decompression. The function assumes the input arrays are logically consistent
+/// and performs only structural validation. If the reconstructed stream does not consume all
+/// required coefficients or indices, or if extra data remains after processing a part, the
+/// function returns `Error.UnsupportedInput`. The `allocator` handles the memory allocations of
+/// the output arrays. Allocation errors are propagated.
+pub fn rebuild(
+    allocator: Allocator,
+    indices: []const u64,
+    coefficients: []const f64,
+    compressed_values: *ArrayList(u8),
+) Error!void {
+    // Must contain at least the three part counts.
+    if (indices.len < 3)
+        return Error.CorruptedCompressedData;
+
+    const part1_count = indices[0];
+    const part2_count = indices[1];
+    const part3_count = indices[2];
+
+    try shared_functions.appendValue(allocator, u64, part1_count, compressed_values);
+    try shared_functions.appendValue(allocator, u64, part2_count, compressed_values);
+    try shared_functions.appendValue(allocator, u64, part3_count, compressed_values);
+
+    var indices_index: u64 = 3;
+    var coefficients_index: u64 = 0;
+
+    // Part 1: Intercept groups.
+    for (0..part1_count) |_| {
+        // intercept.
+        try shared_functions.ensureIndexWithinLength(coefficients_index, coefficients.len);
+        const intercept = coefficients[coefficients_index];
+        try shared_functions.appendValue(allocator, f64, intercept, compressed_values);
+        coefficients_index += 1;
+
+        // slopes_count.
+        try shared_functions.ensureIndexWithinLength(indices_index, indices.len);
+        const slopes_count = indices[indices_index];
+        try shared_functions.appendValue(allocator, u64, slopes_count, compressed_values);
+        indices_index += 1;
+
+        // slope groups.
+        for (0..slopes_count) |_| {
+            // slope.
+            try shared_functions.ensureIndexWithinLength(coefficients_index, coefficients.len);
+            const slope = coefficients[coefficients_index];
+            try shared_functions.appendValue(allocator, f64, slope, compressed_values);
+            coefficients_index += 1;
+
+            // indices_count.
+            try shared_functions.ensureIndexWithinLength(indices_index, indices.len);
+            const indices_count = indices[indices_index];
+            try shared_functions.appendValue(allocator, u64, indices_count, compressed_values);
+            indices_index += 1;
+
+            // deltas.
+            for (0..indices_count) |_| {
+                try shared_functions.ensureIndexWithinLength(indices_index, indices.len);
+                const delta = indices[indices_index];
+                try shared_functions.appendValue(allocator, u64, delta, compressed_values);
+                indices_index += 1;
+            }
+        }
+    }
+
+    // Part 2: Slope groups.
+    for (0..part2_count) |_| {
+        // slope.
+        try shared_functions.ensureIndexWithinLength(coefficients_index, coefficients.len);
+        const slope = coefficients[coefficients_index];
+        try shared_functions.appendValue(allocator, f64, slope, compressed_values);
+        coefficients_index += 1;
+
+        // pair_count.
+        try shared_functions.ensureIndexWithinLength(indices_index, indices.len);
+        const pair_count = indices[indices_index];
+        try shared_functions.appendValue(allocator, u64, pair_count, compressed_values);
+        indices_index += 1;
+
+        // (intercept, delta) pairs.
+        for (0..pair_count) |_| {
+            // intercept.
+            try shared_functions.ensureIndexWithinLength(coefficients_index, coefficients.len);
+            const intercept = coefficients[coefficients_index];
+            try shared_functions.appendValue(allocator, f64, intercept, compressed_values);
+            coefficients_index += 1;
+
+            // delta.
+            try shared_functions.ensureIndexWithinLength(indices_index, indices.len);
+            const delta = indices[indices_index];
+            try shared_functions.appendValue(allocator, u64, delta, compressed_values);
+            indices_index += 1;
+        }
+    }
+
+    // Part 3: Ungrouped segments.
+    for (0..part3_count) |_| {
+        // slope.
+        try shared_functions.ensureIndexWithinLength(coefficients_index, coefficients.len);
+        const slope = coefficients[coefficients_index];
+        try shared_functions.appendValue(allocator, f64, slope, compressed_values);
+        coefficients_index += 1;
+
+        // intercept.
+        try shared_functions.ensureIndexWithinLength(coefficients_index, coefficients.len);
+        const intercept = coefficients[coefficients_index];
+        try shared_functions.appendValue(allocator, f64, intercept, compressed_values);
+        coefficients_index += 1;
+
+        // delta.
+        try shared_functions.ensureIndexWithinLength(indices_index, indices.len);
+        const delta = indices[indices_index];
+        try shared_functions.appendValue(allocator, u64, delta, compressed_values);
+        indices_index += 1;
+    }
+
+    // Final timestamp.
+    try shared_functions.ensureIndexWithinLength(indices_index, indices.len);
+    const final_timestamp = indices[indices_index];
+    try shared_functions.appendValue(allocator, u64, final_timestamp, compressed_values);
+    indices_index += 1;
+
+    // No extra indices allowed.
+    if (indices_index != indices.len)
+        return Error.CorruptedCompressedData;
+
+    // No extra coefficients allowed.
+    if (coefficients_index != coefficients.len)
+        return Error.CorruptedCompressedData;
+}
+
 /// Mix-Piece Phase 1: Compute `SegmentMetadata` for each segment that can be approximated
 /// by a linear function within the `error_bound` from `uncompressed_values`.
 /// Uses both floor and ceil quantization to find optimal segments.
@@ -1314,5 +1559,63 @@ test "check mixpiece configuration parsing" {
         uncompressed_values,
         &compressed_values,
         method_configuration,
+    );
+}
+
+test "rebuildMixPiece rejects malformed header-only input" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).empty;
+    defer compressed.deinit(allocator);
+
+    // indices must contain at least 3 elements for header, but coefficients are missing.
+    const indices = [_]u64{ 1, 0, 0 };
+    const coefficients = [_]f64{}; // no intercept thus corrupted.
+
+    try testing.expectError(
+        Error.CorruptedCompressedData,
+        rebuild(allocator, indices[0..], coefficients[0..], &compressed),
+    );
+}
+
+test "rebuildMixPiece rejects mismatched Part1 group structure" {
+    // To fully understand this test, refer to the MixPiece implementation.
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).empty;
+    defer compressed.deinit(allocator);
+
+    // part1_count = 1, but missing slope data.
+    const indices = [_]u64{
+        1, // part1_count.
+        0, // part2_count.
+        0, // part3_count.
+        1, // slopes_count for group 0.
+        0, // indices_count for slope (but missing deltas + final timestamp).
+    };
+
+    const coefficients = [_]f64{
+        5.0, // intercept.
+        // No slope thus the data is corrupted.
+    };
+
+    try testing.expectError(
+        Error.CorruptedCompressedData,
+        rebuild(allocator, indices[0..], coefficients[0..], &compressed),
+    );
+}
+
+test "rebuildMixPiece rejects missing final timestamp" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).empty;
+    defer compressed.deinit(allocator);
+
+    const indices = [_]u64{
+        0, 0, 0,
+        // Missing final_timestamp.
+    };
+
+    const coefficients = [_]f64{}; // No coefficients needed for zero parts.
+    try testing.expectError(
+        Error.CorruptedCompressedData,
+        rebuild(allocator, indices[0..], coefficients[0..], &compressed),
     );
 }

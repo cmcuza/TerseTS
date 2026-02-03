@@ -43,6 +43,8 @@ const DiscretePoint = shared_structs.DiscretePoint;
 const LinearFunction = shared_structs.LinearFunction;
 
 const tester = @import("../../tester.zig");
+const extractors = @import("../../utilities/extractors.zig");
+const rebuilders = @import("../../utilities/rebuilders.zig");
 
 const testing = std.testing;
 
@@ -185,7 +187,11 @@ pub fn compress(
 
 /// Decompress `compressed_values` produced by "Bottom-Up". The function writes the result to
 /// `decompressed_values`. If an error occurs it is returned.
-pub fn decompress(allocator: Allocator, compressed_values: []const u8, decompressed_values: *ArrayList(f64)) Error!void {
+pub fn decompress(
+    allocator: Allocator,
+    compressed_values: []const u8,
+    decompressed_values: *ArrayList(f64),
+) Error!void {
     // The compressed representation is composed of three values: (start_value, end_value, end_time)
     // all of type 64-bit float, except end_time which is usize.
     if (compressed_values.len % 24 != 0) return Error.UnsupportedInput;
@@ -234,6 +240,44 @@ pub fn decompress(allocator: Allocator, compressed_values: []const u8, decompres
             first_timestamp += 2;
         }
     }
+}
+
+/// Extracts `indices` and `coefficients` from BottomUp's `compressed_values`. BottomUp uses the
+/// same three-value repeating representation as SlideFilter, so this function forwards to
+/// `extractSlide`. All corruption checks and structural validation occur in that routine. Any loss
+/// of information on indices can lead to failures when decoding. The `allocator` handles the memory
+/// of the output arrays. Allocation errors are propagated.
+pub fn extract(
+    allocator: Allocator,
+    compressed_values: []const u8,
+    indices: *ArrayList(u64),
+    coefficients: *ArrayList(f64),
+) Error!void {
+    try extractors.extractCoefficientIndexTuplesWithStartCoefficient(
+        allocator,
+        compressed_values,
+        indices,
+        coefficients,
+    );
+}
+
+/// Rebuilds BottomUp's `compressed_values` from the provided `indices` and `coefficients`.
+/// Because the format matches SlideFilter exactly, this wrapper forwards to `rebuildSlide`.
+/// All format and corruption checks are performed internally. Incorrect or inconsistent
+/// indices may produce corrupted output that cannot be decompressed. The `allocator`
+/// handles the memory allocations of the output arrays. Allocation errors are propagated.
+pub fn rebuild(
+    allocator: Allocator,
+    indices: []const u64,
+    coefficients: []const f64,
+    compressed_values: *ArrayList(u8),
+) Error!void {
+    try rebuilders.rebuildCoefficientIndexTuplesWithStartCoefficient(
+        allocator,
+        indices,
+        coefficients,
+        compressed_values,
+    );
 }
 
 /// `SegmentMergeCost` represents a segment and its associated `cost` with the next segment,

@@ -178,6 +178,143 @@ pub fn decompress(
     );
 }
 
+/// Extracts `indices` and `coefficients` from SimPiece's `compressed_values`.
+/// The representation contains nested blocks of intercepts, slopes, timestamp counts,
+/// and delta values of the form:
+/// [intercept, slopes_count, (slope, index_count, deltas...)..., last_index].
+/// A `indices` ArrayList is used to store extracted counts and deltas, while a `coefficients`
+/// ArrayList stores intercepts and slopes. The structure is variable in length and must follow the
+/// encoding defined in SimPiece code. Any loss of information on the indices, including
+/// corrupted counts or altered delta values, can lead to unexpected failures when attempting to
+/// decompress the resulting representation. The function performs only basic structural checks;
+/// semantic correctness must be ensured by the caller. The final element of the payload must be a
+/// trailing `last_timestamp`. If the buffer ends prematurely, or the structural expectations are
+/// not satisfied, `Error.CorruptedCompressedData` is returned. The `allocator` handles the memory
+/// of the output arrays. Allocation errors are propagated.
+pub fn extract(
+    allocator: Allocator,
+    compressed_values: []const u8,
+    indices: *ArrayList(u64),
+    coefficients: *ArrayList(f64),
+) Error!void {
+
+    // Validate input lengths: must contain at least one intercept and one last_timestamp.
+    if (compressed_values.len < 16)
+        return Error.CorruptedCompressedData;
+
+    const compressed_values_slice = mem.bytesAsSlice(f64, compressed_values);
+
+    var i: u64 = 0;
+    while (i < compressed_values_slice.len - 1) {
+        // intercept.
+        try coefficients.append(allocator, compressed_values_slice[i]);
+        i += 1;
+
+        // slopes_count.
+        try shared_functions.ensureIndexWithinLength(i, compressed_values_slice.len);
+        const slopes_count: u64 = @bitCast(compressed_values_slice[i]);
+        try indices.append(allocator, slopes_count);
+        i += 1;
+
+        // Process each slope block.
+        var slope_i: u64 = 0;
+        while (slope_i < slopes_count) : (slope_i += 1) {
+            // slope.
+            try shared_functions.ensureIndexWithinLength(i, compressed_values_slice.len);
+            try coefficients.append(allocator, compressed_values_slice[i]);
+            i += 1;
+
+            // indices_count.
+            try shared_functions.ensureIndexWithinLength(i, compressed_values_slice.len);
+            const indices_count: u64 = @bitCast(compressed_values_slice[i]);
+            try indices.append(allocator, indices_count);
+            i += 1;
+
+            // deltas.
+            var time_i: u64 = 0;
+            while (time_i < indices_count) : (time_i += 1) {
+                try shared_functions.ensureIndexWithinLength(i, compressed_values_slice.len);
+                const delta: u64 = @bitCast(compressed_values_slice[i]);
+                try indices.append(allocator, delta);
+                i += 1;
+            }
+        }
+    }
+
+    // Final timestamp must exist.
+    if (i != compressed_values_slice.len - 1)
+        return Error.CorruptedCompressedData;
+
+    const last_timestamp: u64 = @bitCast(compressed_values_slice[i]);
+    try indices.append(allocator, last_timestamp);
+}
+
+/// Rebuilds SimPiece's `compressed_values` from the provided `indices` and `coefficients`.
+/// The structure is nested and variable in length, thus no simple extructural checking conditions.
+/// The function reconstructs the encoded stream by iterating through both arrays in the expected
+/// order. Any loss of information on the indices, such as incorrect counts or misaligned delta
+/// values, can lead to unexpected failures during decompression. Only structural validation is
+/// performed. It is the caller's responsibility to ensure the logical consistency of all fields.
+/// A single trailing `last_timestamp` must remain after processing all nested blocks. Extra or
+/// missing elements in either array result in `Error.CorruptedCompressedData`. The `allocator`
+/// handles the memory allocations of the output arrays. Allocation errors are propagated.
+pub fn rebuild(
+    allocator: Allocator,
+    indices: []const u64,
+    coefficients: []const f64,
+    compressed_values: *ArrayList(u8),
+) Error!void {
+    // Validate input lengths: at least the final last_timestamp.
+    if (indices.len == 0) return Error.CorruptedCompressedData;
+
+    var coefficient_index: u64 = 0; // index into coefficients.
+    var indices_index: u64 = 0; // index into indices.
+
+    // For each intercept.
+    while (coefficient_index < coefficients.len) {
+        // Extract intercept.
+        try shared_functions.appendValue(allocator, f64, coefficients[coefficient_index], compressed_values);
+        coefficient_index += 1;
+
+        if (indices_index >= indices.len) return Error.CorruptedCompressedData;
+        const slopes_count = indices[indices_index];
+        try shared_functions.appendValue(allocator, u64, slopes_count, compressed_values);
+        indices_index += 1;
+
+        // For each slope on this intercept.
+        var slope_i: u64 = 0;
+        while (slope_i < slopes_count) : (slope_i += 1) {
+            if (coefficient_index >= coefficients.len) return Error.CorruptedCompressedData;
+            // Extract slope.
+            try shared_functions.appendValue(allocator, f64, coefficients[coefficient_index], compressed_values);
+            coefficient_index += 1;
+
+            if (indices_index >= indices.len) return Error.CorruptedCompressedData;
+            const indices_count = indices[indices_index];
+            try shared_functions.appendValue(allocator, u64, indices_count, compressed_values);
+            indices_index += 1;
+
+            // Extract deltas.
+            var time_i: u64 = 0;
+            while (time_i < indices_count) : (time_i += 1) {
+                if (indices_index >= indices.len) return Error.CorruptedCompressedData;
+                const delta = indices[indices_index];
+                try shared_functions.appendValue(allocator, u64, delta, compressed_values);
+                indices_index += 1;
+            }
+        }
+    }
+
+    // Must have exactly one trailing last_timestamp remaining.
+    if (indices_index >= indices.len) return Error.CorruptedCompressedData;
+    const last_timestamp = indices[indices_index];
+    try shared_functions.appendValue(allocator, u64, last_timestamp, compressed_values);
+    indices_index += 1;
+
+    // No extra data should remain.
+    if (indices_index != indices.len) return Error.CorruptedCompressedData;
+}
+
 /// Sim-Piece Phase 1: Compute `SegmentMetadata` for each segment that can be approximated
 /// by a linear function within the `error_bound` from `uncompressed_values`.
 fn computeSegmentsMetadata(
@@ -759,5 +896,46 @@ test "check simpiece configuration parsing" {
         uncompressed_values,
         &compressed_values,
         method_configuration,
+    );
+}
+
+test "rebuildSimPiece rejects mismatched representation (too few indices)" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).empty;
+    defer compressed.deinit(allocator);
+
+    // Minimal malformed input:
+    // One intercept in coefficients but indices missing nested metadata.
+    const coefficients = [_]f64{1.0}; // intercept only.
+    const indices = [_]u64{0}; // slopes_count but missing final_timestamp.
+
+    try testing.expectError(
+        Error.CorruptedCompressedData,
+        rebuild(
+            allocator,
+            indices[0..],
+            coefficients[0..],
+            &compressed,
+        ),
+    );
+}
+
+test "rebuildSimPiece rejects mismatched representation (missing slope/intercept pairs)" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).empty;
+    defer compressed.deinit(allocator);
+
+    // Only intercept is provided.
+    const coefficients = [_]f64{1.0}; // missing slope.
+    const indices = [_]u64{ 1, 0, 5 }; // slopes_count = 1, but no slope data.
+
+    try testing.expectError(
+        Error.CorruptedCompressedData,
+        rebuild(
+            allocator,
+            indices[0..],
+            coefficients[0..],
+            &compressed,
+        ),
     );
 }

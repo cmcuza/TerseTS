@@ -51,6 +51,9 @@ const Error = tersets.Error;
 
 const tester = @import("../../tester.zig");
 
+const extractors = @import("../../utilities/extractors.zig");
+const rebuilders = @import("../../utilities/rebuilders.zig");
+
 // Enum to determine the type of approximation of the buckets in the histogram.
 const Approximation = enum(i8) { constant, linear };
 
@@ -236,6 +239,84 @@ pub fn decompressPWLH(
             first_timestamp += 1;
         }
     }
+}
+
+/// Extracts `indices` and `coefficients` from the Piecewise Constant Histogram's
+/// `compressed_values`. The representation of PWCH is identical to that used by
+/// Poor Man's Compression, so this function forwards its work to `extractPMC`. All structural
+/// validation and corruption checks are handled internally by that routine. Any loss of
+/// information on the indices can lead to unexpected failures during decompression.
+/// The `allocator` handles the memory allocations of the output arrays. Allocation errors are propagated.
+pub fn extractPWCH(
+    allocator: Allocator,
+    compressed_values: []const u8,
+    indices: *ArrayList(u64),
+    coefficients: *ArrayList(f64),
+) Error!void {
+    try extractors.extractCoefficientIndexPairs(
+        allocator,
+        compressed_values,
+        indices,
+        coefficients,
+    );
+}
+
+/// Extracts `indices` and `coefficients` from the Piecewise Linear Histogram's
+/// `compressed_values`. PWLH uses the same triplet representation as SlideFilter, so this function
+/// delegates to `extractSlide`. All validation and corruption detection handlesd by that routine.
+/// Any loss of timestamp information may lead to unexpected failures during decompression.
+/// The `allocator` handles the memory allocations of the output arrays. Allocation errors are propagated.
+pub fn extractPWLH(
+    allocator: Allocator,
+    compressed_values: []const u8,
+    indices: *ArrayList(u64),
+    coefficients: *ArrayList(f64),
+) Error!void {
+    try extractors.extractDoubleCoefficientIndexTriples(
+        allocator,
+        compressed_values,
+        indices,
+        coefficients,
+    );
+}
+
+/// Rebuilds a Piecewise Constant Histogram representation from the provided `indices` and
+/// `coefficients`. PWCH uses the same binary format as PMC, so this function forwards the work
+/// to `rebuildPMC`. All structural and corruption checks are performed by the underlying function.
+/// Any loss or misalignment of timestamp information can cause failures when decompressing
+/// the rebuilt representation. The `allocator` handles the memory allocations of the output arrays.
+/// Allocation errors are propagated.
+pub fn rebuildPWCH(
+    allocator: Allocator,
+    indices: []const u64,
+    coefficients: []const f64,
+    compressed_values: *ArrayList(u8),
+) Error!void {
+    try rebuilders.rebuildCoefficientIndexPairs(
+        allocator,
+        indices,
+        coefficients,
+        compressed_values,
+    );
+}
+
+/// Rebuilds a Piecewise Linear Histogram representation from the provided `indices` and `coefficients`.
+/// PWLH uses the SlideFilter representation, so this function forwards the work to `rebuildSlide`.
+/// All correctness checks are performed internally by the delegated function. Any inconsistency in timestamp
+/// counts or ordering may produce corrupted data that fails during decompression. The `allocator` handles
+/// the memory of the output arrays. Allocation errors are propagated.
+pub fn rebuildPWLH(
+    allocator: Allocator,
+    indices: []const u64,
+    coefficients: []const f64,
+    compressed_values: *ArrayList(u8),
+) Error!void {
+    try rebuilders.rebuildDoubleCoefficientIndexTriples(
+        allocator,
+        indices,
+        coefficients,
+        compressed_values,
+    );
 }
 
 /// `Bucket` stores information about a range of consecutives values in the time series. The

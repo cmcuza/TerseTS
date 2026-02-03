@@ -48,12 +48,14 @@ const configuration = @import("../../configuration.zig");
 
 const shared_structs = @import("../../utilities/shared_structs.zig");
 const shared_functions = @import("../../utilities/shared_functions.zig");
+const ConvexHull = @import("../../utilities/convex_hull.zig").ConvexHull;
+const extractors = @import("../../utilities/extractors.zig");
+const rebuilders = @import("../../utilities/rebuilders.zig");
+
 const DiscretePoint = shared_structs.DiscretePoint;
 const ContinousPoint = shared_structs.ContinousPoint;
 const Segment = shared_structs.Segment;
 const LinearFunction = shared_structs.LinearFunction;
-
-const ConvexHull = @import("../../utilities/convex_hull.zig").ConvexHull;
 
 /// Compress `uncompressed_values` using "Swing Filter" and its `method_configuration`.
 /// The function writes the result to `compressed_values`. The `allocator` is used to
@@ -808,6 +810,90 @@ pub fn decompressSlideFilter(
     }
 }
 
+/// Extracts `indices` and coefficients from SwingFilter's `compressed_values`. A `indices`
+/// ArrayList is used to store the extracted end indices, and a `coefficients` ArrayList is used
+/// to store the coefficient values. Swing encodes a sequence of triples:
+/// (f64 coefficient, f64 coefficient, u64 end_index). Any inconsistency or loss of information
+/// in the `indices` may result in errors when decompressing the reconstructed representation.
+/// If validation of the `compressed_values` fails, `Error.CorruptedCompressedData` is returned.
+/// The `allocator` handles the memory allocations of the output arrays. Any memory allocation
+/// error is propagated to the caller.
+pub fn extractSwing(
+    allocator: Allocator,
+    compressed_values: []const u8,
+    indices: *ArrayList(u64),
+    coefficients: *ArrayList(f64),
+) Error!void {
+    try extractors.extractCoefficientIndexTuplesWithStartCoefficient(
+        allocator,
+        compressed_values,
+        indices,
+        coefficients,
+    );
+}
+
+/// Extracts `indices` and coefficients from SlideFilter's `compressed_values`. A `indices`
+/// ArrayList is used to store the extracted end indices, and a `coefficients` ArrayList is used
+/// to store the coefficient values. Slide encodes a sequence of triples:
+/// (f64 coefficient, f64 coefficient, u64 end_index). Any inconsistency or loss of information
+/// in the `indices` may result in errors when decompressing the reconstructed representation.
+/// If validation of the `compressed_values` fails, `Error.CorruptedCompressedData` is returned.
+/// The `allocator` handles the memory allocations of the output arrays. Any memory allocation
+/// error is propagated to the caller.
+pub fn extractSlide(
+    allocator: Allocator,
+    compressed_values: []const u8,
+    indices: *ArrayList(u64),
+    coefficients: *ArrayList(f64),
+) Error!void {
+    try extractors.extractDoubleCoefficientIndexTriples(
+        allocator,
+        compressed_values,
+        indices,
+        coefficients,
+    );
+}
+
+/// Rebuilds the `compressed_values` for SwingFilter from `indices` and `coefficients`. A `indices`
+/// ArrayList is used to provide the end indices, and a `coefficients` ArrayList is used to provide
+/// the coefficient values. Swing encodes a sequence of tuples:
+/// (f64 coefficient, u64 end_index) after extracting the first coefficient.
+/// The `allocator` handles the memory allocations of the output array. Any memory allocation
+/// error is propagated to the caller.
+pub fn rebuildSwing(
+    allocator: Allocator,
+    indices: []const u64,
+    coefficients: []const f64,
+    compressed_values: *ArrayList(u8),
+) Error!void {
+    try rebuilders.rebuildCoefficientIndexTuplesWithStartCoefficient(
+        allocator,
+        indices,
+        coefficients,
+        compressed_values,
+    );
+}
+
+/// Rebuilds the `compressed_values` for SlideFilter from `indices` and `coefficients`. A `indices`
+/// ArrayList is used to provide the end indices, and a `coefficients` ArrayList is used to provide
+/// the coefficient values. Slide encodes a sequence of triples:
+/// (f64 coefficient, f64 coefficient, u64 end_index).
+/// The `allocator` handles the memory allocations of the output array. Any memory allocation
+/// error is propagated to the caller.
+pub fn rebuildSlide(
+    allocator: Allocator,
+    indices: []const u64,
+    coefficients: []const f64,
+    compressed_values: *ArrayList(u8),
+) Error!void {
+    try rebuilders.rebuildDoubleCoefficientIndexTriples(
+        allocator,
+        indices,
+        coefficients,
+        compressed_values,
+    );
+}
+
 /// Computes the numerator of the slope derivate as in Eq. (6).
 fn computeSlopeDerivate(segment: Segment) f64 {
     return (segment.end_point.value - segment.start_point.value) *
@@ -1074,4 +1160,36 @@ test "check swing-disc configuration parsing" {
         &compressed_values,
         method_configuration,
     );
+}
+
+test "rebuildSwing rejects mismatched input lengths" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).empty;
+    defer compressed.deinit(allocator);
+
+    const indices = [_]u64{ 1, 2 };
+    const coefficients = [_]f64{ 1.0, 2.0 };
+
+    try testing.expectError(Error.CorruptedCompressedData, rebuildSwing(
+        allocator,
+        indices[0..],
+        coefficients[0..],
+        &compressed,
+    ));
+}
+
+test "rebuildSlide rejects mismatched input lengths" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).empty;
+    defer compressed.deinit(allocator);
+
+    const indices = [_]u64{ 1, 2, 3 };
+    const coefficients = [_]f64{ 1.0, 2.0 };
+
+    try testing.expectError(Error.CorruptedCompressedData, rebuildSlide(
+        allocator,
+        indices[0..],
+        coefficients[0..],
+        &compressed,
+    ));
 }
