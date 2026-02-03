@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::env;
-use std::fs;
 use std::process::{self, Command};
 
 /// Compile TerseTS into a statically linked library and link it. unwrap() is deliberately used, as
