@@ -449,39 +449,17 @@ test "bitpacked quantization detects reconstructed max exceeding error bound" {
     // Error.UnsupportedInput.
     const allocator = testing.allocator;
 
-    // Create a scenario where the reconstructed max differs from max_val by more than error_bound.
-    // We need values where quantization+reconstruction introduces error > error_bound.
-    // Use a range that causes quantization rounding errors to accumulate.
-    const min_val: f64 = 0.0;
-    const max_val: f64 = 100.0;
-    const error_bound: f32 = 0.01; // Very tight error bound
-
-    // bucket_size = 1.998 * 0.01 = 0.01998
-    // max_quantized_value = round((100.0 - 0.0) / 0.01998) = round(5005.005...) = 5005
-    // reconstructed_max = 0.0 + 5005 * 0.01998 = 99.9999
-    // abs(99.9999 - 100.0) = 0.0001 which is > 0.01? No, this won't work.
-
-    // Let me try a different approach: use values that create a reconstruction error.
-    // With very specific values, the quantization grid might not align well.
-    // Try: min=0, max=1.0, error_bound=0.0001
+    // Use values chosen such that quantization rounding error exceeds error_bound.
+    // With min=1.0, max=1.333..., error_bound=0.0001:
     // bucket_size = 1.998 * 0.0001 = 0.0001998
-    // max_quantized = round(1.0 / 0.0001998) = round(5005.005) = 5005
-    // reconstructed = 0 + 5005 * 0.0001998 = 0.9999999
-    // error = abs(0.9999999 - 1.0) = 0.0000001 < 0.0001, still won't trigger
+    // max_quantized = round(0.3333... / 0.0001998) = 1669
+    // reconstructed = 1.0 + 1669 * 0.0001998 = 1.3334662
+    // error = abs(1.3334662 - 1.3333...) ≈ 0.000133 > 0.0001, triggering the check.
+    const min_val: f64 = 1.0;
+    const max_val: f64 = 1.0 + 0.3333333333333333;
+    const error_bound: f32 = 0.0001;
 
-    // Let's use a case where floating point representation causes issues
-    // Use values that have specific bit patterns that don't align with the quantization grid
-    const min_val_alt: f64 = 1.0;
-    const max_val_alt: f64 = 1.0 + 0.3333333333333333; // 1.3333...
-    const error_bound_alt: f32 = 0.0001;
-
-    // bucket_size = 1.998 * 0.0001 = 0.0001998
-    // Range = 0.3333333333333333
-    // max_quantized = round(0.3333333333333333 / 0.0001998) = round(1668.501...) = 1669
-    // reconstructed = 1.0 + 1669 * 0.0001998 = 1.0 + 0.3334662 = 1.3334662
-    // error = abs(1.3334662 - 1.3333333333333333) = 0.0001329 > 0.0001 ✓
-
-    const uncompressed_values = &[2]f64{ min_val_alt, max_val_alt };
+    const uncompressed_values = &[2]f64{ min_val, max_val };
 
     var compressed_values = ArrayList(u8).empty;
     defer compressed_values.deinit(allocator);
@@ -489,7 +467,7 @@ test "bitpacked quantization detects reconstructed max exceeding error bound" {
     const method_configuration = try std.fmt.allocPrint(
         allocator,
         "{{\"abs_error_bound\": {e}}}",
-        .{error_bound_alt},
+        .{error_bound},
     );
     defer allocator.free(method_configuration);
 
