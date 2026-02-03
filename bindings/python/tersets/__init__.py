@@ -99,7 +99,7 @@ class __CoefficientsValues(Structure):
     _fields_ = [("data", POINTER(c_double)), ("len", c_size_t)]
 
 
-class __TimestampsValues(Structure):
+class __IndicesValues(Structure):
     _fields_ = [("data", POINTER(c_size_t)), ("len", c_size_t)]
 
 
@@ -116,13 +116,13 @@ __library.decompress.restype = c_int
 
 __library.extract.argtypes = [
     __CompressedValues, 
-    POINTER(__TimestampsValues), 
+    POINTER(__IndicesValues), 
     POINTER(__CoefficientsValues),
 ]
 __library.extract.restype  = c_int
 
 __library.rebuild.argtypes = [
-    __TimestampsValues, 
+    __IndicesValues, 
     __CoefficientsValues, 
     POINTER(__CompressedValues), 
     c_ubyte,
@@ -354,12 +354,15 @@ def extract(
     Tuple[List[int], List[float]],
     Tuple["numpy.ndarray", "numpy.ndarray"],
 ]:
-    """Extract timestamps and coefficients from a compressed TerseTS array.
+    """Extract indices and coefficients from a compressed TerseTS compressed representation.
 
     This function parses a compressed representation and returns its internal
-    representation as two arrays: timestamps and coefficients. Pass `values`
-    as `bytes` for the fastest processing using Python or install NumPy to enable
-    efficient memory handling and avoid unnecessary copies.
+    representation as two arrays: indices and coefficients. In this context, 
+    indices are method-dependent metadata need to reconstruct the original time series,
+    e.g., indices of key points, segment boundaries, or histogram bin indices.
+    Coefficients are the floating-point values associated with these indices.
+    Pass `values` as `bytes` for the fastest processing using Python or install 
+    NumPy to enable efficient memory handling and avoid unnecessary copies.
 
     Args:
       values: Compressed array as `bytes`, `bytearray`, `memoryview`, or (if NumPy
@@ -367,9 +370,9 @@ def extract(
 
     Returns:
       If NumPy is installed:
-        Tuple of (`timestamps: numpy.ndarray[uintp]`, `coefficients: numpy.ndarray[float64]`).
+        Tuple of (`indices: numpy.ndarray[uintp]`, `coefficients: numpy.ndarray[float64]`).
       Otherwise:
-        Tuple of (`timestamps: list[int]`, `coefficients: list[float]`).
+        Tuple of (`indices: list[int]`, `coefficients: list[float]`).
 
     Raises:
       TypeError: If `values` is not a supported array type.
@@ -377,7 +380,7 @@ def extract(
 
     Notes:
       - Output layouts depend on the compression method used.
-      - See TerseTS's documentation for details on timestamps/coefficients layouts.
+      - See TerseTS's documentation for details on indices/coefficients layouts.
       - Output arrays are copied into Python/NumPy-owned memory before the Zig
         arrays are freed.
 
@@ -419,13 +422,13 @@ def extract(
             "Values must be bytes, bytearray, memoryview, or a NumPy uint8 array"
         )
 
-    timestamps_values = __TimestampsValues()
+    indices_values = __IndicesValues()
     coefficients_values = __CoefficientsValues()
 
     try:
         err = __library.extract(
             compressed_values, 
-            byref(timestamps_values), 
+            byref(indices_values), 
             byref(coefficients_values),
         )
         if err != 0:
@@ -434,37 +437,40 @@ def extract(
         if _INSTALLED_NUMPY:
             # Create views onto native memory, then copy into NumPy-owned arrays
             # before we free the native allocations in `finally`.
-            timestamps = numpy.ctypeslib.as_array(timestamps_values.data, 
-                                                  shape=(timestamps_values.len,)).copy()
+            indices = numpy.ctypeslib.as_array(indices_values.data, 
+                                                  shape=(indices_values.len,)).copy()
             coefficients = numpy.ctypeslib.as_array(coefficients_values.data, 
                                                     shape=(coefficients_values.len,)).copy()
-            return timestamps, coefficients
+            return indices, coefficients
 
         # No NumPy: copy into Python lists.
         return (
-            list(timestamps_values.data[: timestamps_values.len]),
+            list(indices_values.data[: indices_values.len]),
             list(coefficients_values.data[: coefficients_values.len]),
         )
     finally:
-        if timestamps_values.data:
-            __library.freeTimestampValues(byref(timestamps_values))
+        if indices_values.data:
+            __library.freeTimestampValues(byref(indices_values))
         if coefficients_values.data:
             __library.freeCoefficientValues(byref(coefficients_values))
         
 
 def rebuild(
-    timestamps: Union["numpy.ndarray", List[int], Tuple[int, ...]],
+    indices: Union["numpy.ndarray", List[int], Tuple[int, ...]],
     coefficients: Union["numpy.ndarray", List[float], Tuple[float, ...]],
     method: Method,
 ) -> Union[bytes, "numpy.ndarray"]:
-    """Rebuild a compressed TerseTS representation from extracted timestamps and coefficients.
+    """Rebuild a compressed TerseTS representation from extracted indices and coefficients.
 
     This function is the inverse of :func:`extract` and constructs a valid
-    binary compressed representation from the method-specific arrays `timestamps` 
-    and `coefficients`. The returned representation is identical in format to what
-    :func:`compress` would produce for the same method. 
+    binary compressed representation from the method-specific arrays `indices` 
+    and `coefficients`. In this context, indices are method-dependent metadata
+    needed to reconstruct the original time series, e.g., indices of key points, 
+    segment boundaries, or histogram bin indices. Coefficients are the floating-point
+    values associated with these indices. The returned representation is identical in
+    format to what :func:`compress` would produce for the same method. 
     
-    The meaning and required structure of `timestamps` and `coefficients`
+    The meaning and required structure of `indices` and `coefficients`
     depend on the selected compression method. 
     
     TerseTS performs structural validation and will return an error 
@@ -475,7 +481,7 @@ def rebuild(
     faster for large arrays. Otherwise, it falls back to building temporary ctypes arrays.
 
     Args:
-      timestamps: Method-dependent integer metadata. May be a NumPy array of
+      indices: Method-dependent integer metadata. May be a NumPy array of
         dtype `numpy.uintp` (C-contiguous) or a Python `list` / `tuple` of
         Python integers.
       coefficients: Method-dependent floating-point coefficients. May be a
@@ -489,7 +495,7 @@ def rebuild(
     Raises:
       TypeError:
         * If `method` is not a `Method` enum value.
-        * If `timestamps` is not an ndarray/list/tuple of valid integers.
+        * If `indices` is not an ndarray/list/tuple of valid integers.
         * If `coefficients` is not an ndarray/list/tuple of floats.
         * If NumPy arrays do not match required dtypes/layouts.
       RuntimeError:
@@ -502,8 +508,8 @@ def rebuild(
     Examples:
       >>> configuration = {"abs_error_bound": 0.1}
       >>> blob = compress([1.0, 2.08, 2.96], Method.SwingFilter, configuration)
-      >>> timestamps, coefficients = extract(blob)
-      >>> rebuilt = rebuild(timestamps, coefficients, Method.SwingFilter)
+      >>> indices, coefficients = extract(blob)
+      >>> rebuilt = rebuild(indices, coefficients, Method.SwingFilter)
       >>> decompress(rebuilt)
       array([1., 2., 3.])   # if NumPy installed
     """
@@ -515,24 +521,24 @@ def rebuild(
 
     compressed_values = __CompressedValues()
 
-    # Prepare timestamps (size_t*).
-    timestamps_values = __TimestampsValues()
-    if _INSTALLED_NUMPY and isinstance(timestamps, numpy.ndarray):
-        if timestamps.dtype != numpy.uintp:
-            raise TypeError("rebuild(): 'timestamps' NumPy array must have dtype=np.uintp")
-        if timestamps.ndim != 1:
-            raise TypeError("rebuild(): 'timestamps' NumPy array must be 1-dimensional")
-        if not timestamps.flags["C_CONTIGUOUS"]:
-            raise TypeError("rebuild(): 'timestamps' NumPy array must be C-contiguous")
+    # Prepare indices (size_t*).
+    indices_values = __IndicesValues()
+    if _INSTALLED_NUMPY and isinstance(indices, numpy.ndarray):
+        if indices.dtype != numpy.uintp:
+            raise TypeError("rebuild(): 'indices' NumPy array must have dtype=np.uintp")
+        if indices.ndim != 1:
+            raise TypeError("rebuild(): 'indices' NumPy array must be 1-dimensional")
+        if not indices.flags["C_CONTIGUOUS"]:
+            raise TypeError("rebuild(): 'indices' NumPy array must be C-contiguous")
 
-        timestamps_values.data = timestamps.ctypes.data_as(POINTER(c_size_t))
-        timestamps_values.len = timestamps.size
-    elif isinstance(timestamps, (list, tuple)):
-        timestamps_buffer = (c_size_t * len(timestamps))(*timestamps)
-        timestamps_values.data = timestamps_buffer
-        timestamps_values.len = len(timestamps)
+        indices_values.data = indices.ctypes.data_as(POINTER(c_size_t))
+        indices_values.len = indices.size
+    elif isinstance(indices, (list, tuple)):
+        indices_buffer = (c_size_t * len(indices))(*indices)
+        indices_values.data = indices_buffer
+        indices_values.len = len(indices)
     else:
-        raise TypeError("rebuild(): 'timestamps' must be ndarray[uintp] or list/tuple[int]")
+        raise TypeError("rebuild(): 'indices' must be ndarray[uintp] or list/tuple[int]")
 
     # Prepare coefficients (double*).
     coefficients_values = __CoefficientsValues()
@@ -555,7 +561,7 @@ def rebuild(
 
     try:
         err = __library.rebuild(
-            timestamps_values,
+            indices_values,
             coefficients_values,
             byref(compressed_values),
             method.value,

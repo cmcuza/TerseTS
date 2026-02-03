@@ -1277,8 +1277,8 @@ test "rebuildNonLinearApproximation rejects invalid function type code" {
 
     const coefficients = [_]f64{
         0.0, // shift.
-        1.0, // slope0.
-        2.0, // intercept0.
+        1.0, // slope.
+        2.0, // intercept.
     };
 
     try testing.expectError(

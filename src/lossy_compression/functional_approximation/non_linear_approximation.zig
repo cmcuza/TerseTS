@@ -120,7 +120,7 @@ pub fn compress(
     // All function types are stored using 4 bits each, so we can pack 2 per byte.
     // This saves space in the compressed representation.
     // For it, we first calculate the number of bytes needed to store all function types.
-    const packed_len: u64 = (segments_count + 1) / 2; // ceil(segments_count/2).
+    const packed_len: u64 = (segments_count + 1) / 2; // Equal to (segments_count/2).
 
     // Allocates space for packed function types (2 per byte).
     var packed_function_types = try allocator.alloc(u8, packed_len);
