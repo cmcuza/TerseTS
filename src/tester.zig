@@ -111,9 +111,9 @@ const noise_scale: f64 = 0.005; // 0.5%
 
 /// Different data distributions used for testing.
 pub const DataDistribution = enum {
-    TightedBoundedRandomValues,
+    TightlyBoundedRandomValues,
     LinearFunctions,
-    QuadradicFunctions,
+    QuadraticFunctions,
     ExponentialFunctions,
     PowerFunctions,
     SqrtFunctions,
@@ -143,12 +143,12 @@ pub fn testErrorBoundedCompressionMethod(
     for (data_distributions) |dist| {
         const error_bound: f32 = random.float(f32) + 1e-4; // Ensure a non-zero error bound.
         switch (dist) {
-            .TightedBoundedRandomValues => try testGeneratedErrorBoundedCompression(
+            .TightlyBoundedRandomValues => try testGeneratedErrorBoundedCompression(
                 allocator,
-                generateRandomTightedBoundedValues,
+                generateRandomTightlyBoundedValues,
                 method,
                 error_bound,
-                "Tighted Bounded Values",
+                "Tightly Bounded Values",
             ),
             .LinearFunctions => try testGeneratedErrorBoundedCompression(
                 allocator,
@@ -157,7 +157,7 @@ pub fn testErrorBoundedCompressionMethod(
                 error_bound,
                 "Linear Functions",
             ),
-            .QuadradicFunctions => try testGeneratedErrorBoundedCompression(
+            .QuadraticFunctions => try testGeneratedErrorBoundedCompression(
                 allocator,
                 generateRandomQuadraticFunctions,
                 method,
@@ -255,11 +255,11 @@ pub fn testLosslessMethod(
 ) !void {
     for (data_distributions) |dist| {
         switch (dist) {
-            .TightedBoundedRandomValues => try testGeneratedLosslessCompression(
+            .TightlyBoundedRandomValues => try testGeneratedLosslessCompression(
                 allocator,
-                generateRandomTightedBoundedValues,
+                generateRandomTightlyBoundedValues,
                 method,
-                "Tighted Bounded Values",
+                "Tightly Bounded Values",
             ),
             .LinearFunctions => try testGeneratedLosslessCompression(
                 allocator,
@@ -267,7 +267,7 @@ pub fn testLosslessMethod(
                 method,
                 "Linear Functions",
             ),
-            .QuadradicFunctions => try testGeneratedLosslessCompression(
+            .QuadraticFunctions => try testGeneratedLosslessCompression(
                 allocator,
                 generateRandomQuadraticFunctions,
                 method,
@@ -791,19 +791,19 @@ pub fn generateDefaultBoundedValues(allocator: Allocator, values: *ArrayList(f64
 /// a random number of `f64` values between a smaller randomly generated range for use in testing using
 /// `random` and adds them to `uncompressed_values`. This range can be represented by a `f64`
 /// without losing precision, thus it is used as a default range for testing purposes.
-pub fn generateRandomTightedBoundedValues(allocator: Allocator, values: *ArrayList(f64), random: Random) !void {
+pub fn generateRandomTightlyBoundedValues(allocator: Allocator, values: *ArrayList(f64), random: Random) !void {
     const reduction_factor = generateBoundedRandomValue(
         f64,
         1e2,
         1e6,
-        null,
+        random,
     );
     // Generate random lower and upper bounds within [-max_test_value/1e4, max_test_value/1e4].
     const lower_bound = generateBoundedRandomValue(
         f64,
         -max_test_value / reduction_factor,
         max_test_value / reduction_factor,
-        null,
+        random,
     );
 
     const upper_bound: f64 = @abs(lower_bound) * reduction_factor;
@@ -1055,7 +1055,8 @@ pub fn generateMixedBoundedValuesFunctions(
 }
 
 /// Generate a random value of type `T` between `at_least` and `at_most` for use in testing using
-/// `random_opt`. `T` must be a floating-point type (e.g., `f32`, `f64`). If random_opt is not
+/// `random_opt`. `T` must be a floating-point type (e.g., `f32`, `f64`). The value is sampled
+/// logarithmically to ensure uniform coverage across orders of magnitude. If `random_opt` is not
 /// passed, a random number generator is created using the current time as seed.
 pub fn generateBoundedRandomValue(comptime T: type, at_least: T, at_most: T, random_opt: ?Random) T {
     var random = resolveRandom(random_opt);

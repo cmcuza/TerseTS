@@ -223,7 +223,7 @@ test "bitpacked quantization can compress and decompress bounded values" {
     // Use only tighted bounded random values for this test.
     // BitPackedQuantization requires bounded values to operate correctly.
     // Other data distributions may generate unbounded values which are not supported.
-    const data_distributions = &[_]tester.DataDistribution{.TightedBoundedRandomValues};
+    const data_distributions = &[_]tester.DataDistribution{.TightlyBoundedRandomValues};
 
     // This function evaluates BitPackedQuantization using all data distribution stored in
     // `data_distribution`.
@@ -397,5 +397,48 @@ test "check bit-quantization configuration parsing" {
         uncompressed_values,
         &compressed_values,
         method_configuration,
+    );
+}
+
+test "bitpacked quantization detects grid collapse due to precision loss" {
+    // Regression test for the precision guard: when bucket_size is so small that
+    // min_val + bucket_size == min_val (grid collapses), and the range exceeds error_bound,
+    // compress should return Error.UnsupportedInput.
+    const allocator = testing.allocator;
+
+    // Use a very large min_val and a tiny error_bound to create a scenario where
+    // bucket_size (1.998 * error_bound) is too small relative to min_val.
+    // This triggers the grid collapse condition: min_val + bucket_size == min_val
+    const min_val: f64 = 1e14;
+    const max_val: f64 = min_val + 1.0; // Range of 1.0.
+    const error_bound: f32 = 1e-10; // Tiny error bound.
+
+    const uncompressed_values = &[2]f64{ min_val, max_val };
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    const method_configuration = try std.fmt.allocPrint(
+        allocator,
+        "{{\"abs_error_bound\": {e}}}",
+        .{error_bound},
+    );
+    defer allocator.free(method_configuration);
+
+    // The grid collapse condition should be detected and return UnsupportedInput.
+    compress(
+        allocator,
+        uncompressed_values[0..],
+        &compressed_values,
+        method_configuration,
+    ) catch |err| {
+        try testing.expectEqual(Error.UnsupportedInput, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "Expected compression to fail due to grid collapse (min_val + bucket_size == min_val)",
+        .{},
     );
 }
