@@ -111,7 +111,7 @@ pub fn defaultConfigurationBuilder(
     method: tersets.Method,
 ) ![]u8 {
     return switch (method) {
-        // Methods using absolute error: float objective
+        // Methods using absolute error: float objective.
         .PoorMansCompressionMidrange,
         .PoorMansCompressionMean,
         .SwingFilter,
