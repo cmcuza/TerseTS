@@ -235,6 +235,8 @@ pub fn extract(
     indices: *ArrayList(u64),
     coefficients: *ArrayList(f64),
 ) Error!void {
+    // Delegate to CoefficientIndexTuplesWithStartCoefficient extractor.
+    // VisvalingamWhyatt uses the same representation as SwingFilter.
     try extractors.extractCoefficientIndexTuplesWithStartCoefficient(
         allocator,
         compressed_values,
@@ -254,6 +256,8 @@ pub fn rebuild(
     coefficients: []const f64,
     compressed_values: *ArrayList(u8),
 ) Error!void {
+    // Delegate to CoefficientIndexTuplesWithStartCoefficient extractor.
+    // VisvalingamWhyatt uses the same representation as SwingFilter.
     try rebuilders.rebuildCoefficientIndexTuplesWithStartCoefficient(
         allocator,
         indices,

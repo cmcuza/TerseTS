@@ -253,6 +253,8 @@ pub fn extractPWCH(
     indices: *ArrayList(u64),
     coefficients: *ArrayList(f64),
 ) Error!void {
+    // Delegate to CoefficientIndexPairs extractor.
+    // PWCH uses the same representation as PMC.
     try extractors.extractCoefficientIndexPairs(
         allocator,
         compressed_values,
@@ -272,6 +274,8 @@ pub fn extractPWLH(
     indices: *ArrayList(u64),
     coefficients: *ArrayList(f64),
 ) Error!void {
+    // Delegate to CoefficientIndexTuplesWithStartCoefficient extractor.
+    // PWLH uses the same representation as SlideFilter.
     try extractors.extractDoubleCoefficientIndexTriples(
         allocator,
         compressed_values,
@@ -292,6 +296,8 @@ pub fn rebuildPWCH(
     coefficients: []const f64,
     compressed_values: *ArrayList(u8),
 ) Error!void {
+    // Delegate to CoefficientIndexPairs extractor.
+    // PWCH uses the same representation as PMC.
     try rebuilders.rebuildCoefficientIndexPairs(
         allocator,
         indices,
@@ -311,6 +317,8 @@ pub fn rebuildPWLH(
     coefficients: []const f64,
     compressed_values: *ArrayList(u8),
 ) Error!void {
+    // Delegate to CoefficientIndexTuplesWithStartCoefficient extractor.
+    // PWLH uses the same representation as SlideFilter.
     try rebuilders.rebuildDoubleCoefficientIndexTriples(
         allocator,
         indices,

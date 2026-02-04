@@ -226,7 +226,9 @@ pub fn extract(
     indices: *ArrayList(u64),
     coefficients: *ArrayList(f64),
 ) Error!void {
-    try extractors.extractCoefficientIndexTuplesWithStartCoefficient(
+    // Delegate to DoubleCoefficientIndexTriples extractor.
+    // ConvexABC uses the same representation as SlideFilter.
+    try extractors.extractDoubleCoefficientIndexTriples(
         allocator,
         compressed_values,
         indices,
@@ -245,7 +247,9 @@ pub fn rebuild(
     coefficients: []const f64,
     compressed_values: *ArrayList(u8),
 ) Error!void {
-    try rebuilders.rebuildCoefficientIndexTuplesWithStartCoefficient(
+    // Delegate to DoubleCoefficientIndexTriples rebuilder.
+    // ConvexABC uses the same representation as SlideFilter.
+    try rebuilders.rebuildDoubleCoefficientIndexTriples(
         allocator,
         indices,
         coefficients,
