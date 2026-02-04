@@ -20,6 +20,7 @@ import math
 import time
 import re
 from tersets import compress, decompress, Method
+from tersets import extract, rebuild
 
 
 # Generate a random f64 value. This is equivalent to Zig's `random.int(u64)`
@@ -67,6 +68,50 @@ class TerseTSPythonTest(unittest.TestCase):
         configuration = {"abs_error_bound": 0.0}
         compressed = compress(uncompressed, method, configuration)
         decompressed = decompress(compressed)
+
+        if type(uncompressed) is not type(decompressed):
+            # Convert to list for comparison.
+            # This can happen if NumPy is installed and used in decompress().
+            decompressed = list(decompressed)
+
+        self.assertEqual(uncompressed, decompressed)
+    
+    def test_extract_and_rebuild_zero_error(self):
+        """Test compressing and decompressing with zero error"""
+        random.seed(time.time())
+        count = 0
+        uncompressed = []
+
+        while count < TEST_VALUE_COUNT:
+            random_value = generate_random_f64()
+            if is_finite_and_real(random_value):
+                count += 1
+                uncompressed.append(random_value)
+
+        # Randomly select a compression method for testing.
+        # Only methods that support all f64 values are selected.
+        method = random.choice(
+            [
+                Method.PoorMansCompressionMean,
+                Method.PoorMansCompressionMidrange,
+                Method.SwingFilter,
+                Method.ABCLinearApproximation,
+                Method.SwingFilterDisconnected,
+                Method.SlideFilter,
+            ]
+        )
+
+        configuration = {"abs_error_bound": 0.0}
+        compressed = compress(uncompressed, method, configuration)
+        index, coefficients = extract(compressed)
+        rebuilt = rebuild(index, coefficients, method)
+        decompressed = decompress(rebuilt)
+
+        if type(uncompressed) is not type(decompressed):
+            # Convert to list for comparison. 
+            # This can happen if NumPy is installed and used in decompress().
+            decompressed = list(decompressed)
+
         self.assertEqual(uncompressed, decompressed)
 
 
@@ -127,3 +172,4 @@ class MethodEnumMatchTest(unittest.TestCase):
         self.assertEqual(zig_methods, python_methods)
         for i, member in enumerate(Method):
             self.assertEqual(i, member.value)
+
