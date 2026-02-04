@@ -39,6 +39,18 @@ struct CompressedValues {
   size_t   len;    
 };
 
+// Output buffer for coefficient values (the library writes these fields).
+struct CoefficientsValues {
+  double *data;
+  size_t   len;
+};
+
+// Output buffer for indices values (the library writes these fields).
+struct IndicesValues {
+  int64_t *data;
+  size_t   len;
+};
+
 // Compress uncompressed_values to compressed_values according to configuration.
 // Returns 0 on success, non-zero on error (e.g., 1 = unsupported method).
 int32_t compress(struct UncompressedValues uncompressed_values,
@@ -51,9 +63,24 @@ int32_t compress(struct UncompressedValues uncompressed_values,
 int32_t decompress(struct CompressedValues compressed_values,
                    struct UncompressedValues *uncompressed_values);
 
+// Extract coefficients and indices from compressed_values.
+// Returns 0 on success, non-zero on error (e.g., 1 = unsupported method).
+int32_t extract(struct CompressedValues compressed_values,
+                  struct CoefficientsValues *coefficients_values,
+                  struct IndicesValues *indices_values);
+
+// Rebuild compressed_values from coefficients_values and indices_values.
+// Returns 0 on success, non-zero on error (e.g., 1 = unsupported method).
+int32_t rebuild(struct CoefficientsValues coefficients_values,
+                struct IndicesValues indices_values,
+                struct CompressedValues *compressed_values);
+
+
 // Free functions.
 void freeCompressedValues(struct CompressedValues *compressed_values);
 void freeUncompressedValues(struct UncompressedValues *uncompressed_values);
+void freeCoefficientValues(struct CoefficientsValues *coefficients_values);
+void freeIndicesValues(struct IndicesValues *indices_values);
 
 #ifdef __cplusplus
 }
