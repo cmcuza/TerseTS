@@ -167,7 +167,7 @@ pub fn extract(
 ) Error!void {
     // Delegate to CoefficientIndexTuplesWithStartCoefficient extractor.
     // SlidingWindow uses the same representation as SwingFilter.
-    try extractors.extractCoefficientIndexTuplesWithStartCoefficient(
+    try extractors.extractDoubleCoefficientIndexTriples(
         allocator,
         compressed_values,
         indices,
@@ -188,7 +188,7 @@ pub fn rebuild(
 ) Error!void {
     // Delegate to CoefficientIndexTuplesWithStartCoefficient extractor.
     // SlidingWindow uses the same representation as SwingFilter.
-    try rebuilders.rebuildCoefficientIndexTuplesWithStartCoefficient(
+    try rebuilders.rebuildDoubleCoefficientIndexTriples(
         allocator,
         indices,
         coefficients,
