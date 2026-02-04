@@ -146,7 +146,7 @@ int main(void) {
            compressed_values.len);
 
 	// Decompress the data.
-    result = decompress(compressed_values, &decompressed_values, config);
+    result = decompress(compressed_values, &decompressed_values, configuration);
     if (result != 0) {
         printf("Decompression failed with error code %d\n", result);
         freeCompressedValues(&compressed_values);
@@ -175,13 +175,13 @@ TerseTS provides Python bindings located in `bindings/python/tersets/__init__.py
    - **Parameters:**
       - `values`: A list, tuple, or `numpy.ndarray` of floats representing the data to compress. `numpy.ndarray` is faster as they can be compressed without creating a copy.
       - `method`: An enum value from `tersets.Method` specifying the compression method.
-      - `configuration`: A dictionary or JSON string specifying compression parameters (e.g., `{"abs_error_bound": 0.1}`).
+      - `configuration`: A dictionary or JSON string specifying compression parameters (e.g., `{\"abs_error_bound\": 0.1}`).
    - **Returns:** Compressed data as bytes or an error raised as a Python exception.
 
 - **`decompress(values)`:**
    - **Parameters:**
       - `values`: The compressed data as `bytes`, `bytearray`, or `memoryview` to decompress.
-   - **Returns:** Decompressed values as a Python list of floats or an error are raised as a Python exception.. 
+   - **Returns:** Decompressed values as a Python list of floats or an error is raised as a Python exception.. 
 
 Compression methods are listed in the `Method` enum in the file `tersets/__init__.py`. Below is a usage example demonstrating how to use the TerseTS Python API for compressing and decompressing time series data.
 
@@ -224,14 +224,14 @@ TerseTS provides Julia bindings located in `./bindings/julia/TerseTS.jl`, which 
       - `values`: An `AbstractVector{Float64}` representing the data to compress. 
       - `method`: An enum value from `TerseTS.Method` specifying the compression method.
       - `configuration`: A JSON string specifying compression parameters (e.g., `{"abs_error_bound": 0.1}`).
-   - **Returns:** Compressed data as `AbstractVector{UInt8}` or an error raised as a Julia exception.
+   - **Returns:** Compressed data as `Vector{UInt8}` or an error raised as a Julia exception.
 
 - **`decompress(values)`:**
    - **Parameters:**
       - `values`: The compressed data as an `AbstractVector{UInt8}` to decompress.
-   - **Returns:** Decompressed values as an `AbstractVector{Float64}` or an error are raised as a Julia exception.
+   - **Returns:** Decompressed values as an `Vector{Float64}` or an error are raised as a Julia exception.
 
-Compression methods are listed in the `Method` enum in the file `TerseTS.jl`. Below is a usage example demonstrating how to use the TerseTS Julia API for compressing and decompressing time series data.
+Compression methods are listed in the `Method` enum in the file `src/tersets.zig`. Below is a usage example demonstrating how to use the TerseTS Zig API for compressing and decompressing time series data. 
 
 ```Julia
 include("TerseTS.jl")
