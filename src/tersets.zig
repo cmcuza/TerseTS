@@ -333,14 +333,14 @@ pub fn decompress(
     return decompressed_values;
 }
 
-/// Extract `timestamps` and `coefficients` from `compressed_values` using the method encoded in the last byte.
+/// Extract `indices` and `coefficients` from `compressed_values` using the method encoded in the last byte.
 /// The function dispatches to the appropriate extractor based on the method. On success, the extracted
-/// `timestamps` and `coefficients` are populated. The `allocator` handles the memory for the output arrays.
+/// `indices` and `coefficients` are populated. The `allocator` handles the memory for the output arrays.
 /// If an error occurs it is returned.
 pub fn extract(
     allocator: Allocator,
     compressed_values: []const u8,
-    timestamps: *ArrayList(u64),
+    indices: *ArrayList(u64),
     coefficients: *ArrayList(f64),
 ) Error!void {
     if (compressed_values.len == 0) return Error.UnsupportedInput;
@@ -357,7 +357,7 @@ pub fn extract(
             try poor_mans_compression.extract(
                 allocator,
                 compressed_values_slice,
-                timestamps,
+                indices,
                 coefficients,
             );
         },
@@ -365,7 +365,7 @@ pub fn extract(
             try swing_slide_filter.extractSwing(
                 allocator,
                 compressed_values_slice,
-                timestamps,
+                indices,
                 coefficients,
             );
         },
@@ -374,7 +374,7 @@ pub fn extract(
             try swing_slide_filter.extractSlide(
                 allocator,
                 compressed_values_slice,
-                timestamps,
+                indices,
                 coefficients,
             );
         },
@@ -382,7 +382,7 @@ pub fn extract(
             try abc_linear_approximation.extract(
                 allocator,
                 compressed_values_slice,
-                timestamps,
+                indices,
                 coefficients,
             );
         },
@@ -390,7 +390,7 @@ pub fn extract(
             try sim_piece.extract(
                 allocator,
                 compressed_values_slice,
-                timestamps,
+                indices,
                 coefficients,
             );
         },
@@ -398,7 +398,7 @@ pub fn extract(
             try mix_piece.extract(
                 allocator,
                 compressed_values_slice,
-                timestamps,
+                indices,
                 coefficients,
             );
         },
@@ -406,7 +406,7 @@ pub fn extract(
             try piecewise_histogram.extractPWCH(
                 allocator,
                 compressed_values_slice,
-                timestamps,
+                indices,
                 coefficients,
             );
         },
@@ -414,7 +414,7 @@ pub fn extract(
             try piecewise_histogram.extractPWLH(
                 allocator,
                 compressed_values_slice,
-                timestamps,
+                indices,
                 coefficients,
             );
         },
@@ -422,7 +422,7 @@ pub fn extract(
             try vw.extract(
                 allocator,
                 compressed_values_slice,
-                timestamps,
+                indices,
                 coefficients,
             );
         },
@@ -430,7 +430,7 @@ pub fn extract(
             try sliding_window.extract(
                 allocator,
                 compressed_values_slice,
-                timestamps,
+                indices,
                 coefficients,
             );
         },
@@ -438,7 +438,7 @@ pub fn extract(
             try bottom_up.extract(
                 allocator,
                 compressed_values_slice,
-                timestamps,
+                indices,
                 coefficients,
             );
         },
@@ -446,7 +446,7 @@ pub fn extract(
             try non_linear_approximation.extract(
                 allocator,
                 compressed_values_slice,
-                timestamps,
+                indices,
                 coefficients,
             );
         },
@@ -476,12 +476,12 @@ pub fn extract(
     }
 }
 
-/// Rebuild `compressed_values` from `timestamps` and `coefficients` using the specified `method`.
+/// Rebuild `compressed_values` from `indices` and `coefficients` using the specified `method`.
 /// The function dispatches to the appropriate rebuilder based on the method. On success, the rebuilt
 /// `compressed_values` are returned with the method byte appended. If an error occurs it is returned.
 pub fn rebuild(
     allocator: Allocator,
-    timestamps: []const u64,
+    indices: []const u64,
     coefficients: []const f64,
     method: Method,
 ) Error!ArrayList(u8) {
@@ -494,7 +494,7 @@ pub fn rebuild(
         .PoorMansCompressionMean, .PoorMansCompressionMidrange => {
             try poor_mans_compression.rebuild(
                 allocator,
-                timestamps,
+                indices,
                 coefficients,
                 &compressed_values,
             );
@@ -502,7 +502,7 @@ pub fn rebuild(
         .SwingFilter => {
             try swing_slide_filter.rebuildSwing(
                 allocator,
-                timestamps,
+                indices,
                 coefficients,
                 &compressed_values,
             );
@@ -511,7 +511,7 @@ pub fn rebuild(
         .SlideFilter, .SwingFilterDisconnected => {
             try swing_slide_filter.rebuildSlide(
                 allocator,
-                timestamps,
+                indices,
                 coefficients,
                 &compressed_values,
             );
@@ -519,7 +519,7 @@ pub fn rebuild(
         .ABCLinearApproximation => {
             try abc_linear_approximation.rebuild(
                 allocator,
-                timestamps,
+                indices,
                 coefficients,
                 &compressed_values,
             );
@@ -527,7 +527,7 @@ pub fn rebuild(
         .SimPiece => {
             try sim_piece.rebuild(
                 allocator,
-                timestamps,
+                indices,
                 coefficients,
                 &compressed_values,
             );
@@ -535,7 +535,7 @@ pub fn rebuild(
         .MixPiece => {
             try mix_piece.rebuild(
                 allocator,
-                timestamps,
+                indices,
                 coefficients,
                 &compressed_values,
             );
@@ -543,7 +543,7 @@ pub fn rebuild(
         .PiecewiseConstantHistogram => {
             try piecewise_histogram.rebuildPWCH(
                 allocator,
-                timestamps,
+                indices,
                 coefficients,
                 &compressed_values,
             );
@@ -551,7 +551,7 @@ pub fn rebuild(
         .PiecewiseLinearHistogram => {
             try piecewise_histogram.rebuildPWLH(
                 allocator,
-                timestamps,
+                indices,
                 coefficients,
                 &compressed_values,
             );
@@ -559,7 +559,7 @@ pub fn rebuild(
         .SlidingWindow => {
             try sliding_window.rebuild(
                 allocator,
-                timestamps,
+                indices,
                 coefficients,
                 &compressed_values,
             );
@@ -567,7 +567,7 @@ pub fn rebuild(
         .BottomUp => {
             try bottom_up.rebuild(
                 allocator,
-                timestamps,
+                indices,
                 coefficients,
                 &compressed_values,
             );
@@ -575,7 +575,7 @@ pub fn rebuild(
         .VisvalingamWhyatt => {
             try vw.rebuild(
                 allocator,
-                timestamps,
+                indices,
                 coefficients,
                 &compressed_values,
             );
@@ -583,7 +583,7 @@ pub fn rebuild(
         .NonLinearApproximation => {
             try non_linear_approximation.rebuild(
                 allocator,
-                timestamps,
+                indices,
                 coefficients,
                 &compressed_values,
             );
@@ -691,19 +691,19 @@ test "extract and rebuild works for any compression method supported" {
         // Test extract and rebuild.
         var coefficient_values = ArrayList(f64).empty;
         defer coefficient_values.deinit(allocator);
-        var timestamp_values = ArrayList(u64).empty;
-        defer timestamp_values.deinit(allocator);
+        var index_values = ArrayList(u64).empty;
+        defer index_values.deinit(allocator);
 
         try extract(
             allocator,
             compressed_values.items,
-            &timestamp_values,
+            &index_values,
             &coefficient_values,
         );
 
         var rebuild_values = try rebuild(
             allocator,
-            timestamp_values.items,
+            index_values.items,
             coefficient_values.items,
             method,
         );

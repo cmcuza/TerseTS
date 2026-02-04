@@ -34,8 +34,8 @@ pub const UncompressedValues = Array(f64);
 /// A pointer to compressed values and the number of bytes.
 pub const CompressedValues = Array(u8);
 
-/// A pointer to timestamp values and the number of values.
-pub const TimestampValues = Array(usize);
+/// A pointer to indices values and the number of values.
+pub const IndicesValues = Array(usize);
 
 /// A pointer to coefficient values and the number of values.
 pub const CoefficientsValues = Array(f64);
@@ -125,8 +125,8 @@ export fn decompress(
     return 0;
 }
 
-/// Extracts timestamps and coefficients from a compressed buffer using the method encoded in the last byte.
-/// On success, fills `timestamps_values_array` and `coefficients_values_array` with extracted values.
+/// Extracts indices and coefficients from a compressed buffer using the method encoded in the last byte.
+/// On success, fills `indices_values_array` and `coefficients_values_array` with extracted values.
 /// Extraction layouts depend on the compression method; see `extractors.zig` for details.
 /// On success zero is returned, and the following non-zero values are returned on errors:
 /// - 1) Unknown compression method.
@@ -141,28 +141,27 @@ export fn decompress(
 /// - 10) Out of memory.
 export fn extract(
     compressed_values_array: CompressedValues,
-    timestamps_values_array: *TimestampValues,
+    indices_values_array: *IndicesValues,
     coefficients_values_array: *CoefficientsValues,
 ) i32 {
     const compressed_values = compressed_values_array.data[0..compressed_values_array.len];
     if (compressed_values.len == 0) return 2;
 
-    var timetamps = ArrayList(u64).empty;
+    var indices = ArrayList(u64).empty;
     var coefficients = ArrayList(f64).empty;
 
-    // Return time and coefficients together. We need to put the size of timestamps at front in a
+    // Return indices and coefficients together. We need to put the size of indices at front in a
     // u32 to split the values.
     tersets.extract(
         allocator,
         compressed_values,
-        &timetamps,
+        &indices,
         &coefficients,
     ) catch |e| return errorToInt(e);
 
-    const time_slice = timetamps.toOwnedSlice(allocator) catch |err| return errorToInt(err);
-
-    timestamps_values_array.data = time_slice.ptr;
-    timestamps_values_array.len = time_slice.len;
+    const indices_slice = indices.toOwnedSlice(allocator) catch |err| return errorToInt(err);
+    indices_values_array.data = indices_slice.ptr;
+    indices_values_array.len = indices_slice.len;
 
     const coefficients_slice = coefficients.toOwnedSlice(allocator) catch |err| return errorToInt(err);
 
@@ -172,7 +171,7 @@ export fn extract(
     return 0;
 }
 
-/// Rebuilds a compressed buffer from provided timestamps and coefficients, using the specified method.
+/// Rebuilds a compressed buffer from provided indices and coefficients, using the specified method.
 /// On success, fills `compressed_values_array` with the rebuilt compressed stream (including method byte).
 /// Input arrays must match the expected layout for the method; see `extractors.zig` for details.
 /// On success zero is returned, and the following non-zero values are returned on errors:
@@ -187,19 +186,19 @@ export fn extract(
 /// - 9) Unsupported method.
 /// - 10) Out of memory.
 export fn rebuild(
-    timestamps_values_array: TimestampValues,
+    indices_values_array: IndicesValues,
     coefficients_values_array: CoefficientsValues,
     compressed_values_array: *CompressedValues,
     method_idx: u8,
 ) i32 {
     const method: Method = @enumFromInt(method_idx);
 
-    const timestamps = timestamps_values_array.data[0..timestamps_values_array.len];
+    const indices = indices_values_array.data[0..indices_values_array.len];
     const coefficients = coefficients_values_array.data[0..coefficients_values_array.len];
 
     var components_values = tersets.rebuild(
         allocator,
-        timestamps,
+        indices,
         coefficients,
         method,
     ) catch |e| return errorToInt(e);
@@ -239,13 +238,13 @@ export fn freeCoefficientValues(coefficients_values: *CoefficientsValues) void {
     freeValuesMemory(CoefficientsValues, coefficients_values);
 }
 
-/// Frees a `timestamp_values` buffer previously produced by `extract`.
+/// Frees a `indices_values` buffer previously produced by `extract`.
 /// This function is primarily used by the Python and C bindings.
 /// If used independently, ensure that the actual allocated size of
-/// `timestamp_values.data` matches the value stored in `timestamp_values.len`.
+/// `indices_values.data` matches the value stored in `indices_values.len`.
 /// A mismatch between these two values will corrupt the memory allocator state.
-export fn freeTimestampValues(timestamp_values: *TimestampValues) void {
-    freeValuesMemory(TimestampValues, timestamp_values);
+export fn freeIndicesValues(indices_values: *IndicesValues) void {
+    freeValuesMemory(IndicesValues, indices_values);
 }
 
 /// Frees a `values` struct previously produced by the TerseTS library. This function is an
@@ -254,7 +253,7 @@ export fn freeTimestampValues(timestamp_values: *TimestampValues) void {
 /// If the `values.len` is zero, it indicates that the memory has already been freed.
 fn freeValuesMemory(comptime ValuesType: type, values: *ValuesType) void {
     if (ValuesType != CompressedValues and ValuesType != UncompressedValues and
-        ValuesType != CoefficientsValues and ValuesType != TimestampValues)
+        ValuesType != CoefficientsValues and ValuesType != IndicesValues)
     {
         @compileError("freeValuesMemory: unsuported ValuesType"); // Invalid type for freeing values.
     }

@@ -202,25 +202,25 @@ pub fn decompress(
     var index: usize = 0;
 
     while (index < compressed_lines_and_index.len) : (index += 3) {
-        const start_point = .{ .time = first_timestamp, .value = compressed_lines_and_index[index] };
+        const start_point = .{ .index = first_timestamp, .value = compressed_lines_and_index[index] };
         const end_point = .{
-            .time = @as(usize, @bitCast(compressed_lines_and_index[index + 2])),
+            .index = @as(usize, @bitCast(compressed_lines_and_index[index + 2])),
             .value = compressed_lines_and_index[index + 1],
         };
 
         // Check if the segment has only two points. If so, we can directly append their values.
-        if (start_point.time + 1 < end_point.time) {
-            const duration: f64 = @floatFromInt(end_point.time - start_point.time);
+        if (start_point.index + 1 < end_point.index) {
+            const duration: f64 = @floatFromInt(end_point.index - start_point.index);
 
             const slope = (end_point.value - start_point.value) / duration;
             const intercept = start_point.value - slope *
-                @as(f64, @floatFromInt(start_point.time));
+                @as(f64, @floatFromInt(start_point.index));
 
             try decompressed_values.append(allocator, start_point.value);
-            var current_timestamp: usize = start_point.time + 1;
+            var current_timestamp: usize = start_point.index + 1;
 
             // Interpolate the values between the start and end points of the current segment.
-            while (current_timestamp < end_point.time) : (current_timestamp += 1) {
+            while (current_timestamp < end_point.index) : (current_timestamp += 1) {
                 const y: f64 = slope * @as(f64, @floatFromInt(current_timestamp)) + intercept;
                 try decompressed_values.append(allocator, y);
             }
@@ -233,7 +233,7 @@ pub fn decompress(
 
             // Append the end point only if it is different from the start point.
             // This is to avoid duplicates in the decompressed values.
-            if (start_point.time != end_point.time) {
+            if (start_point.index != end_point.index) {
                 try decompressed_values.append(allocator, end_point.value);
             }
 

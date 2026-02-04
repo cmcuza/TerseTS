@@ -55,9 +55,9 @@ pub const LinearFunction = struct {
     intercept: f64,
 };
 
-/// `Point` is a point represented by `time` and `value`. `time` is of datatype `time_type`.
-fn Point(comptime time_type: type) type {
-    return struct { time: time_type, value: f64 };
+/// `Point` is a point represented by `index` and `value`. `index` is of datatype `index_type`.
+fn Point(comptime index_type: type) type {
+    return struct { index: index_type, value: f64 };
 }
 
 /// `SegmentMetadata` stores the information about an approximated segment during the execution

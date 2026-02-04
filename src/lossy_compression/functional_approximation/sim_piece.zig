@@ -103,7 +103,7 @@ pub fn compress(
     // Sim-Piece Phase 4: Create the final compressed representation and store in compressed values.
     try createCompressedRepresentation(allocator, merged_segments_metadata_map, compressed_values);
 
-    // The last timestamp must be stored, otherwise the end time during decompression is unknown.
+    // The last indices must be stored, otherwise the end time during decompression is unknown.
     try shared_functions.appendValue(allocator, usize, uncompressed_values.len, compressed_values);
 }
 
@@ -241,7 +241,7 @@ pub fn extract(
         }
     }
 
-    // Final timestamp must exist.
+    // Final indices must exist.
     if (i != compressed_values_slice.len - 1)
         return Error.CorruptedCompressedData;
 
@@ -335,7 +335,7 @@ fn computeSegmentsMetadata(
         return Error.UnsupportedInput;
 
     // Initialize the `start_point` with the first uncompressed value.
-    var start_point: DiscretePoint = .{ .time = 0, .value = uncompressed_values[0] };
+    var start_point: DiscretePoint = .{ .index = 0, .value = uncompressed_values[0] };
 
     // The quantization can only be done using the original error bound. Afterwards, we add
     // `tersets.ErrorBoundMargin` to avoid exceeding the error bound during decompression.
@@ -352,12 +352,12 @@ fn computeSegmentsMetadata(
             return Error.UnsupportedInput;
 
         const end_point: DiscretePoint = .{
-            .time = current_timestamp,
+            .index = current_timestamp,
             .value = uncompressed_values[current_timestamp],
         };
 
         // `segment_size` of type f64 to avoid casting from usize when computing other variables.
-        const segment_size: f64 = @floatFromInt(current_timestamp - start_point.time);
+        const segment_size: f64 = @floatFromInt(current_timestamp - start_point.index);
         const upper_limit: f64 = upper_bound_slope * segment_size + quantized_intercept;
         const lower_limit: f64 = lower_bound_slope * segment_size + quantized_intercept;
 
@@ -367,7 +367,7 @@ fn computeSegmentsMetadata(
             // The new point is outside the upper and lower limit. Record a new segment metadata in
             // `segments_metadata_map` associated to `intercept`.
             try segments_metadata.append(allocator, .{
-                .start_time = start_point.time,
+                .start_time = start_point.index,
                 .intercept = quantized_intercept,
                 .upper_bound_slope = upper_bound_slope,
                 .lower_bound_slope = lower_bound_slope,
@@ -392,7 +392,7 @@ fn computeSegmentsMetadata(
         }
     }
 
-    const segment_size = uncompressed_values.len - start_point.time;
+    const segment_size = uncompressed_values.len - start_point.index;
     if (segment_size > 0) {
         // Append the final segment.
         if (segment_size == 1) {
@@ -400,7 +400,7 @@ fn computeSegmentsMetadata(
             lower_bound_slope = 0;
         }
         try segments_metadata.append(allocator, .{
-            .start_time = start_point.time,
+            .start_time = start_point.index,
             .intercept = quantized_intercept,
             .upper_bound_slope = upper_bound_slope,
             .lower_bound_slope = lower_bound_slope,

@@ -45,8 +45,8 @@ struct CoefficientsValues {
   size_t   len;
 };
 
-// Output buffer for timestamp values (the library writes these fields).
-struct TimestampValues {
+// Output buffer for indices values (the library writes these fields).
+struct IndicesValues {
   int64_t *data;
   size_t   len;
 };
@@ -63,16 +63,16 @@ int32_t compress(struct UncompressedValues uncompressed_values,
 int32_t decompress(struct CompressedValues compressed_values,
                    struct UncompressedValues *uncompressed_values);
 
-// Extract coefficients and timestamps from compressed_values.
+// Extract coefficients and indices from compressed_values.
 // Returns 0 on success, non-zero on error (e.g., 1 = unsupported method).
 int32_t extract(struct CompressedValues compressed_values,
                   struct CoefficientsValues *coefficients_values,
-                  struct TimestampValues *timestamps_values);
+                  struct IndicesValues *indices_values);
 
-// Rebuild compressed_values from coefficients_values and timestamps_values.
+// Rebuild compressed_values from coefficients_values and indices_values.
 // Returns 0 on success, non-zero on error (e.g., 1 = unsupported method).
 int32_t rebuild(struct CoefficientsValues coefficients_values,
-                struct TimestampValues timestamps_values,
+                struct IndicesValues indices_values,
                 struct CompressedValues *compressed_values);
 
 
@@ -80,7 +80,7 @@ int32_t rebuild(struct CoefficientsValues coefficients_values,
 void freeCompressedValues(struct CompressedValues *compressed_values);
 void freeUncompressedValues(struct UncompressedValues *uncompressed_values);
 void freeCoefficientValues(struct CoefficientsValues *coefficients_values);
-void freeTimestampValues(struct TimestampValues *timestamp_values);
+void freeIndicesValues(struct IndicesValues *indices_values);
 
 #ifdef __cplusplus
 }

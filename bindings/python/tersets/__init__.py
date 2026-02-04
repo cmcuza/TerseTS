@@ -450,7 +450,7 @@ def extract(
         )
     finally:
         if indices_values.data:
-            __library.freeTimestampValues(byref(indices_values))
+            __library.freeIndicesValues(byref(indices_values))
         if coefficients_values.data:
             __library.freeCoefficientValues(byref(coefficients_values))
         

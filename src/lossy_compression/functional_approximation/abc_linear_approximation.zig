@@ -77,7 +77,7 @@ pub fn compress(
         var last_valid_line: ?LinearFunction = null;
 
         // Insert the first point in the convex hull.
-        try convex_hull.add(.{ .time = current_segment_start, .value = uncompressed_values[current_segment_start] });
+        try convex_hull.add(.{ .index = current_segment_start, .value = uncompressed_values[current_segment_start] });
 
         // Create a index to grow iterate over the time series from the current segment start.
         var index_over_segment = current_segment_start + 1;
@@ -87,7 +87,7 @@ pub fn compress(
         while (index_over_segment < uncompressed_values.len) : (index_over_segment += 1) {
             // Section III-A, Step 1: Computing the Convex Hull.
             // Add next point to convex hull for current segment.
-            try convex_hull.add(.{ .time = index_over_segment, .value = uncompressed_values[index_over_segment] });
+            try convex_hull.add(.{ .index = index_over_segment, .value = uncompressed_values[index_over_segment] });
 
             // Section III-A, Step 2-3: Find A, B, C and compute the solution line.
             // Try to compute the best fitting line using current convex hull points.
@@ -218,7 +218,7 @@ pub fn decompress(
 /// Extracts `indices` and `coefficients` from ConvexABC's `compressed_values`.
 /// ConvexABC uses the same representation as SlideFilter, so this function delegates to
 /// `extractSlide`. All corruption detection and validation checks are handled by
-/// that routine. Any loss or modification of timestamp information can lead to
+/// that routine. Any loss or modification of indices information can lead to
 /// failures during decompression. Allocation errors are propagated.
 pub fn extract(
     allocator: Allocator,
@@ -239,7 +239,7 @@ pub fn extract(
 /// Rebuilds ConvexABC's `compressed_values` from the provided `indices` and
 /// `coefficients`. The format matches SlideFilter, so this function forwards
 /// to `rebuildSlide`. All structural validation and corruption checks occur
-/// inside the delegated function. Any timestamp inconsistencies may cause failures
+/// inside the delegated function. Any indices inconsistencies may cause failures
 /// when decoding the rebuilt representation. Allocation errors are propagated.
 pub fn rebuild(
     allocator: Allocator,
@@ -284,10 +284,10 @@ pub fn findABCOptimalSegment(convex_hull: *ConvexHull, allocator: Allocator) Err
         point_c_index = pivot_point_c_idx orelse {
             // No valid C found, use AB as the line (in case of just two points in convex hull).
             // Need at least three points to define a valid segment using the ABC method.
-            const delta_time = @as(f64, @floatFromInt(point_b.time - point_a.time));
+            const delta_time = @as(f64, @floatFromInt(point_b.index - point_a.index));
 
             const slope = (point_b.value - point_a.value) / delta_time;
-            const intercept = point_a.value - slope * @as(f64, @floatFromInt(point_a.time));
+            const intercept = point_a.value - slope * @as(f64, @floatFromInt(point_a.index));
 
             return LinearFunction{ .slope = slope, .intercept = intercept };
         };
@@ -300,10 +300,10 @@ pub fn findABCOptimalSegment(convex_hull: *ConvexHull, allocator: Allocator) Err
         try visited.put(point_a_index, {}); // Mark as visited.
 
         // Determine relative x-position of pivot to l_i.
-        if (point_c.time > point_b.time) {
+        if (point_c.index > point_b.index) {
             // x-external to right -> advance to next side.
             point_a_index += 1;
-        } else if (point_c.time < point_a.time) {
+        } else if (point_c.index < point_a.index) {
             // x-external to left -> adjust upper hull between v(l_{i-1}) and v(l_i).
             if (point_a_index == 0) {
                 // If we are already at the first side, we cannot move left.
@@ -324,14 +324,14 @@ pub fn findABCOptimalSegment(convex_hull: *ConvexHull, allocator: Allocator) Err
     const end = convex_hull.at(point_a_index + 1);
     const point_c = convex_hull.at(point_c_index);
 
-    const delta_time = @as(f64, @floatFromInt(end.time - start.time));
+    const delta_time = @as(f64, @floatFromInt(end.index - start.index));
 
     const slope = (end.value - start.value) / delta_time;
 
-    const pred = slope * (@as(f64, @floatFromInt(point_c.time - start.time))) + start.value;
+    const pred = slope * (@as(f64, @floatFromInt(point_c.index - start.index))) + start.value;
     const deviation = @abs(pred - point_c.value);
 
-    const intercept = start.value - slope * @as(f64, @floatFromInt(start.time)) + deviation / 2;
+    const intercept = start.value - slope * @as(f64, @floatFromInt(start.index)) + deviation / 2;
 
     return LinearFunction{ .slope = slope, .intercept = intercept };
 }
@@ -365,15 +365,15 @@ fn findPivotC(convex_hull: *ConvexHull, point_a_index: usize) ?usize {
 /// between the actual value of point_c and its projected value on the line segment.
 fn computeDeviation(point_a: DiscretePoint, point_b: DiscretePoint, point_c: DiscretePoint) f64 {
     // Compute slope of side formed by `point_a` and `point_b`.
-    const delta_time = @as(f64, @floatFromInt(point_b.time - point_a.time));
+    const delta_time = @as(f64, @floatFromInt(point_b.index - point_a.index));
     const slope = (point_b.value - point_a.value) / delta_time;
 
     // Project point_c vertically onto the line defined by point_a and point_b. The expression
     // (time_point_c - time_point_a) may be negative if point_c is x-external
-    // (i.e., point_c.time < point_a.time), which is valid and expected. We use floating-point
+    // (i.e., point_c.index < point_a.index), which is valid and expected. We use floating-point
     // subtraction to avoid usize underflow.
-    const time_point_a = @as(f64, @floatFromInt(point_a.time));
-    const time_point_c = @as(f64, @floatFromInt(point_c.time));
+    const time_point_a = @as(f64, @floatFromInt(point_a.index));
+    const time_point_c = @as(f64, @floatFromInt(point_c.index));
 
     const pred = slope * (time_point_c - time_point_a) + point_a.value;
 

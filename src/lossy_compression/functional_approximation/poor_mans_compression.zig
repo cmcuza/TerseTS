@@ -172,9 +172,9 @@ pub fn decompress(
     }
 }
 
-/// Extracts `timestamps` and `coefficients` from Poor Man's Compression (PMC)'s
+/// Extracts `indicess` and `coefficients` from Poor Man's Compression (PMC)'s
 /// `compressed_values`. The function works for both PMCMidrange and PMCMean.
-/// A `timestamps` ArrayList is used to store the extracted end indices, and a
+/// A `indicess` ArrayList is used to store the extracted end indices, and a
 /// `coefficients` ArrayList is used to store the extracted coefficient values.
 /// If validation of the `compressed_values` fails, `Error.CorruptedCompressedData` is
 /// returned. The `allocator` handles the memory allocations of the output arrays.
@@ -182,34 +182,34 @@ pub fn decompress(
 pub fn extract(
     allocator: Allocator,
     compressed_values: []const u8,
-    timestamps: *ArrayList(u64),
+    indicess: *ArrayList(u64),
     coefficients: *ArrayList(f64),
 ) Error!void {
     try extractors.extractCoefficientIndexPairs(
         allocator,
         compressed_values,
-        timestamps,
+        indicess,
         coefficients,
     );
 }
 
 /// Rebuilds Poor Man's Compression (PMC) `compressed_values` from the provided
-/// `timestamps` and `coefficients`. The function works for both PMCMidrange and PMCMean.
+/// `indicess` and `coefficients`. The function works for both PMCMidrange and PMCMean.
 /// The function expects both arrays to have equal length. Each pair is encoded as an f64
-/// coefficient and a u64 end_index taken from the `coefficients` and `timestamps` arrays,
-/// respectively. Any mismatch or loss of information in the timestamps can lead to failures
+/// coefficient and a u64 end_index taken from the `coefficients` and `indicess` arrays,
+/// respectively. Any mismatch or loss of information in the indicess can lead to failures
 /// when decompressing the rebuilt representation. The `allocator` handles the memory
 /// allocations of the output arrays. Returns `Error.CorruptedCompressedData`
 /// if the array lengths differ, and propagates allocation errors otherwise.
 pub fn rebuild(
     allocator: Allocator,
-    timestamps: []const u64,
+    indicess: []const u64,
     coefficients: []const f64,
     compressed_values: *ArrayList(u8),
 ) Error!void {
     try rebuilders.rebuildCoefficientIndexPairs(
         allocator,
-        timestamps,
+        indicess,
         coefficients,
         compressed_values,
     );

@@ -97,9 +97,9 @@ pub fn compress(
         try heap.add(PointArea{
             .index = i,
             .area = calculateArea(
-                DiscretePoint{ .time = i - 1, .value = uncompressed_values[i - 1] },
-                DiscretePoint{ .time = i, .value = uncompressed_values[i] },
-                DiscretePoint{ .time = i + 1, .value = uncompressed_values[i + 1] },
+                DiscretePoint{ .index = i - 1, .value = uncompressed_values[i - 1] },
+                DiscretePoint{ .index = i, .value = uncompressed_values[i] },
+                DiscretePoint{ .index = i + 1, .value = uncompressed_values[i + 1] },
             ),
             .left_point = i - 1,
             .right_point = i + 1,
@@ -190,7 +190,7 @@ pub fn decompress(allocator: Allocator, compressed_values: []const u8, decompres
     var index: usize = 0;
 
     // Extract the start point from the compressed representation.
-    var start_point: DiscretePoint = .{ .time = 0, .value = compressed_lines_and_index[0] };
+    var start_point: DiscretePoint = .{ .index = 0, .value = compressed_lines_and_index[0] };
     try decompressed_values.append(allocator, start_point.value);
 
     // We need to create a segment for the linear function.
@@ -199,20 +199,20 @@ pub fn decompress(allocator: Allocator, compressed_values: []const u8, decompres
     while (index < compressed_lines_and_index.len - 1) : (index += 2) {
         // index + 1 is the end value and index + 2 is the end time.
         const end_point: DiscretePoint = .{
-            .time = @as(usize, @bitCast(compressed_lines_and_index[index + 2])),
+            .index = @as(usize, @bitCast(compressed_lines_and_index[index + 2])),
             .value = compressed_lines_and_index[index + 1],
         };
 
-        if (start_point.time + 1 < end_point.time) {
+        if (start_point.index + 1 < end_point.index) {
             // Create the linear approximation for the current segment.
-            const duration: f64 = @floatFromInt(end_point.time - start_point.time);
+            const duration: f64 = @floatFromInt(end_point.index - start_point.index);
             slope = (end_point.value - start_point.value) / duration;
             intercept = start_point.value - slope *
-                @as(f64, @floatFromInt(start_point.time));
+                @as(f64, @floatFromInt(start_point.index));
 
-            var current_timestamp: usize = start_point.time + 1;
+            var current_timestamp: usize = start_point.index + 1;
             // Interpolate the values between the start and end points of the current segment.
-            while (current_timestamp < end_point.time) : (current_timestamp += 1) {
+            while (current_timestamp < end_point.index) : (current_timestamp += 1) {
                 const y: f64 = slope * @as(f64, @floatFromInt(current_timestamp)) + intercept;
                 try decompressed_values.append(allocator, y);
             }
@@ -312,11 +312,11 @@ fn comparePointArea(_: void, point_1: PointArea, point_2: PointArea) math.Order 
 
 /// Return the absolute area of the triangle defined by three points.
 fn calculateArea(left_point: DiscretePoint, central_point: DiscretePoint, right_point: DiscretePoint) f64 {
-    const x1: f64 = @floatFromInt(left_point.time);
+    const x1: f64 = @floatFromInt(left_point.index);
     const y1: f64 = left_point.value;
-    const x2: f64 = @floatFromInt(central_point.time);
+    const x2: f64 = @floatFromInt(central_point.index);
     const y2: f64 = central_point.value;
-    const x3: f64 = @floatFromInt(right_point.time);
+    const x3: f64 = @floatFromInt(right_point.index);
     const y3: f64 = right_point.value;
 
     return @abs((x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2)) / 2.0);
@@ -337,9 +337,9 @@ fn updateNeighborArea(
     if (left_index > 0 and right_index < uncompressed_values.len) {
         // New area of the neighbor point.
         const new_area = calculateArea(
-            DiscretePoint{ .time = left_index, .value = uncompressed_values[left_index] },
-            DiscretePoint{ .time = center_index, .value = uncompressed_values[center_index] },
-            DiscretePoint{ .time = right_index, .value = uncompressed_values[right_index] },
+            DiscretePoint{ .index = left_index, .value = uncompressed_values[left_index] },
+            DiscretePoint{ .index = center_index, .value = uncompressed_values[center_index] },
+            DiscretePoint{ .index = right_index, .value = uncompressed_values[right_index] },
         );
 
         new_neighbor.area = new_area;
@@ -361,9 +361,9 @@ pub fn testAreaWithinErrorBound(
     // Calculate the area formed by each triangle.
     for (1..values.len - 1) |i| {
         const area = calculateArea(
-            DiscretePoint{ .time = i - 1, .value = values[i - 1] },
-            DiscretePoint{ .time = i, .value = values[i] },
-            DiscretePoint{ .time = i + 1, .value = values[i + 1] },
+            DiscretePoint{ .index = i - 1, .value = values[i - 1] },
+            DiscretePoint{ .index = i, .value = values[i] },
+            DiscretePoint{ .index = i + 1, .value = values[i + 1] },
         );
         try testing.expect(area <= error_bound);
     }

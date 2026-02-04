@@ -334,7 +334,7 @@ pub fn extract(
 /// Rebuilds NonLinearApproximation's `compressed_values` from the given `indices` and
 /// `coefficients`. The encoding consists of shift_amount (coefficients[0]), number_of_segments
 /// (indices[0]), packed function types (indices[1 .. number_of_segments]), for each segment:
-/// slope, intercept, end_index. Any loss or misalignment of timestamp information, for example,
+/// slope, intercept, end_index. Any loss or misalignment of indices information, for example,
 /// incorrect function type, wrong segment count, missing end_index, can lead to failures during
 /// decompression. The function checks for structural consistency and returns
 /// `Error.CorruptedCompressedData` for malformed input. The `allocator` handles the memory

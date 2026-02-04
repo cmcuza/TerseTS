@@ -112,25 +112,25 @@ pub fn decompress(allocator: Allocator, compressed_values: []const u8, decompres
     var index: usize = 0;
 
     while (index < compressed_lines_and_index.len) : (index += 3) {
-        const start_point = .{ .time = first_timestamp, .value = compressed_lines_and_index[index] };
+        const start_point = .{ .index = first_timestamp, .value = compressed_lines_and_index[index] };
         const end_point = .{
-            .time = @as(usize, @bitCast(compressed_lines_and_index[index + 2])),
+            .index = @as(usize, @bitCast(compressed_lines_and_index[index + 2])),
             .value = compressed_lines_and_index[index + 1],
         };
 
         // Check if the segment has more than two points.
-        if (start_point.time + 1 < end_point.time) {
-            const duration: f64 = @floatFromInt(end_point.time - start_point.time);
+        if (start_point.index + 1 < end_point.index) {
+            const duration: f64 = @floatFromInt(end_point.index - start_point.index);
 
             const slope = (end_point.value - start_point.value) / duration;
             const intercept = start_point.value;
 
             try decompressed_values.append(allocator, start_point.value);
-            var current_timestamp: usize = start_point.time + 1;
+            var current_timestamp: usize = start_point.index + 1;
 
             // Interpolate the values between the start and end points of the current segment.
-            while (current_timestamp < end_point.time) : (current_timestamp += 1) {
-                const scaled_time = @as(f64, @floatFromInt(current_timestamp - start_point.time));
+            while (current_timestamp < end_point.index) : (current_timestamp += 1) {
+                const scaled_time = @as(f64, @floatFromInt(current_timestamp - start_point.index));
                 const y: f64 = slope * scaled_time + intercept;
                 try decompressed_values.append(allocator, y);
             }
@@ -142,7 +142,7 @@ pub fn decompress(allocator: Allocator, compressed_values: []const u8, decompres
             try decompressed_values.append(allocator, start_point.value);
             // Check wheter the point is the same. If so, then we are at the end of the time series.
             // Thus, do not insert the end point. Otherwise, insert the end point.
-            if (start_point.time != end_point.time) {
+            if (start_point.index != end_point.index) {
                 try decompressed_values.append(allocator, end_point.value);
                 first_timestamp += 2;
             } else {

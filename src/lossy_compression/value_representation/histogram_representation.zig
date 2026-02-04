@@ -205,28 +205,28 @@ pub fn decompressPWLH(
     var index: usize = 0;
     while (index < compressed_lines_and_index.len) : (index += 3) {
         const current_segment: Segment = .{
-            .start_point = .{ .time = first_timestamp, .value = compressed_lines_and_index[index] },
+            .start_point = .{ .index = first_timestamp, .value = compressed_lines_and_index[index] },
             .end_point = .{
-                .time = @as(usize, @bitCast(compressed_lines_and_index[index + 2])) - 1,
+                .index = @as(usize, @bitCast(compressed_lines_and_index[index + 2])) - 1,
                 .value = compressed_lines_and_index[index + 1],
             },
         };
 
-        if (current_segment.start_point.time < current_segment.end_point.time) {
-            if (current_segment.end_point.time != current_segment.start_point.time) {
-                const duration: f64 = @floatFromInt(current_segment.end_point.time -
-                    current_segment.start_point.time);
+        if (current_segment.start_point.index < current_segment.end_point.index) {
+            if (current_segment.end_point.index != current_segment.start_point.index) {
+                const duration: f64 = @floatFromInt(current_segment.end_point.index -
+                    current_segment.start_point.index);
                 linear_approximation.slope = (current_segment.end_point.value -
                     current_segment.start_point.value) / duration;
                 linear_approximation.intercept = current_segment.start_point.value - linear_approximation.slope *
-                    @as(f64, @floatFromInt(current_segment.start_point.time));
+                    @as(f64, @floatFromInt(current_segment.start_point.index));
             } else {
                 linear_approximation.slope = 0.0;
                 linear_approximation.intercept = current_segment.start_point.value;
             }
             try decompressed_values.append(allocator, current_segment.start_point.value);
-            var current_timestamp: usize = current_segment.start_point.time + 1;
-            while (current_timestamp < current_segment.end_point.time) : (current_timestamp += 1) {
+            var current_timestamp: usize = current_segment.start_point.index + 1;
+            while (current_timestamp < current_segment.end_point.index) : (current_timestamp += 1) {
                 const y: f64 = @floatCast(linear_approximation.slope *
                     @as(f64, @floatFromInt(current_timestamp)) +
                     linear_approximation.intercept);
@@ -461,7 +461,7 @@ const Histogram = struct {
         // Create a new bucket for the incoming value with start and end at 'index'.
         var bucket: Bucket = try Bucket.init(self.allocator, index, index, value, value);
 
-        try bucket.convex_hull.add(.{ .time = index, .value = value });
+        try bucket.convex_hull.add(.{ .index = index, .value = value });
 
         try self.buckets.append(self.allocator, bucket);
 
@@ -892,14 +892,14 @@ test "Compute simple linear approximation merge error with known results" {
     // No need to deallocate memory because histogram will do it.
     var convex_hull_one = try ConvexHull.init(allocator);
 
-    try convex_hull_one.add(.{ .time = 0.0, .value = 0.0 });
-    try convex_hull_one.add(.{ .time = 1.0, .value = 1.0 });
+    try convex_hull_one.add(.{ .index = 0.0, .value = 0.0 });
+    try convex_hull_one.add(.{ .index = 1.0, .value = 1.0 });
 
     // No need to deallocate memory because histogram will do it.
     var convex_hull_two = try ConvexHull.init(allocator);
 
-    try convex_hull_two.add(.{ .time = 2.0, .value = 2.0 });
-    try convex_hull_two.add(.{ .time = 3.0, .value = 3.0 });
+    try convex_hull_two.add(.{ .index = 2.0, .value = 2.0 });
+    try convex_hull_two.add(.{ .index = 3.0, .value = 3.0 });
 
     // Insert into buckets.
     var histogram = try Histogram.init(allocator, 2, .linear);
@@ -931,14 +931,14 @@ test "Compute divergent linear approximation merge error with known results" {
     // No need to deallocate memory because `histogram` will do it.
     var convex_hull_one = try ConvexHull.init(allocator);
 
-    try convex_hull_one.add(.{ .time = 0.0, .value = 0.0 });
-    try convex_hull_one.add(.{ .time = 1.0, .value = 1.0 });
+    try convex_hull_one.add(.{ .index = 0.0, .value = 0.0 });
+    try convex_hull_one.add(.{ .index = 1.0, .value = 1.0 });
 
     // No need to deallocate memory because histogram will do it.
     var convex_hull_two = try ConvexHull.init(allocator);
 
-    try convex_hull_two.add(.{ .time = 2.0, .value = 3.0 });
-    try convex_hull_two.add(.{ .time = 3.0, .value = 4.0 });
+    try convex_hull_two.add(.{ .index = 2.0, .value = 3.0 });
+    try convex_hull_two.add(.{ .index = 3.0, .value = 4.0 });
 
     // Step 2: Insert into buckets.
     var histogram = try Histogram.init(allocator, 2, .linear);
