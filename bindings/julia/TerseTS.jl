@@ -16,6 +16,8 @@
 
 module TerseTS
 
+using Libdl
+
 # TODO: Fix segmentation and garbage collection errors.
 # https://docs.julialang.org/en/v1/manual/calling-c-and-fortran-code/
 # https://docs.julialang.org/en/v1/base/c/
@@ -53,7 +55,7 @@ end
 A pointer to uncompressed values and the number of values.
 """
 struct UncompressedValues
-    data::Ref{Float64}
+    data::Ptr{Float64}
     len::Csize_t
 end
 
@@ -61,7 +63,7 @@ end
 A pointer to compressed values and the number of bytes.
 """
 struct CompressedValues
-    data::Ref{UInt8}
+    data::Ptr{UInt8}
     len::Csize_t
 end
 
@@ -79,7 +81,11 @@ function findlibrary()
         error("Only FreeBSD, Linux, macOS, and Windows is supported.")
     end
 
-    normpath("../../zig-out/lib/") * library_name
+    return normpath(joinpath(@__DIR__, "..", "..", "zig-out", "lib", library_name))
+end
+
+function __init__()
+    _lib[] = Libdl.dlopen(findlibrary())
 end
 
 """
@@ -89,11 +95,14 @@ function compress(
     uncompressed_values::AbstractVector{Float64},
     method::Method,
     configuration::AbstractString,
-)
-    AbstractVector{UInt8}
-    uncompressed_values_ref = convert(Ref{Float64}, uncompressed_values)
+)   
+    # Ensure contiguous Float64 storage
+    xvec = x isa Vector{Float64} ? x : collect(Float64, x)
+    AbstractVector{UInt8} uncompressed_values_ref = convert(Ptr{Float64}, uncompressed_values)
+    
     uncompressed_values_struct =
         UncompressedValues(uncompressed_values_ref, length(uncompressed_values))
+    
     compressed_values_struct = CompressedValues(C_NULL, 0)
 
     tersets_error = @ccall findlibrary().compress(
