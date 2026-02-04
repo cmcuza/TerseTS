@@ -652,7 +652,7 @@ test "extract and rebuild works for any compression method supported" {
             method == Method.RunLengthEncoding)
         {
             // These compression methods are not supported for extraction
-            // of the coefficients and time indices. This is because even small
+            // of the coefficients and indices. This is because even small
             // chages in the compressed representation can lead to large differences
             // or completely inconsistent decompressed values. For example, for
             // BitPackedQuantization, The decompression process relies on metadata

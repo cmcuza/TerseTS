@@ -210,10 +210,10 @@ pub fn decompress(allocator: Allocator, compressed_values: []const u8, decompres
             intercept = start_point.value - slope *
                 @as(f64, @floatFromInt(start_point.index));
 
-            var current_timestamp: usize = start_point.index + 1;
+            var current_index: usize = start_point.index + 1;
             // Interpolate the values between the start and end points of the current segment.
-            while (current_timestamp < end_point.index) : (current_timestamp += 1) {
-                const y: f64 = slope * @as(f64, @floatFromInt(current_timestamp)) + intercept;
+            while (current_index < end_point.index) : (current_index += 1) {
+                const y: f64 = slope * @as(f64, @floatFromInt(current_index)) + intercept;
                 try decompressed_values.append(allocator, y);
             }
         }
@@ -227,7 +227,7 @@ pub fn decompress(allocator: Allocator, compressed_values: []const u8, decompres
 /// Extracts `indices` and `coefficients` from Visvalingam-Whyatt's `compressed_values`. The binary
 /// representation follows the same pattern as SwingFilter, so this function calls `extractSwing`.
 /// All structural and corruption checks are performed by the delegated function. Any loss of
-/// timestamp information can lead to failures during later decompression. The `allocator` handles
+/// index information can lead to failures during later decompression. The `allocator` handles
 /// the memory of the output arrays. Allocation errors are propagated.
 pub fn extract(
     allocator: Allocator,

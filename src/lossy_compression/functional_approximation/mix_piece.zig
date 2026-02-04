@@ -261,7 +261,7 @@ pub fn decompress(
 
                     index += delta;
                     try all_segments.append(allocator, .{
-                        .start_time = index,
+                        .start_index = index,
                         .lower_bound_slope = slope,
                         .upper_bound_slope = slope,
                         .intercept = intercept,
@@ -288,7 +288,7 @@ pub fn decompress(
 
                 index += delta;
                 try all_segments.append(allocator, .{
-                    .start_time = index,
+                    .start_index = index,
                     .lower_bound_slope = slope,
                     .upper_bound_slope = slope,
                     .intercept = intercept,
@@ -310,7 +310,7 @@ pub fn decompress(
 
             index += delta;
             try all_segments.append(allocator, .{
-                .start_time = index,
+                .start_index = index,
                 .lower_bound_slope = slope,
                 .upper_bound_slope = slope,
                 .intercept = intercept,
@@ -321,7 +321,7 @@ pub fn decompress(
     // Sort all segments by index.
     mem.sort(shared_structs.SegmentMetadata, all_segments.items, {}, struct {
         fn compare(_: void, a: shared_structs.SegmentMetadata, b: shared_structs.SegmentMetadata) bool {
-            return a.start_time < b.start_time;
+            return a.start_index < b.start_index;
         }
     }.compare);
 
@@ -330,17 +330,17 @@ pub fn decompress(
     // Decompress each segment separately.
     for (0..all_segments.items.len) |i| {
         const segment = all_segments.items[i];
-        const start_time = segment.start_time;
-        const end_time = if (i + 1 < all_segments.items.len)
-            all_segments.items[i + 1].start_time
+        const start_index = segment.start_index;
+        const end_index = if (i + 1 < all_segments.items.len)
+            all_segments.items[i + 1].start_index
         else
             final_index;
         // Generate points for the current segment.
         try sp.decompressSegment(
             allocator,
             segment,
-            start_time,
-            end_time,
+            start_index,
+            end_index,
             decompressed_values,
         );
     }
@@ -713,7 +713,7 @@ fn computeSegmentsMetadata(
             if (last_valid_floor >= last_valid_ceil) {
                 // Use floor quantization.
                 try segments_metadata.append(allocator, .{
-                    .start_time = start_point.index,
+                    .start_index = start_point.index,
                     .intercept = quantized_intercept_floor,
                     .upper_bound_slope = upper_bound_slope_floor,
                     .lower_bound_slope = lower_bound_slope_floor,
@@ -721,7 +721,7 @@ fn computeSegmentsMetadata(
             } else {
                 // Use ceil quantization.
                 try segments_metadata.append(allocator, .{
-                    .start_time = start_point.index,
+                    .start_index = start_point.index,
                     .intercept = quantized_intercept_ceil,
                     .upper_bound_slope = upper_bound_slope_ceil,
                     .lower_bound_slope = lower_bound_slope_ceil,
@@ -758,7 +758,7 @@ fn computeSegmentsMetadata(
                 lower_bound_slope_floor = 0;
             }
             try segments_metadata.append(allocator, .{
-                .start_time = start_point.index,
+                .start_index = start_point.index,
                 .intercept = quantized_intercept_floor,
                 .upper_bound_slope = upper_bound_slope_floor,
                 .lower_bound_slope = lower_bound_slope_floor,
@@ -770,7 +770,7 @@ fn computeSegmentsMetadata(
                 lower_bound_slope_ceil = 0;
             }
             try segments_metadata.append(allocator, .{
-                .start_time = start_point.index,
+                .start_index = start_point.index,
                 .intercept = quantized_intercept_ceil,
                 .upper_bound_slope = upper_bound_slope_ceil,
                 .lower_bound_slope = lower_bound_slope_ceil,
@@ -785,7 +785,7 @@ fn computeSegmentsMetadata(
                     lower_bound_slope_ceil = 0;
                 }
                 try segments_metadata.append(allocator, .{
-                    .start_time = start_point.index,
+                    .start_index = start_point.index,
                     .intercept = quantized_intercept_ceil,
                     .upper_bound_slope = upper_bound_slope_ceil,
                     .lower_bound_slope = lower_bound_slope_ceil,
@@ -797,7 +797,7 @@ fn computeSegmentsMetadata(
                     lower_bound_slope_floor = 0;
                 }
                 try segments_metadata.append(allocator, .{
-                    .start_time = start_point.index,
+                    .start_index = start_point.index,
                     .intercept = quantized_intercept_floor,
                     .upper_bound_slope = upper_bound_slope_floor,
                     .lower_bound_slope = lower_bound_slope_floor,
@@ -864,12 +864,12 @@ fn mergeSegmentsMetadata(
 
         // Initialize the first group with the first segment.
         var current_group: shared_structs.SegmentMetadata = .{
-            .start_time = 0.0, // Not used for group metadata.
+            .start_index = 0.0, // Not used for group metadata.
             .intercept = segments_same_intercept_val.items[0].intercept,
             .lower_bound_slope = segments_same_intercept_val.items[0].lower_bound_slope,
             .upper_bound_slope = segments_same_intercept_val.items[0].upper_bound_slope,
         };
-        try indices_array.append(allocator, segments_same_intercept_val.items[0].start_time);
+        try indices_array.append(allocator, segments_same_intercept_val.items[0].start_index);
 
         // Process remaining segments for this intercept value.
         for (segments_same_intercept_val.items[1..]) |segment| {
@@ -878,7 +878,7 @@ fn mergeSegmentsMetadata(
                 segment.upper_bound_slope >= current_group.lower_bound_slope)
             {
                 // Segments can be grouped - update the group's interval.
-                try indices_array.append(allocator, segment.start_time);
+                try indices_array.append(allocator, segment.start_index);
                 current_group.lower_bound_slope = @max(
                     current_group.lower_bound_slope,
                     segment.lower_bound_slope,
@@ -893,7 +893,7 @@ fn mergeSegmentsMetadata(
                     // Multiple segments in group - add to same_intercept_groups.
                     for (indices_array.items) |index| {
                         try same_intercept_groups.append(allocator, .{
-                            .start_time = index,
+                            .start_index = index,
                             .intercept = current_group.intercept,
                             .lower_bound_slope = current_group.lower_bound_slope,
                             .upper_bound_slope = current_group.upper_bound_slope,
@@ -902,7 +902,7 @@ fn mergeSegmentsMetadata(
                 } else {
                     // Single segment - save for Part 2 processing.
                     try single_segment_groups.append(allocator, .{
-                        .start_time = indices_array.items[0],
+                        .start_index = indices_array.items[0],
                         .intercept = current_group.intercept,
                         .lower_bound_slope = current_group.lower_bound_slope,
                         .upper_bound_slope = current_group.upper_bound_slope,
@@ -912,12 +912,12 @@ fn mergeSegmentsMetadata(
                 // Start new group with current segment.
                 indices_array.clearRetainingCapacity();
                 current_group = .{
-                    .start_time = 0.0,
+                    .start_index = 0,
                     .intercept = segment.intercept,
                     .lower_bound_slope = segment.lower_bound_slope,
                     .upper_bound_slope = segment.upper_bound_slope,
                 };
-                try indices_array.append(allocator, segment.start_time);
+                try indices_array.append(allocator, segment.start_index);
             }
         }
 
@@ -925,7 +925,7 @@ fn mergeSegmentsMetadata(
         if (indices_array.items.len > 1) {
             for (indices_array.items) |index| {
                 try same_intercept_groups.append(allocator, .{
-                    .start_time = index,
+                    .start_index = index,
                     .intercept = current_group.intercept,
                     .lower_bound_slope = current_group.lower_bound_slope,
                     .upper_bound_slope = current_group.upper_bound_slope,
@@ -933,7 +933,7 @@ fn mergeSegmentsMetadata(
             }
         } else {
             try single_segment_groups.append(allocator, .{
-                .start_time = indices_array.items[0],
+                .start_index = indices_array.items[0],
                 .intercept = current_group.intercept,
                 .lower_bound_slope = current_group.lower_bound_slope,
                 .upper_bound_slope = current_group.upper_bound_slope,
@@ -953,20 +953,20 @@ fn mergeSegmentsMetadata(
 
     // For cross-intercept grouping, track both intercept and indices values for each segment.
     var cross_intercept_segment_info =
-        ArrayList(struct { intercept: f64, start_time: usize }).empty;
+        ArrayList(struct { intercept: f64, start_index: usize }).empty;
     defer cross_intercept_segment_info.deinit(allocator);
 
     if (single_segment_groups.items.len > 0) {
         // Initialize with the first ungrouped segment.
         var current_cross_group: shared_structs.SegmentMetadata = .{
-            .start_time = 0.0, // Not used for group metadata.
+            .start_index = 0, // Not used for group metadata.
             .intercept = 0.0, // Will vary for each segment in the group.
             .lower_bound_slope = single_segment_groups.items[0].lower_bound_slope,
             .upper_bound_slope = single_segment_groups.items[0].upper_bound_slope,
         };
         try cross_intercept_segment_info.append(allocator, .{
             .intercept = single_segment_groups.items[0].intercept,
-            .start_time = single_segment_groups.items[0].start_time,
+            .start_index = single_segment_groups.items[0].start_index,
         });
 
         // Process remaining ungrouped segments.
@@ -986,7 +986,7 @@ fn mergeSegmentsMetadata(
                 );
                 try cross_intercept_segment_info.append(allocator, .{
                     .intercept = segment.intercept,
-                    .start_time = segment.start_time,
+                    .start_index = segment.start_index,
                 });
             } else {
                 // Cannot merge - finalize current cross-intercept group.
@@ -994,7 +994,7 @@ fn mergeSegmentsMetadata(
                     // Multiple segments - add to cross_intercept_groups.
                     for (cross_intercept_segment_info.items) |info| {
                         try cross_intercept_groups.append(allocator, .{
-                            .start_time = info.start_time,
+                            .start_index = info.start_index,
                             .intercept = info.intercept,
                             .lower_bound_slope = current_cross_group.lower_bound_slope,
                             .upper_bound_slope = current_cross_group.upper_bound_slope,
@@ -1004,7 +1004,7 @@ fn mergeSegmentsMetadata(
                     // Single segment - add to ungrouped_segments.
                     for (cross_intercept_segment_info.items) |info| {
                         try ungrouped_segments.append(allocator, .{
-                            .start_time = info.start_time,
+                            .start_index = info.start_index,
                             .intercept = info.intercept,
                             .lower_bound_slope = current_cross_group.lower_bound_slope,
                             .upper_bound_slope = current_cross_group.upper_bound_slope,
@@ -1015,14 +1015,14 @@ fn mergeSegmentsMetadata(
                 // Start new cross-intercept group.
                 cross_intercept_segment_info.clearRetainingCapacity();
                 current_cross_group = .{
-                    .start_time = 0.0,
+                    .start_index = 0.0,
                     .intercept = 0.0,
                     .lower_bound_slope = segment.lower_bound_slope,
                     .upper_bound_slope = segment.upper_bound_slope,
                 };
                 try cross_intercept_segment_info.append(allocator, .{
                     .intercept = segment.intercept,
-                    .start_time = segment.start_time,
+                    .start_index = segment.start_index,
                 });
             }
         }
@@ -1031,7 +1031,7 @@ fn mergeSegmentsMetadata(
         if (cross_intercept_segment_info.items.len > 1) {
             for (cross_intercept_segment_info.items) |info| {
                 try cross_intercept_groups.append(allocator, .{
-                    .start_time = info.start_time,
+                    .start_index = info.start_index,
                     .intercept = info.intercept,
                     .lower_bound_slope = current_cross_group.lower_bound_slope,
                     .upper_bound_slope = current_cross_group.upper_bound_slope,
@@ -1040,7 +1040,7 @@ fn mergeSegmentsMetadata(
         } else if (cross_intercept_segment_info.items.len == 1) {
             for (cross_intercept_segment_info.items) |info| {
                 try ungrouped_segments.append(allocator, .{
-                    .start_time = info.start_time,
+                    .start_index = info.start_index,
                     .intercept = info.intercept,
                     .lower_bound_slope = current_cross_group.lower_bound_slope,
                     .upper_bound_slope = current_cross_group.upper_bound_slope,
@@ -1054,21 +1054,21 @@ fn mergeSegmentsMetadata(
         shared_structs.SegmentMetadata,
         same_intercept_groups.items,
         {},
-        sp.compareMetadataByStartTime,
+        sp.compareMetadataByStartIndex,
     );
 
     mem.sort(
         shared_structs.SegmentMetadata,
         cross_intercept_groups.items,
         {},
-        sp.compareMetadataByStartTime,
+        sp.compareMetadataByStartIndex,
     );
 
     mem.sort(
         shared_structs.SegmentMetadata,
         ungrouped_segments.items,
         {},
-        sp.compareMetadataByStartTime,
+        sp.compareMetadataByStartIndex,
     );
 }
 
@@ -1100,7 +1100,7 @@ fn populateSameInterceptGroupsHashMap(
         if (!hash_to_array_result.found_existing) {
             hash_to_array_result.value_ptr.* = ArrayList(usize).empty;
         }
-        try hash_to_array_result.value_ptr.*.append(allocator, segment_metadata.start_time);
+        try hash_to_array_result.value_ptr.*.append(allocator, segment_metadata.start_index);
     }
 }
 
@@ -1129,7 +1129,7 @@ fn populateCrossInterceptGroupsAsHashMap(
         // Create an InterceptIndexPair and add it to the list for this slope.
         const intercept_index_pair = InterceptIndexPair{
             .intercept = segment_metadata.intercept,
-            .index = segment_metadata.start_time,
+            .index = segment_metadata.start_index,
         };
 
         try hash_result.value_ptr.*.append(allocator, intercept_index_pair);
@@ -1153,7 +1153,7 @@ fn populateUngroupedSegmentsArray(
         const ungrouped_segment = UngroupedSegment{
             .slope = slope,
             .intercept = ungrouped_segments.items[index].intercept,
-            .index = ungrouped_segments.items[index].start_time,
+            .index = ungrouped_segments.items[index].start_index,
         };
 
         // Append to the output array (ArrayList handles memory allocation internally).
@@ -1205,11 +1205,11 @@ fn createCompressedRepresentationMergedSegments(
 
 /// Mix-Piece Phase 4.2. Create compressed representation from the 'cross_intercept_groups_map'
 /// that can decoded during decompression and store it in `compressed_values`. The compressed
-/// representation is a byte array containing the slopes a_j, intercept-timestamps pairs and
+/// representation is a byte array containing the slopes a_j, intercept-indicess pairs and
 /// necessary metadata for proper decoding. Specifically, the compressed representation has
 /// the following structure: [a_j, k_j, b_j,1, t_j,1, b_j,2, t_j,2, ..., b_j,k_j, t_j,k_j]
-/// where a_j is the  slope, k_j is the  number of intercept-timestamp pairs for this slope
-/// b_j,i is the i-th intercept for slope a_j, t_j,i is the i-th timestamp for slope a_j.
+/// where a_j is the  slope, k_j is the  number of intercept-index pairs for this slope
+/// b_j,i is the i-th intercept for slope a_j, t_j,i is the i-th index for slope a_j.
 fn createCompressedRepresentationCrossInterceptGroups(
     allocator: Allocator,
     cross_intercept_groups_map: CrossInterceptGroupsMap,

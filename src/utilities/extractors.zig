@@ -61,8 +61,8 @@ pub fn extractCoefficientIndexPairs(
             const coefficient = components[i];
             try coefficients.append(allocator, coefficient);
         } else {
-            const timestamp = components[i];
-            const end_index: u64 = @bitCast(timestamp);
+            const index = components[i];
+            const end_index: u64 = @bitCast(index);
             try indices.append(allocator, end_index);
         }
     }
@@ -85,7 +85,7 @@ pub fn extractCoefficientIndexTuplesWithStartCoefficient(
     coefficients: *ArrayList(f64),
 ) Error!void {
     // Validate input lengths: first value is coefficient,
-    // then alternating coefficient and timestamp.
+    // then alternating coefficient and index.
     if ((compressed_values.len - 8) % 16 != 0) return Error.CorruptedCompressedData;
     const components = mem.bytesAsSlice(f64, compressed_values);
     for (0..components.len) |i| {
@@ -94,8 +94,8 @@ pub fn extractCoefficientIndexTuplesWithStartCoefficient(
             const coefficient = components[i];
             try coefficients.append(allocator, coefficient);
         } else {
-            const timestamp = components[i];
-            const end_index: u64 = @bitCast(timestamp);
+            const index = components[i];
+            const end_index: u64 = @bitCast(index);
             try indices.append(allocator, end_index);
         }
     }
@@ -103,8 +103,8 @@ pub fn extractCoefficientIndexTuplesWithStartCoefficient(
 
 /// Extracts `indices` and `coefficients` from `compressed_values`.
 /// The encoding follows repeating triples of `(coefficient: f64,
-/// coefficient: f64, timestamp: f64)`. Every third `f64` value is interpreted
-/// as a timestamp, while the remaining values are interpreted as coefficients.
+/// coefficient: f64, index: f64)`. Every third `f64` value is interpreted
+/// as an index, while the remaining values are interpreted as coefficients.
 /// Any loss of information in the extracted indices, including invalid bit
 /// patterns or mismatched segment boundaries, may result in errors during
 /// decompression. If the buffer length is not a multiple of 24 bytes, the
@@ -117,7 +117,7 @@ pub fn extractDoubleCoefficientIndexTriples(
     coefficients: *ArrayList(f64),
 ) Error!void {
     // Validate input lengths: the `compressed_values` contain every third
-    // value as a timestamp, others are coefficients.
+    // value as an index, others are coefficients.
     if (compressed_values.len % 24 != 0) return Error.CorruptedCompressedData;
     const components = mem.bytesAsSlice(f64, compressed_values);
     for (0..components.len) |i| {
@@ -125,8 +125,8 @@ pub fn extractDoubleCoefficientIndexTriples(
             const coefficient = components[i];
             try coefficients.append(allocator, coefficient);
         } else {
-            const time = components[i];
-            const end_index: u64 = @bitCast(time);
+            const index = components[i];
+            const end_index: u64 = @bitCast(index);
             try indices.append(allocator, end_index);
         }
     }

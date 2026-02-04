@@ -201,11 +201,11 @@ pub fn decompressPWLH(
 
     var linear_approximation: LinearFunction = .{ .slope = undefined, .intercept = undefined };
 
-    var first_timestamp: usize = 0;
+    var first_index: usize = 0;
     var index: usize = 0;
     while (index < compressed_lines_and_index.len) : (index += 3) {
         const current_segment: Segment = .{
-            .start_point = .{ .index = first_timestamp, .value = compressed_lines_and_index[index] },
+            .start_point = .{ .index = first_index, .value = compressed_lines_and_index[index] },
             .end_point = .{
                 .index = @as(usize, @bitCast(compressed_lines_and_index[index + 2])) - 1,
                 .value = compressed_lines_and_index[index + 1],
@@ -225,18 +225,18 @@ pub fn decompressPWLH(
                 linear_approximation.intercept = current_segment.start_point.value;
             }
             try decompressed_values.append(allocator, current_segment.start_point.value);
-            var current_timestamp: usize = current_segment.start_point.index + 1;
-            while (current_timestamp < current_segment.end_point.index) : (current_timestamp += 1) {
+            var current_index: usize = current_segment.start_point.index + 1;
+            while (current_index < current_segment.end_point.index) : (current_index += 1) {
                 const y: f64 = @floatCast(linear_approximation.slope *
-                    @as(f64, @floatFromInt(current_timestamp)) +
+                    @as(f64, @floatFromInt(current_index)) +
                     linear_approximation.intercept);
                 try decompressed_values.append(allocator, y);
             }
             try decompressed_values.append(allocator, current_segment.end_point.value);
-            first_timestamp = current_timestamp + 1;
+            first_index = current_index + 1;
         } else {
             try decompressed_values.append(allocator, current_segment.start_point.value);
-            first_timestamp += 1;
+            first_index += 1;
         }
     }
 }
@@ -266,7 +266,7 @@ pub fn extractPWCH(
 /// Extracts `indices` and `coefficients` from the Piecewise Linear Histogram's
 /// `compressed_values`. PWLH uses the same triplet representation as SlideFilter, so this function
 /// delegates to `extractSlide`. All validation and corruption detection handlesd by that routine.
-/// Any loss of timestamp information may lead to unexpected failures during decompression.
+/// Any loss of index information may lead to unexpected failures during decompression.
 /// The `allocator` handles the memory allocations of the output arrays. Allocation errors are propagated.
 pub fn extractPWLH(
     allocator: Allocator,
@@ -287,7 +287,7 @@ pub fn extractPWLH(
 /// Rebuilds a Piecewise Constant Histogram representation from the provided `indices` and
 /// `coefficients`. PWCH uses the same binary format as PMC, so this function forwards the work
 /// to `rebuildPMC`. All structural and corruption checks are performed by the underlying function.
-/// Any loss or misalignment of timestamp information can cause failures when decompressing
+/// Any loss or misalignment of index information can cause failures when decompressing
 /// the rebuilt representation. The `allocator` handles the memory allocations of the output arrays.
 /// Allocation errors are propagated.
 pub fn rebuildPWCH(
@@ -308,7 +308,7 @@ pub fn rebuildPWCH(
 
 /// Rebuilds a Piecewise Linear Histogram representation from the provided `indices` and `coefficients`.
 /// PWLH uses the SlideFilter representation, so this function forwards the work to `rebuildSlide`.
-/// All correctness checks are performed internally by the delegated function. Any inconsistency in timestamp
+/// All correctness checks are performed internally by the delegated function. Any inconsistency in index
 /// counts or ordering may produce corrupted data that fails during decompression. The `allocator` handles
 /// the memory of the output arrays. Allocation errors are propagated.
 pub fn rebuildPWLH(

@@ -56,7 +56,7 @@ pub fn rebuildCoefficientIndexPairs(
     try compressed_values.ensureTotalCapacity(allocator, coefficients.len * 16);
 
     const total_length = coefficients.len + indices.len;
-    var timestamp_index: u64 = 0;
+    var index: u64 = 0;
     var coefficient_index: u64 = 0;
     for (0..total_length) |i| {
         if (i % 2 == 0) {
@@ -64,9 +64,9 @@ pub fn rebuildCoefficientIndexPairs(
             try shared_functions.appendValue(allocator, f64, coefficient, compressed_values);
             coefficient_index += 1;
         } else {
-            const time = indices[timestamp_index];
-            try shared_functions.appendValue(allocator, u64, time, compressed_values);
-            timestamp_index += 1;
+            const index_value = indices[index];
+            try shared_functions.appendValue(allocator, u64, index_value, compressed_values);
+            index += 1;
         }
     }
 }
@@ -99,7 +99,7 @@ pub fn rebuildCoefficientIndexTuplesWithStartCoefficient(
     try compressed_values.ensureTotalCapacity(allocator, coefficients.len * 16);
 
     const total_len = coefficients.len + indices.len;
-    var timestamp_index: u64 = 0;
+    var index: u64 = 0;
     var coefficient_index: u64 = 0;
     for (0..total_len) |i| {
         // Coefficients are at even indices (0, 1, 3, 5, ...),
@@ -108,16 +108,16 @@ pub fn rebuildCoefficientIndexTuplesWithStartCoefficient(
             try shared_functions.appendValue(allocator, f64, coefficient, compressed_values);
             coefficient_index += 1;
         } else {
-            const time = indices[timestamp_index];
-            try shared_functions.appendValue(allocator, u64, time, compressed_values);
-            timestamp_index += 1;
+            const index_value = indices[index];
+            try shared_functions.appendValue(allocator, u64, index_value, compressed_values);
+            index += 1;
         }
     }
 }
 
 /// Rebuilds the `compressed_values` array from the provided `indices` and
 /// `coefficients`. The encoding follows a fixed representation of two
-/// coefficients followed by one timestamp, repeating this pattern. The
+/// coefficients followed by one index, repeating this pattern. The
 /// function therefore expects `coefficients.len == indices.len * 2`.
 /// If the input does not satisfy this requirement,
 /// `Error.CorruptedCompressedData` is returned. Any loss of information in
@@ -140,7 +140,7 @@ pub fn rebuildDoubleCoefficientIndexTriples(
     try compressed_values.ensureTotalCapacity(allocator, coefficients.len * 24);
 
     const total_len = coefficients.len + indices.len;
-    var timestamp_index: u64 = 0;
+    var index: u64 = 0;
     var coefficient_index: u64 = 0;
     for (0..total_len) |i| {
         if ((i + 1) % 3 != 0) {
@@ -148,9 +148,9 @@ pub fn rebuildDoubleCoefficientIndexTriples(
             try shared_functions.appendValue(allocator, f64, coefficient, compressed_values);
             coefficient_index += 1;
         } else {
-            const timestamp = indices[timestamp_index];
-            try shared_functions.appendValue(allocator, u64, timestamp, compressed_values);
-            timestamp_index += 1;
+            const index_value = indices[index];
+            try shared_functions.appendValue(allocator, u64, index_value, compressed_values);
+            index += 1;
         }
     }
 }

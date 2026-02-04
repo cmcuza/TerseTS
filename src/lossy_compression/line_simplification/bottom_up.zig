@@ -198,11 +198,11 @@ pub fn decompress(
 
     const compressed_lines_and_index = mem.bytesAsSlice(f64, compressed_values);
 
-    var first_timestamp: usize = 0;
+    var first_index: usize = 0;
     var index: usize = 0;
 
     while (index < compressed_lines_and_index.len) : (index += 3) {
-        const start_point = .{ .index = first_timestamp, .value = compressed_lines_and_index[index] };
+        const start_point = .{ .index = first_index, .value = compressed_lines_and_index[index] };
         const end_point = .{
             .index = @as(usize, @bitCast(compressed_lines_and_index[index + 2])),
             .value = compressed_lines_and_index[index + 1],
@@ -217,15 +217,15 @@ pub fn decompress(
                 @as(f64, @floatFromInt(start_point.index));
 
             try decompressed_values.append(allocator, start_point.value);
-            var current_timestamp: usize = start_point.index + 1;
+            var current_index: usize = start_point.index + 1;
 
             // Interpolate the values between the start and end points of the current segment.
-            while (current_timestamp < end_point.index) : (current_timestamp += 1) {
-                const y: f64 = slope * @as(f64, @floatFromInt(current_timestamp)) + intercept;
+            while (current_index < end_point.index) : (current_index += 1) {
+                const y: f64 = slope * @as(f64, @floatFromInt(current_index)) + intercept;
                 try decompressed_values.append(allocator, y);
             }
             try decompressed_values.append(allocator, end_point.value);
-            first_timestamp = current_timestamp + 1;
+            first_index = current_index + 1;
         } else {
             // If the start and end points are one point apart,
             // append the start point and end points directly.
@@ -237,7 +237,7 @@ pub fn decompress(
                 try decompressed_values.append(allocator, end_point.value);
             }
 
-            first_timestamp += 2;
+            first_index += 2;
         }
     }
 }

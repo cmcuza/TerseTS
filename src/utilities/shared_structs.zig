@@ -61,11 +61,11 @@ fn Point(comptime index_type: type) type {
 }
 
 /// `SegmentMetadata` stores the information about an approximated segment during the execution
-/// of Sim-Piece and Mix-Piece. It stores the starting time of the segment in `start_time`, the
+/// of Sim-Piece and Mix-Piece. It stores the starting index of the segment in `start_index`, the
 /// `interception` point used to create the linear function approximation, and the slopes of
 /// the upper and lower bounds that constraint the linear approximation in that segment.
 pub const SegmentMetadata = struct {
-    start_time: usize,
+    start_index: usize,
     intercept: f64,
     upper_bound_slope: f64,
     lower_bound_slope: f64,
