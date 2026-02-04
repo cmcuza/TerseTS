@@ -34,14 +34,26 @@ pub const UncompressedValues = Array(f64);
 /// A pointer to compressed values and the number of bytes.
 pub const CompressedValues = Array(u8);
 
+/// A pointer to indices values and the number of values.
+pub const IndicesValues = Array(usize);
+
+/// A pointer to coefficient values and the number of values.
+pub const CoefficientsValues = Array(f64);
+
 /// Compress `uncompressed_values` to `compressed_values` according to `configuration`.
 /// The General Purpose Allocator `allocator` is passed as a parameter to tersets for
 /// memory management in the compression methods. On success zero is returned, and the
 /// following non-zero values are returned on errors:
-/// - 1) Unsupported compression method.
-/// - 2) No uncompressed values.
-/// - 3) Error bound is negative.
-/// - 5) Out-of-memory for compression.
+/// - 1) Unknown compression method.
+/// - 2) Unsupported input.
+/// - 3) Invalid configuration.
+/// - 4) Corrupted compressed data.
+/// - 5) Item not found.
+/// - 6) Empty convex hull.
+/// - 7) Empty queue.
+/// - 8) Byte stream error.
+/// - 9) Unsupported method.
+/// - 10) Out of memory.
 export fn compress(
     uncompressed_values_array: UncompressedValues,
     compressed_values_array: *CompressedValues,
@@ -76,12 +88,20 @@ export fn compress(
     return 0;
 }
 
-/// Decompress `compressed_values` to `uncompressed_values` according to `configuration`.
-/// On success zero is returned, and the following non-zero values are returned on errors:
-/// - 1) Unsupported decompression method.
-/// - 2) No compressed values.
-/// - 4) Incorrect compressed values.
-/// - 5) Out-of-memory for decompression.
+/// Decompress `compressed_values` to `uncompressed_values`. The method is encoded in the last byte
+/// of `compressed_values`. The General Purpose Allocator `allocator` is passed as a parameter to
+/// tersets for memory management in the decompression methods. On success zero is returned, and the
+/// following non-zero values are returned on errors:
+/// - 1) Unknown compression method.
+/// - 2) Unsupported input.
+/// - 3) Invalid configuration.
+/// - 4) Corrupted compressed data.
+/// - 5) Item not found.
+/// - 6) Empty convex hull.
+/// - 7) Empty queue.
+/// - 8) Byte stream error.
+/// - 9) Unsupported method.
+/// - 10) Out of memory.
 export fn decompress(
     compressed_values_array: CompressedValues,
     decompressed_values_array: *UncompressedValues,
@@ -105,27 +125,141 @@ export fn decompress(
     return 0;
 }
 
+/// Extracts indices and coefficients from a compressed buffer using the method encoded in the last byte.
+/// On success, fills `indices_values_array` and `coefficients_values_array` with extracted values.
+/// Extraction layouts depend on the compression method; see `extractors.zig` for details.
+/// On success zero is returned, and the following non-zero values are returned on errors:
+/// - 1) Unknown compression method.
+/// - 2) Unsupported input.
+/// - 3) Invalid configuration.
+/// - 4) Corrupted compressed data.
+/// - 5) Item not found.
+/// - 6) Empty convex hull.
+/// - 7) Empty queue.
+/// - 8) Byte stream error.
+/// - 9) Unsupported method.
+/// - 10) Out of memory.
+export fn extract(
+    compressed_values_array: CompressedValues,
+    indices_values_array: *IndicesValues,
+    coefficients_values_array: *CoefficientsValues,
+) i32 {
+    const compressed_values = compressed_values_array.data[0..compressed_values_array.len];
+    if (compressed_values.len == 0) return 2;
+
+    var indices = ArrayList(u64).empty;
+    var coefficients = ArrayList(f64).empty;
+
+    // Return indices and coefficients together. We need to put the size of indices at front in a
+    // u32 to split the values.
+    tersets.extract(
+        allocator,
+        compressed_values,
+        &indices,
+        &coefficients,
+    ) catch |e| return errorToInt(e);
+
+    const indices_slice = indices.toOwnedSlice(allocator) catch |err| return errorToInt(err);
+    indices_values_array.data = indices_slice.ptr;
+    indices_values_array.len = indices_slice.len;
+
+    const coefficients_slice = coefficients.toOwnedSlice(allocator) catch |err| return errorToInt(err);
+
+    coefficients_values_array.data = coefficients_slice.ptr;
+    coefficients_values_array.len = coefficients_slice.len;
+
+    return 0;
+}
+
+/// Rebuilds a compressed buffer from provided indices and coefficients, using the specified method.
+/// On success, fills `compressed_values_array` with the rebuilt compressed stream (including method byte).
+/// Input arrays must match the expected layout for the method; see `extractors.zig` for details.
+/// On success zero is returned, and the following non-zero values are returned on errors:
+/// - 1) Unknown compression method.
+/// - 2) Unsupported input.
+/// - 3) Invalid configuration.
+/// - 4) Corrupted compressed data.
+/// - 5) Item not found.
+/// - 6) Empty convex hull.
+/// - 7) Empty queue.
+/// - 8) Byte stream error.
+/// - 9) Unsupported method.
+/// - 10) Out of memory.
+export fn rebuild(
+    indices_values_array: IndicesValues,
+    coefficients_values_array: CoefficientsValues,
+    compressed_values_array: *CompressedValues,
+    method_idx: u8,
+) i32 {
+    const method: Method = @enumFromInt(method_idx);
+
+    const indices = indices_values_array.data[0..indices_values_array.len];
+    const coefficients = coefficients_values_array.data[0..coefficients_values_array.len];
+
+    var components_values = tersets.rebuild(
+        allocator,
+        indices,
+        coefficients,
+        method,
+    ) catch |e| return errorToInt(e);
+
+    const components_slice = components_values.toOwnedSlice(allocator) catch |err| return errorToInt(err);
+
+    compressed_values_array.data = components_slice.ptr;
+    compressed_values_array.len = components_slice.len;
+
+    return 0;
+}
+
 /// Frees a `compressed_values` buffer previously produced by `compress`.
 /// This function is primarily used by the Python and C bindings.
 /// If used independently, ensure that the actual allocated size of
 /// `compressed_values.data` matches the value stored in `compressed_values.len`.
 /// A mismatch between these two values will corrupt the memory allocator state.
 export fn freeCompressedValues(compressed_values: *CompressedValues) void {
-    if (compressed_values.len != 0) {
-        allocator.free(compressed_values.data[0..compressed_values.len]);
-        compressed_values.len = 0; // mark as freed
-    }
+    freeValuesMemory(CompressedValues, compressed_values);
 }
 
 /// Frees an `uncompressed_values` buffer previously produced by `decompress`.
+/// This function is primarily used by the Python and C bindings. If used independently,
+/// ensure that the actual allocated size of`uncompressed_values.data` matches the value
+/// stored in `uncompressed_values.len`. A mismatch between these two values will corrupt
+/// the memory allocator state.
+export fn freeUncompressedValues(uncompressed_values: *UncompressedValues) void {
+    freeValuesMemory(UncompressedValues, uncompressed_values);
+}
+
+/// Frees a `coefficients_values` buffer previously produced by `extract`. This function
+/// is primarily used by the Python and C bindings. If used independently, ensure that
+/// the actual allocated size of `coefficients_values.data` matches the value stored in
+/// `coefficients_values.len`. A mismatch between these two values will corrupt
+/// the memory allocator state.
+export fn freeCoefficientValues(coefficients_values: *CoefficientsValues) void {
+    freeValuesMemory(CoefficientsValues, coefficients_values);
+}
+
+/// Frees a `indices_values` buffer previously produced by `extract`.
 /// This function is primarily used by the Python and C bindings.
 /// If used independently, ensure that the actual allocated size of
-/// `uncompressed_values.data` matches the value stored in `uncompressed_values.len`.
+/// `indices_values.data` matches the value stored in `indices_values.len`.
 /// A mismatch between these two values will corrupt the memory allocator state.
-export fn freeUncompressedValues(uncompressed_values: *UncompressedValues) void {
-    if (uncompressed_values.len != 0) {
-        allocator.free(uncompressed_values.data[0..uncompressed_values.len]);
-        uncompressed_values.len = 0; // mark as freed
+export fn freeIndicesValues(indices_values: *IndicesValues) void {
+    freeValuesMemory(IndicesValues, indices_values);
+}
+
+/// Frees a `values` struct previously produced by the TerseTS library. This function is an
+/// internal helper used by the exported `free*Values` functions for the C and Python bindings.
+/// It checks the `ValuesType` at compile time to ensure only supported types are freed.
+/// If the `values.len` is zero, it indicates that the memory has already been freed.
+fn freeValuesMemory(comptime ValuesType: type, values: *ValuesType) void {
+    if (ValuesType != CompressedValues and ValuesType != UncompressedValues and
+        ValuesType != CoefficientsValues and ValuesType != IndicesValues)
+    {
+        @compileError("freeValuesMemory: unsuported ValuesType"); // Invalid type for freeing values.
+    }
+    if (values.len != 0) {
+        allocator.free(values.data[0..values.len]);
+        values.len = 0; // Mark it as freed.
     }
 }
 
@@ -139,14 +273,14 @@ fn errorToInt(err: Error) i32 {
     switch (err) {
         Error.UnknownMethod => return 1,
         Error.UnsupportedInput => return 2,
-        Error.UnsupportedErrorBound => return 3,
-        Error.InvalidConfiguration => return 4,
-        Error.CorruptedCompressedData => return 5,
-        Error.OutOfMemory => return 6,
-        Error.ItemNotFound => return 7,
-        Error.EmptyConvexHull => return 8,
-        Error.EmptyQueue => return 9,
-        Error.ByteStreamError => return 10,
+        Error.InvalidConfiguration => return 3,
+        Error.CorruptedCompressedData => return 4,
+        Error.ItemNotFound => return 5,
+        Error.EmptyConvexHull => return 6,
+        Error.EmptyQueue => return 7,
+        Error.ByteStreamError => return 8,
+        Error.UnsupportedMethod => return 9,
+        Error.OutOfMemory => return 10,
     }
 }
 
@@ -163,6 +297,11 @@ test "method enum must match method constants" {
     try testing.expectEqual(@intFromEnum(tersets.Method.VisvalingamWhyatt), 9);
     try testing.expectEqual(@intFromEnum(tersets.Method.SlidingWindow), 10);
     try testing.expectEqual(@intFromEnum(tersets.Method.BottomUp), 11);
+    try testing.expectEqual(@intFromEnum(tersets.Method.MixPiece), 12);
+    try testing.expectEqual(@intFromEnum(tersets.Method.BitPackedQuantization), 13);
+    try testing.expectEqual(@intFromEnum(tersets.Method.RunLengthEncoding), 14);
+    try testing.expectEqual(@intFromEnum(tersets.Method.NonLinearApproximation), 15);
+    try testing.expectEqual(@intFromEnum(tersets.Method.SerfQT), 16);
 }
 
 test "error for unknown compression method" {
@@ -229,7 +368,7 @@ test "error for negative error bound when compressing" {
         configuration,
     );
 
-    try testing.expectEqual(4, return_code);
+    try testing.expectEqual(3, return_code);
 }
 
 test "error for unknown decompression method" {
@@ -249,7 +388,7 @@ test "error for empty input when decompressing" {
 
     const return_code = decompress(compressed_values, &decompressed_values);
 
-    try testing.expectEqual(5, return_code);
+    try testing.expectEqual(4, return_code);
 }
 
 test "can compress and decompress" {
@@ -302,11 +441,11 @@ test "free allocated compressed values" {
     };
 
     // First free should release the array and zero the length.
-    freeCompressedValues(&compressed_values);
+    freeValuesMemory(CompressedValues, &compressed_values);
     try testing.expectEqual(@as(usize, 0), compressed_values.len);
 
     // Second free should no try to deallocate again.
-    freeCompressedValues(&compressed_values);
+    freeValuesMemory(CompressedValues, &compressed_values);
     try testing.expectEqual(@as(usize, 0), compressed_values.len);
 }
 
@@ -315,14 +454,14 @@ test "free allocated uncompressed values" {
     for (array, 0..) |*value, i|
         value.* = @as(f64, @floatFromInt(i));
 
-    var compressed_values = UncompressedValues{
+    var uncompressed_values = UncompressedValues{
         .data = array.ptr,
         .len = array.len,
     };
 
-    freeUncompressedValues(&compressed_values);
-    try testing.expectEqual(@as(usize, 0), compressed_values.len);
+    freeValuesMemory(UncompressedValues, &uncompressed_values);
+    try testing.expectEqual(@as(usize, 0), uncompressed_values.len);
 
-    freeUncompressedValues(&compressed_values);
-    try testing.expectEqual(@as(usize, 0), compressed_values.len);
+    freeValuesMemory(UncompressedValues, &uncompressed_values);
+    try testing.expectEqual(@as(usize, 0), uncompressed_values.len);
 }

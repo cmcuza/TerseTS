@@ -74,10 +74,14 @@ const Method = tersets.Method;
 
 const shared = @import("utilities/shared_structs.zig");
 
-/// `global_at_least` and `global_at_most` define the default minimum and maximum bounds for
-/// generating random integer values in tests. These values are chosen to provide a reasonable
-/// range for most scenarios, balancing test coverage and performance.
+/// Defines the default minimum number for generating random integer values in tests.
+/// These values are chosen to provide a reasonable range for most scenarios, balancing test
+/// coverage and performance.
 pub const global_at_least: usize = 10;
+
+/// Defines the default maximum number for generating random integer values in tests.
+/// These values are chosen to provide a reasonable range for most scenarios, balancing test
+/// coverage and performance.
 pub const global_at_most: usize = 50;
 
 /// Probability used when replacing a value with a special float (NaN, +inf, -inf) in test generators.
@@ -815,7 +819,8 @@ pub fn generateBoundedRandomValues(
 
     for (0..generateNumberOfValues(random)) |_| {
         // generate f64 values in the range [0, 1).
-        const bounded_value = lower_bound + (upper_bound - lower_bound);
+        const random_value: f64 = random.float(f64);
+        const bounded_value = lower_bound + random_value * (upper_bound - lower_bound);
         const clamped_value = math.clamp(bounded_value, -clamped_max_value, clamped_max_value);
         try uncompressed_values.append(allocator, clamped_value);
     }
