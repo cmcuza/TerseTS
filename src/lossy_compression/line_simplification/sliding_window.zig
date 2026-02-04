@@ -165,8 +165,8 @@ pub fn extract(
     indices: *ArrayList(u64),
     coefficients: *ArrayList(f64),
 ) Error!void {
-    // Delegate to CoefficientIndexTuplesWithStartCoefficient extractor.
-    // SlidingWindow uses the same representation as SwingFilter.
+    // Delegate to DoubleCoefficientIndexTriples extractor.
+    // SlidingWindow uses the same representation as SlideFilter.
     try extractors.extractDoubleCoefficientIndexTriples(
         allocator,
         compressed_values,
@@ -186,8 +186,8 @@ pub fn rebuild(
     coefficients: []const f64,
     compressed_values: *ArrayList(u8),
 ) Error!void {
-    // Delegate to CoefficientIndexTuplesWithStartCoefficient extractor.
-    // SlidingWindow uses the same representation as SwingFilter.
+    // Delegate to DoubleCoefficientIndexTriples extractor.
+    // SlidingWindow uses the same representation as SlideFilter.
     try rebuilders.rebuildDoubleCoefficientIndexTriples(
         allocator,
         indices,

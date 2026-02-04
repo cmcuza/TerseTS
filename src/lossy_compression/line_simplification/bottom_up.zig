@@ -253,9 +253,9 @@ pub fn extract(
     indices: *ArrayList(u64),
     coefficients: *ArrayList(f64),
 ) Error!void {
-    // Delegate to CoefficientIndexTuplesWithStartCoefficient extractor.
-    // BottomUp uses the same representation as SwingFilter.
-    try extractors.extractCoefficientIndexTuplesWithStartCoefficient(
+    // Delegate to DoubleCoefficientIndexTriples extractor.
+    // BottomUp uses the same representation as SlideFilter.
+    try extractors.extractDoubleCoefficientIndexTriples(
         allocator,
         compressed_values,
         indices,
@@ -274,9 +274,9 @@ pub fn rebuild(
     coefficients: []const f64,
     compressed_values: *ArrayList(u8),
 ) Error!void {
-    // Delegate to CoefficientIndexTuplesWithStartCoefficient extractor.
-    // BottomUp uses the same representation as SwingFilter.
-    try rebuilders.rebuildCoefficientIndexTuplesWithStartCoefficient(
+    // Delegate to DoubleCoefficientIndexTriples extractor.
+    // BottomUp uses the same representation as SlideFilter.
+    try rebuilders.rebuildDoubleCoefficientIndexTriples(
         allocator,
         indices,
         coefficients,
