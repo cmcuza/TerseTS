@@ -17,7 +17,7 @@
 module TerseTS
 
 """
- Mirror TerseTS Method Enum.
+Mirror TerseTS Method Enum.
 """
 @enum Method::UInt8 begin
     PoorMansCompressionMidrange = 0
@@ -61,7 +61,7 @@ Locate the TerseTS library for this system.
 function findlibrary()::String
     repository_root = joinpath(@__DIR__, "..", "..")
 
-    if Sys.iswindows()
+    library_path = if Sys.iswindows()
         # Zig uses zig-out/bin for dynamic linked libraries on Windows.
         joinpath(repository_root, "zig-out", "bin", "tersets.dll")
     elseif Sys.isapple()
@@ -69,9 +69,16 @@ function findlibrary()::String
     elseif Sys.isunix()
         joinpath(repository_root, "zig-out", "lib", "libtersets.so")
     else
-        error("Only FreeBSD, Linux, macOS, and Windows is supported.")
+        error("Only FreeBSD, Linux, macOS, and Windows are supported.")
     end
+
+    normpath(library_path)
 end
+
+"""
+Location of the TerseTS library for this system.
+"""
+const library = findlibrary()
 
 """
 Compress an `AbstractVector` of `Float64` values with a TerseTS compression `method` according to `configuration`.
@@ -85,7 +92,7 @@ function compress(
         UncompressedValues(pointer(uncompressed_values), length(uncompressed_values))
     compressed_values_struct_ref = Ref{CompressedValues}(CompressedValues(C_NULL, 0))
 
-    tersets_error = @ccall findlibrary().compress(
+    tersets_error = @ccall library.compress(
         uncompressed_values_struct::UncompressedValues,
         compressed_values_struct_ref::Ref{CompressedValues},
         method::UInt8,
@@ -105,7 +112,7 @@ function compress(
     )
     compressed_values = copy(compressed_values_view)
 
-    @ccall findlibrary().freeCompressedValues(
+    @ccall library.freeCompressedValues(
         compressed_values_struct_ref::Ref{CompressedValues},
     )::Cvoid
 
@@ -120,7 +127,7 @@ function decompress(compressed_values::AbstractVector{UInt8})::AbstractVector{Fl
         CompressedValues(pointer(compressed_values), length(compressed_values))
     uncompressed_values_struct_ref = Ref{UncompressedValues}(UncompressedValues(C_NULL, 0))
 
-    tersets_error = @ccall findlibrary().decompress(
+    tersets_error = @ccall library.decompress(
         compressed_values_struct::CompressedValues,
         uncompressed_values_struct_ref::Ref{UncompressedValues},
     )::Cint
@@ -138,7 +145,7 @@ function decompress(compressed_values::AbstractVector{UInt8})::AbstractVector{Fl
     )
     uncompressed_values = copy(uncompressed_values_view)
 
-    @ccall findlibrary().freeUncompressedValues(
+    @ccall library.freeUncompressedValues(
         uncompressed_values_struct_ref::Ref{UncompressedValues},
     )::Cvoid
 

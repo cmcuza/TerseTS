@@ -57,7 +57,7 @@ jobs:
       run: python3 -m unittest --verbose
       working-directory: bindings/python
 
-    - name: Set up Julia
+    - name: Set Up Julia
       uses: julia-actions/setup-julia@v1
       with:
         version: "1"

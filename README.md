@@ -56,7 +56,7 @@ TerseTS provides `src/tersets.zig` as the single access point and two main funct
       - `compressed_values: []const u8`: The compressed data to decompress.
    - **Returns:** The function returns an `Error!ArrayList(f64)` which includes a dynamically allocated `decompressed_values` (of type `ArrayList(f64)`) or a `TerseTS.Error` in case of failure. 
 
-Compression methods are listed in the `Method` enum in the file `src/tesets.zig`. Below is a usage example demonstrating how to use the TerseTS Zig API for compressing and decompressing time series data.
+Compression methods are listed in the `Method` enum in the file `src/tersets.zig`. Below is a usage example demonstrating how to use the TerseTS Zig API for compressing and decompressing time series data.
 
 ```zig
 const std = @import("std");
@@ -71,7 +71,7 @@ pub fn main() void {
    // Configuration for compression.
    // The supported compression methods are specified in tersets.zig.
    const method = tersets.Method.SwingFilter;
-   // The supported configuration are specified in configuration.zig.
+   // The supported configurations are specified in configuration.zig.
    const configuration = "{ \"abs_error_bound\": 0.1 }";
 
    // Compress the data.
@@ -96,7 +96,7 @@ pub fn main() void {
 <details>
 <summary><strong>C Usage Example</strong></summary>
 
-TerseTS provides `./bindings/c/tersets.h` as API for C which should be included in the source code, i.e., `#include "tersets.h"`. The TerseTS library must also be [linked](#linking) to the project. The two main functions `compress()` and `decompress()` are exposed as follow: 
+TerseTS provides `bindings/c/tersets.h` as API for C which should be included in the source code, i.e., `#include "tersets.h"`. The TerseTS library must also be [linked](#linking) to the project. The two main functions `compress()` and `decompress()` are exposed as follows:
 
 - **`int32_t compress(struct UncompressedValues uncompressed_values, struct CompressedValues *compressed_values, uint8_t method, const char *configuration)`:**
    - **Parameters:**
@@ -128,7 +128,7 @@ int main(void) {
     // Configuration for compression.
     // The supported compression methods are specified in tersets.zig and tersets.h.
     enum Method method = SwingFilter;
-    // The supported configuration are specified in configuration.zig.
+    // The supported configurations are specified in configuration.zig.
     const char *configuration = "{\"abs_error_bound\": 0.01}";
 
     // Arrays to write compressed/decompressed data to.
@@ -146,7 +146,7 @@ int main(void) {
            compressed_values.len);
 
     // Decompress the data.
-    result = decompress(compressed_values, &decompressed_values, configuration);
+    result = decompress(compressed_values, &decompressed_values);
     if (result != 0) {
         printf("Decompression failed with error code %d\n", result);
         freeCompressedValues(&compressed_values);
@@ -169,7 +169,7 @@ int main(void) {
 <details>
 <summary><strong>Python Usage Example</strong></summary>
 
-TerseTS provides Python bindings located in `bindings/python/tersets/__init__.py`, which can be directly imported into a Python program using `import tersets`. To install the bindings, navigate to the Python binding root directory and run `pip install .` as described in the [Python bindings README](bindings/python/README.md). The bindings automatically load the native library, and all dynamically allocated memory is deallocated internally in a safe way. The two main functions `compress()` and `decompress()` are exposed as follow:
+TerseTS provides Python bindings located in `bindings/python/tersets/__init__.py`, which can be directly imported into a Python program using `import tersets`. To install the bindings, navigate to the Python binding root directory and run `pip install .` as described in the [Python bindings README](bindings/python/README.md). The bindings automatically load the native library, and all dynamically allocated memory is deallocated internally in a safe way. The two main functions `compress()` and `decompress()` are exposed as follows:
 
 - **`compress(values, method, configuration)`:**
    - **Parameters:**
@@ -194,7 +194,7 @@ uncompressed_values = [1.0, 2.0, 3.0, 4.0, 5.0]
 # Configuration for compression.
 # The supported compression methods are specified in tersets.zig and tersets/__init__.py.
 method = Method.SwingFilter
-# The supported configuration are specified in configuration.zig.
+# The supported configurations are specified in configuration.zig.
 configuration = {"abs_error_bound": 0.1}
 
 print("Uncompressed data length: ", len(uncompressed_values))
@@ -217,7 +217,7 @@ print("Decompression successful. Decompressed data length: ", len(decompressed_v
 <details>
 <summary><strong>Julia Usage Example</strong></summary>
 
-TerseTS provides Julia bindings located in `./bindings/julia/TerseTS.jl`, which can be directly imported into a Julia program using `include("TerseTS.jl")`. The bindings automatically load the native library, and all dynamically allocated memory is deallocated internally in a safe way. The two main functions `compress()` and `decompress()` are exposed as follow:
+TerseTS provides Julia bindings located in `bindings/julia/TerseTS.jl`, which can be directly imported into a Julia program using `include("TerseTS.jl")`. The bindings automatically load the native library, and all dynamically allocated memory is deallocated internally in a safe way. The two main functions `compress()` and `decompress()` are exposed as follows:
 
 - **`compress(values, method, configuration)`:**
    - **Parameters:**
@@ -243,7 +243,7 @@ uncompressed_values = [1.0, 2.0, 3.0, 4.0, 5.0]
 # The supported compression methods are specified in tersets.zig and TerseTS.jl.
 # The Julia-API provides a `Method` enum to access the available methods.
 method = TerseTS.SwingFilter
-# The supported configuration are specified in configuration.zig.
+# The supported configurations are specified in configuration.zig.
 configuration = "{\"abs_error_bound\": 0.1}"
 
 print("Uncompressed data length: ", length(uncompressed_values))
