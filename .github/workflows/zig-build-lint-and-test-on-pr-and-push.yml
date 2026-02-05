@@ -60,7 +60,7 @@ jobs:
     - name: Set up Julia
       uses: julia-actions/setup-julia@v1
       with:
-        version: "lts"
+        version: "1"
 
     - name: Julia Run Unittest
       run: julia Tests.jl
