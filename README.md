@@ -34,7 +34,7 @@ TerseTS is implemented in Zig and the native library provides a Zig-API and a C-
    * `data`: Pointer to an array of compressed bytes (`uint8_t *`).
    * `len`: Number of bytes in the buffer (`size_t`).
 
-	These structures are used as arguments to the compression and decompression functions, allowing efficient transfer of data between Zig and multiple language bindings. TerseTS provides an API in the following languages:
+These structures are used as arguments to the compression and decompression functions, allowing efficient transfer of data between Zig and multiple language bindings. TerseTS provides an API in the following languages:
 
 <a id="zig-usage-example"></a>
 <details>
@@ -58,7 +58,7 @@ TerseTS provides `src/tersets.zig` as the single access point and two main funct
 
 Compression methods are listed in the `Method` enum in the file `src/tesets.zig`. Below is a usage example demonstrating how to use the TerseTS Zig API for compressing and decompressing time series data.
 
-```c
+```zig
 const std = @import("std");
 const tersets = @import("path/to/tersets.zig");
 const gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -127,15 +127,15 @@ int main(void) {
 
     // Configuration for compression.
     // The supported compression methods are specified in tersets.zig and tersets.h.
-	enum Method method = SwingFilter;
-	// The supported configuration are specified in configuration.zig.
-	const char *configuration = "{\"abs_error_bound\": 0.01}";
+    enum Method method = SwingFilter;
+    // The supported configuration are specified in configuration.zig.
+    const char *configuration = "{\"abs_error_bound\": 0.01}";
 
     // Arrays to write compressed/decompressed data to.
     struct CompressedValues   compressed_values = {0};
     struct UncompressedValues decompressed_values = {0};
 
-	// Compress the data.
+    // Compress the data.
     int32_t result = compress(uncompressed_values, &compressed_values, method, configuration);
     if (result != 0) {
         printf("Compression failed with error code %d\n", result);
@@ -145,7 +145,7 @@ int main(void) {
     printf("Compression successful. Compressed length: %zu bytes\n",
            compressed_values.len);
 
-	// Decompress the data.
+    // Decompress the data.
     result = decompress(compressed_values, &decompressed_values, configuration);
     if (result != 0) {
         printf("Decompression failed with error code %d\n", result);
@@ -181,7 +181,7 @@ TerseTS provides Python bindings located in `bindings/python/tersets/__init__.py
 - **`decompress(values)`:**
    - **Parameters:**
       - `values`: The compressed data as `bytes`, `bytearray`, or `memoryview` to decompress.
-   - **Returns:** Decompressed values as a Python list of floats or an error is raised as a Python exception.. 
+   - **Returns:** Decompressed values as a Python list of floats or an error is raised as a Python exception.
 
 Compression methods are listed in the `Method` enum in the file `tersets/__init__.py`. Below is a usage example demonstrating how to use the TerseTS Python API for compressing and decompressing time series data.
 
@@ -224,16 +224,16 @@ TerseTS provides Julia bindings located in `./bindings/julia/TerseTS.jl`, which 
       - `values`: An `AbstractVector{Float64}` representing the data to compress. 
       - `method`: An enum value from `TerseTS.Method` specifying the compression method.
       - `configuration`: A JSON string specifying compression parameters (e.g., `{"abs_error_bound": 0.1}`).
-   - **Returns:** Compressed data as `Vector{UInt8}` or an error raised as a Julia exception.
+   - **Returns:** Compressed data as `AbstractVector{UInt8}` or an error raised as a Julia exception.
 
 - **`decompress(values)`:**
    - **Parameters:**
       - `values`: The compressed data as an `AbstractVector{UInt8}` to decompress.
-   - **Returns:** Decompressed values as an `Vector{Float64}` or an error are raised as a Julia exception.
+   - **Returns:** Decompressed values as an `AbstractVector{Float64}` or an error is raised as a Julia exception.
 
-Compression methods are listed in the `Method` enum in the file `src/tersets.zig`. Below is a usage example demonstrating how to use the TerseTS Zig API for compressing and decompressing time series data. 
+Compression methods are listed in the `Method` enum in the file `src/tersets.zig`. Below is a usage example demonstrating how to use the TerseTS Julia API for compressing and decompressing time series data. 
 
-```Julia
+```julia
 include("TerseTS.jl")
 
 # Input data.
@@ -263,7 +263,7 @@ print("Decompression successful. Decompressed data length: ", length(decompresse
 
 
 # Linking:
-- **Microsoft Windows**: Link the `tersets.dll` to the project. It can be found in the output folder after compiling TerseTS, by default: `zig-out/lib/tersets.dll`.
+- **Microsoft Windows**: Link the `tersets.dll` to the project. It can be found in the output folder after compiling TerseTS, by default: `zig-out/bin/tersets.dll`.
 - **Linux**: Link the `libtersets.so` to the project. It can be found in the output folder after compiling TerseTS, by default: `zig-out/lib/libtersets.so`.
 - **macOS**: Link the `libtersets.dylib` to the project. It can be found in the output folder after compiling TerseTS, by default: `zig-out/lib/libtersets.dylib`.
 
