@@ -50,7 +50,10 @@ const serqt = @import(
 const vw = @import("lossy_compression/line_simplification/visvalingam_whyatt.zig");
 const sliding_window = @import("lossy_compression/line_simplification/sliding_window.zig");
 const bottom_up = @import("lossy_compression/line_simplification/bottom_up.zig");
+
+// Import lossless compression methods.
 const rle_enconding = @import("lossless_compression/run_length_encoding.zig");
+const delta_encoding = @import("lossless_compression/bitpacked_delta_encoding.zig");
 
 const extractors = @import("utilities/extractors.zig");
 const tester = @import("tester.zig");
@@ -89,6 +92,7 @@ pub const Method = enum {
     RunLengthEncoding,
     NonLinearApproximation,
     SerfQT,
+    BitPackedDeltaEncoding,
 };
 
 /// Compress `uncompressed_values` using `method` and its `configuration` and returns the results
@@ -252,6 +256,14 @@ pub fn compress(
                 configuration,
             );
         },
+        .BitPackedDeltaEncoding => {
+            try delta_encoding.compress(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                configuration,
+            );
+        },
     }
     try compressed_values.append(allocator, @intFromEnum(method));
     return compressed_values;
@@ -327,6 +339,9 @@ pub fn decompress(
         },
         .SerfQT => {
             try serqt.decompress(allocator, compressed_values_slice, &decompressed_values);
+        },
+        .BitPackedDeltaEncoding => {
+            try delta_encoding.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
     }
 
