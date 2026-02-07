@@ -15,6 +15,9 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
+    // Paths to external libraries.
+    const pocketfft_path = b.path("lib/pocketfft");
+    const pocketfft_c_path = b.path("lib/pocketfft/pocketfft.c");
 
     // Create root module.
     const root_module = b.createModule(.{
@@ -30,6 +33,10 @@ pub fn build(b: *std.Build) void {
         .linkage = .dynamic,
         .version = .{ .major = 0, .minor = 0, .patch = 1 },
     });
+
+    library.addIncludePath(pocketfft_path);
+    library.addCSourceFile(.{ .file = pocketfft_c_path, .flags = &.{"-std=c99"} });
+    library.linkLibC();
 
     b.installArtifact(library);
 
