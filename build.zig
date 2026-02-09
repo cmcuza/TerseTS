@@ -39,6 +39,8 @@ pub fn build(b: *std.Build) void {
         .version = .{ .major = 0, .minor = 0, .patch = 1 },
     });
 
+    library.bundle_compiler_rt = true;
+
     b.installArtifact(library);
 
     // Task for running tests.
