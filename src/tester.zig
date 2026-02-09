@@ -74,10 +74,14 @@ const Method = tersets.Method;
 
 const shared = @import("utilities/shared_structs.zig");
 
-/// `global_at_least` and `global_at_most` define the default minimum and maximum bounds for
-/// generating random integer values in tests. These values are chosen to provide a reasonable
-/// range for most scenarios, balancing test coverage and performance.
+/// Defines the default minimum number for generating random integer values in tests.
+/// These values are chosen to provide a reasonable range for most scenarios, balancing test
+/// coverage and performance.
 pub const global_at_least: usize = 10;
+
+/// Defines the default maximum number for generating random integer values in tests.
+/// These values are chosen to provide a reasonable range for most scenarios, balancing test
+/// coverage and performance.
 pub const global_at_most: usize = 50;
 
 /// Probability used when replacing a value with a special float (NaN, +inf, -inf) in test generators.

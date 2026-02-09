@@ -31,6 +31,8 @@ const tester = @import("../../tester.zig");
 
 const shared_functions = @import("../../utilities/shared_functions.zig");
 const configuration = @import("../../configuration.zig");
+const extractors = @import("../../utilities/extractors.zig");
+const rebuilders = @import("../../utilities/rebuilders.zig");
 
 /// Compress `uncompressed_values` within `error_bound` using "Poor Man’s Compression - Midrange".
 /// The function writes the result to `compressed_values`. The `allocator` is used to allocate
@@ -111,9 +113,6 @@ pub fn compressMean(
 
     const error_bound: f32 = parsed_configuration.abs_error_bound;
 
-    if (error_bound < 0)
-        return Error.UnsupportedErrorBound;
-
     for (uncompressed_values) |value| {
         const nextMinimum = @min(value, minimum);
         const nextMaximum = @max(value, maximum);
@@ -171,6 +170,49 @@ pub fn decompress(
         }
         uncompressed_index = index;
     }
+}
+
+/// Extracts `indicess` and `coefficients` from Poor Man's Compression (PMC)'s
+/// `compressed_values`. The function works for both PMCMidrange and PMCMean.
+/// A `indicess` ArrayList is used to store the extracted end indices, and a
+/// `coefficients` ArrayList is used to store the extracted coefficient values.
+/// If validation of the `compressed_values` fails, `Error.CorruptedCompressedData` is
+/// returned. The `allocator` handles the memory allocations of the output arrays.
+/// Any memory allocation error is propagated to the caller.
+pub fn extract(
+    allocator: Allocator,
+    compressed_values: []const u8,
+    indicess: *ArrayList(u64),
+    coefficients: *ArrayList(f64),
+) Error!void {
+    try extractors.extractCoefficientIndexPairs(
+        allocator,
+        compressed_values,
+        indicess,
+        coefficients,
+    );
+}
+
+/// Rebuilds Poor Man's Compression (PMC) `compressed_values` from the provided
+/// `indicess` and `coefficients`. The function works for both PMCMidrange and PMCMean.
+/// The function expects both arrays to have equal length. Each pair is encoded as an f64
+/// coefficient and a u64 end_index taken from the `coefficients` and `indicess` arrays,
+/// respectively. Any mismatch or loss of information in the indicess can lead to failures
+/// when decompressing the rebuilt representation. The `allocator` handles the memory
+/// allocations of the output arrays. Returns `Error.CorruptedCompressedData`
+/// if the array lengths differ, and propagates allocation errors otherwise.
+pub fn rebuild(
+    allocator: Allocator,
+    indicess: []const u64,
+    coefficients: []const f64,
+    compressed_values: *ArrayList(u8),
+) Error!void {
+    try rebuilders.rebuildCoefficientIndexPairs(
+        allocator,
+        indicess,
+        coefficients,
+        compressed_values,
+    );
 }
 
 test "midrange can always compress and decompress with zero error bound" {
@@ -287,4 +329,20 @@ test "check pmc-midrange configuration parsing" {
         &compressed_values,
         method_configuration,
     );
+}
+
+test "rebuildPMC rejects mismatched input lengths" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).empty;
+    defer compressed.deinit(allocator);
+
+    const indices = [_]u64{1};
+    const coefficients = [_]f64{ 1.0, 2.0 };
+
+    try testing.expectError(Error.CorruptedCompressedData, rebuild(
+        allocator,
+        indices[0..],
+        coefficients[0..],
+        &compressed,
+    ));
 }

@@ -69,7 +69,7 @@ pub fn compress(
     // If the error_bound is zero, we compute the difference between the
     // value and the minimum value, ensuring all resulting integers are >= 0.
     // For non-zero error_bound, we apply fixed-width bucket quantization
-    // using the defined bucket size (1.99 × error_bound).
+    // using the defined bucket size (1.998 × error_bound).
     var encoded_value: u64 = 0;
     for (uncompressed_values) |value| {
         if (!math.isFinite(value) or @abs(value) > tester.max_test_value) return Error.UnsupportedInput;
