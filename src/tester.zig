@@ -648,10 +648,10 @@ pub fn replaceNormalValues(
     }
 }
 
-/// Generate a random `f64` value using `random_opt`. If `random_opt` is not passed, a random number
+/// Generate a random `f64` value using `random_optional`. If `random_optional` is not passed, a random number
 /// generator is created.
-pub fn generateRandomValue(random_opt: ?Random) f64 {
-    var random = resolveRandom(random_opt);
+pub fn generateRandomValue(random_optional: ?Random) f64 {
+    var random = resolveRandom(random_optional);
 
     // rand can only generate f64 values in the range [0, 1).
     const random_value = @as(f64, @bitCast(random.int(u64)));
@@ -847,13 +847,13 @@ pub fn generateBoundedRandomValues(
     uncompressed_values: *ArrayList(f64),
     lower_bound: f64,
     upper_bound: f64,
-    random_opt: ?Random,
+    random_optional: ?Random,
 ) !void {
-    const random = resolveRandom(random_opt);
+    const random = resolveRandom(random_optional);
 
     for (0..generateNumberOfValues(random)) |_| {
         // generate f64 values in the range [0, 1).
-        const bounded_value = generateBoundedRandomValue(f64, lower_bound, upper_bound, random_opt);
+        const bounded_value = generateBoundedRandomValue(f64, lower_bound, upper_bound, random_optional);
         try uncompressed_values.append(allocator, bounded_value);
     }
 }
@@ -886,7 +886,7 @@ pub fn generateRandomLinearFunction(allocator: Allocator, uncompressed_values: *
 
 /// Generate a random number of `f64` values following a power function with random coefficients
 /// theta_1 * x ^ theta_2, and add them to `uncompressed_values`. Small random noise is added to
-/// each value. The generated values are bounded within [-1e15, 1e15]. If `random_opt` is
+/// each value. The generated values are bounded within [-1e15, 1e15]. If `random_optional` is
 /// not passed, a random number generator is created.
 pub fn generateRandomPowerFunction(allocator: Allocator, uncompressed_values: *ArrayList(f64), random: Random) !void {
 
@@ -907,7 +907,7 @@ pub fn generateRandomPowerFunction(allocator: Allocator, uncompressed_values: *A
 
 /// Generate a random number of `f64` values following a sinusoidal function with random amplitude,
 /// frequency, and additive noise. The output values are guaranteed to be finite and lie within the
-/// range [-1e15, 1e15]. The values are generated using `random_opt` and returned in
+/// range [-1e15, 1e15]. The values are generated using `random_optional` and returned in
 /// `uncompressed_values`. If an error occurs, it is returned.
 pub fn generateRandomSinusoidalFunction(
     allocator: Allocator,
@@ -936,7 +936,7 @@ pub fn generateRandomSinusoidalFunction(
 
 /// Generate a random number of `f64` values following a quadratic function with random coefficients
 /// theta_1 * x ^ 2 + theta_2, and add them to `uncompressed_values`. Small random noise is added to
-/// each value. The generated values are bounded within [-1e15, 1e15]. If `random_opt` is
+/// each value. The generated values are bounded within [-1e15, 1e15]. If `random_optional` is
 /// not passed, a random number generator is created.
 pub fn generateRandomQuadraticFunction(allocator: Allocator, uncompressed_values: *ArrayList(f64), random: Random) !void {
     // theta_1 in [-1e6, 1e6] (log-uniform).
@@ -960,7 +960,7 @@ pub fn generateRandomQuadraticFunction(allocator: Allocator, uncompressed_values
 
 /// Generate a random number of `f64` values following a square root function with random coefficients
 /// theta_1 * sqrt(x) + theta_2, and add them to `uncompressed_values`. Small random noise is added to
-/// each value. The generated values are bounded within [-1e15, 1e15]. If `random_opt` is
+/// each value. The generated values are bounded within [-1e15, 1e15]. If `random_optional` is
 /// not passed, a random number generator is created.
 pub fn generateRandomSqrtFunction(allocator: Allocator, uncompressed_values: *ArrayList(f64), random: Random) !void {
     // theta_1 in [-1e10, 1e10] (log-uniform).
@@ -984,7 +984,7 @@ pub fn generateRandomSqrtFunction(allocator: Allocator, uncompressed_values: *Ar
 
 /// Generate a random number of `f64` values following a exponential function with random coefficients
 /// theta_1 * e ^ (x * theta_2), and add them to `uncompressed_values`. Small random noise is added to
-/// each value. The generated values are bounded within [-1e15, 1e15]. If `random_opt` is
+/// each value. The generated values are bounded within [-1e15, 1e15]. If `random_optional` is
 /// not passed, a random number generator is created.
 pub fn generateRandomExponentialFunction(allocator: Allocator, uncompressed_values: *ArrayList(f64), random: Random) !void {
 
@@ -1055,11 +1055,11 @@ pub fn generateMixedBoundedValuesFunctions(
 }
 
 /// Generate a random value of type `T` between `at_least` and `at_most` for use in testing using
-/// `random_opt`. `T` must be a floating-point type (e.g., `f32`, `f64`). The value is sampled
-/// logarithmically to ensure uniform coverage across orders of magnitude. If `random_opt` is not
+/// `random_optional`. `T` must be a floating-point type (e.g., `f32`, `f64`). The value is sampled
+/// logarithmically to ensure uniform coverage across orders of magnitude. If `random_optional` is not
 /// passed, a random number generator is created using the current time as seed.
-pub fn generateBoundedRandomValue(comptime T: type, at_least: T, at_most: T, random_opt: ?Random) T {
-    var random = resolveRandom(random_opt);
+pub fn generateBoundedRandomValue(comptime T: type, at_least: T, at_most: T, random_optional: ?Random) T {
+    var random = resolveRandom(random_optional);
 
     const at_least_log = toLog(T, at_least);
     const at_most_log = toLog(T, at_most);
@@ -1075,10 +1075,10 @@ pub fn generateBoundedRandomValue(comptime T: type, at_least: T, at_most: T, ran
 }
 
 /// Generate a random value of type `T` between `at_least` and `at_most` for use in testing using
-/// `random_opt`. `T` must be an integer-point type (e.g., `i32`, `usize`). If random_opt is not
+/// `random_optional`. `T` must be an integer-point type (e.g., `i32`, `usize`). If random_optional is not
 /// passed, a random number generator is created using the current time as seed.
-pub fn generateBoundRandomInteger(comptime T: type, at_least: T, at_most: T, random_opt: ?Random) T {
-    var random = resolveRandom(random_opt);
+pub fn generateBoundRandomInteger(comptime T: type, at_least: T, at_most: T, random_optional: ?Random) T {
+    var random = resolveRandom(random_optional);
 
     const rand_value: T = random.intRangeAtMost(T, at_least, at_most);
     return rand_value;
@@ -1103,10 +1103,10 @@ pub fn getDefaultRandomGenerator() Random {
     return default_prng.random();
 }
 
-/// Returns a `Random` object. If `random_opt` is provided, it is returned directly. Otherwise,
+/// Returns a `Random` object. If `random_optional` is provided, it is returned directly. Otherwise,
 /// this function returns the default `Random` instance.
-pub fn resolveRandom(random_opt: ?Random) Random {
-    return random_opt orelse getDefaultRandomGenerator();
+pub fn resolveRandom(random_optional: ?Random) Random {
+    return random_optional orelse getDefaultRandomGenerator();
 }
 
 /// Adds noise to a given value based on `noise_scale`. This ensures that the noise is proportional
