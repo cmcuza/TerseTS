@@ -1103,6 +1103,8 @@ pub fn getDefaultRandomGenerator() Random {
     if (default_seed == 0) {
         default_seed = @bitCast(time.milliTimestamp());
         default_prng = std.Random.DefaultPrng.init(default_seed);
+    } else {
+        default_prng = std.Random.DefaultPrng.init(default_seed);
     }
     return default_prng.random();
 }
