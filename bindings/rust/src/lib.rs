@@ -12,15 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Python bindings for the TerseTS library.
+//! Rust bindings for the TerseTS library.
 
 mod capi;
 
-use std::ffi::CString;
-use std::ptr;
-
 use capi::{CompressedValues, UncompressedValues};
 
+#[repr(u8)]
+#[derive(Clone, Copy, Debug)]
 pub enum Method {
     PoorMansCompressionMidrange,
     PoorMansCompressionMean,
@@ -41,55 +40,68 @@ pub enum Method {
     SerfQT,
 }
 
-impl From<Method> for u8 {
-    fn from(method: Method) -> Self {
-        match method {
-            Method::PoorMansCompressionMidrange => 0,
-            Method::PoorMansCompressionMean => 1,
-            Method::SwingFilter => 2,
-            Method::SwingFilterDisconnected => 3,
-            Method::SlideFilter => 4,
-            Method::SimPiece => 5,
-            Method::PiecewiseConstantHistogram => 6,
-            Method::PiecewiseLinearHistogram => 7,
-            Method::ABCLinearApproximation => 8,
-            Method::VisvalingamWhyatt => 9,
-            Method::SlidingWindow => 10,
-            Method::BottomUp => 11,
-            Method::MixPiece => 12,
-            Method::BitPackedQuantization => 13,
-            Method::RunLengthEncoding => 14,
-            Method::NonLinearApproximation => 15,
-            Method::SerfQT => 16,
-        }
-    }
+#[derive(Debug)]
+pub struct TerseError {
+    pub code: i32,
 }
 
-pub fn compress(uncompressed_values: &[f64], method: Method, configuration: &str) -> Vec<u8> {
-    let uncompressed_values = UncompressedValues {
-        data: uncompressed_values.as_ptr(),
-        len: uncompressed_values.len(),
+type Result<T> = std::result::Result<T, TerseError>;
+
+
+pub fn compress(uncompressed: &[f64], method: Method, configuration: &str) -> Result<Vec<u8>> {
+    let uncompressed_values = UncompressedValues { data: uncompressed.as_ptr(), len: uncompressed.len() };
+
+    let mut compressed_values = CompressedValues { data: std::ptr::null_mut(), len: 0 };
+
+    let configuration = std::ffi::CString::new(configuration).map_err(|_| TerseError { code: -1001 })?;
+
+    let code = unsafe {
+        capi::compress(uncompressed_values, &mut compressed_values, method as u8, configuration.as_ptr())
     };
 
-    let mut compressed_values = CompressedValues {
-        data: ptr::null_mut(),
+    if code != 0 {
+        unsafe { capi::freeCompressedValues(&mut compressed_values) };
+        return Err(TerseError { code });
+    }
+
+    let out = unsafe {
+        std::slice::from_raw_parts(compressed_values.data as *const u8, compressed_values.len).to_vec()
+    };
+
+    unsafe { capi::freeCompressedValues(&mut compressed_values) };
+
+    Ok(out)
+}
+
+
+pub fn decompress(compressed: &[u8]) -> Result<Vec<f64>> {
+    let compressed_values = CompressedValues {
+        data: compressed.as_ptr() as *mut u8,
+        len: compressed.len(),
+    };
+
+    let mut uncompressed_values = UncompressedValues {
+        data: std::ptr::null(),
         len: 0,
     };
 
-    // TODO: Replace unwrap() with a proper error.
-    let configuration = CString::new(configuration).unwrap();
+    let code = unsafe { capi::decompress(compressed_values, &mut uncompressed_values) };
 
-    let tersets_error = unsafe {
-        capi::compress(
-            uncompressed_values,
-            &mut compressed_values,
-            method.into(),
-            configuration.as_ptr(),
-        )
+    if code != 0 {
+        unsafe { capi::freeUncompressedValues(&mut uncompressed_values) };
+        return Err(TerseError { code });
+    }
+
+    let out = unsafe {
+        let slice = std::slice::from_raw_parts(uncompressed_values.data, uncompressed_values.len);
+        slice.to_vec()
     };
 
-    vec![]
+    unsafe { capi::freeUncompressedValues(&mut uncompressed_values) };
+
+    Ok(out)
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -101,7 +113,10 @@ mod tests {
             &[10.0, 20.0, 30.0, 40.0, 50.0],
             Method::SwingFilter,
             r#"{ "abs_error_bound": 0.0 }"#,
-        );
-        //TODO: Include decompress() and check values are the same.
+        ).unwrap();
+
+        let uncompressed_values = decompress(&compressed_values).unwrap();
+        assert_eq!(uncompressed_values, vec![10.0, 20.0, 30.0, 40.0, 50.0]);
     }
+
 }
