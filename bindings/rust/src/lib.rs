@@ -15,11 +15,17 @@
 //! Rust bindings for the TerseTS library.
 
 mod capi;
+mod error;
+
+use std::ffi::CString;
+use std::ptr;
+use std::slice;
 
 use capi::{CompressedValues, UncompressedValues};
+use error::{Result, TerseTSError};
 
+/// Mirror TerseTS Method Enum.
 #[repr(u8)]
-#[derive(Clone, Copy, Debug)]
 pub enum Method {
     PoorMansCompressionMidrange,
     PoorMansCompressionMean,
@@ -40,83 +46,96 @@ pub enum Method {
     SerfQT,
 }
 
-#[derive(Debug)]
-pub struct TerseError {
-    pub code: i32,
-}
-
-type Result<T> = std::result::Result<T, TerseError>;
-
-
-pub fn compress(uncompressed: &[f64], method: Method, configuration: &str) -> Result<Vec<u8>> {
-    let uncompressed_values = UncompressedValues { data: uncompressed.as_ptr(), len: uncompressed.len() };
-
-    let mut compressed_values = CompressedValues { data: std::ptr::null_mut(), len: 0 };
-
-    let configuration = std::ffi::CString::new(configuration).map_err(|_| TerseError { code: -1001 })?;
-
-    let code = unsafe {
-        capi::compress(uncompressed_values, &mut compressed_values, method as u8, configuration.as_ptr())
+/// Compress a slice of `f64` in `uncompressed_values` to a `Vec` of `u8` with a TerseTS compression
+/// `method` according to `configuration`. If an error occurs it is returned.
+pub fn compress(
+    uncompressed_values: &[f64],
+    method: Method,
+    configuration: &str,
+) -> Result<Vec<u8>> {
+    let uncompressed_values_struct = UncompressedValues {
+        data: uncompressed_values.as_ptr(),
+        len: uncompressed_values.len(),
     };
 
-    if code != 0 {
-        unsafe { capi::freeCompressedValues(&mut compressed_values) };
-        return Err(TerseError { code });
-    }
-
-    let out = unsafe {
-        std::slice::from_raw_parts(compressed_values.data as *const u8, compressed_values.len).to_vec()
-    };
-
-    unsafe { capi::freeCompressedValues(&mut compressed_values) };
-
-    Ok(out)
-}
-
-
-pub fn decompress(compressed: &[u8]) -> Result<Vec<f64>> {
-    let compressed_values = CompressedValues {
-        data: compressed.as_ptr() as *mut u8,
-        len: compressed.len(),
-    };
-
-    let mut uncompressed_values = UncompressedValues {
-        data: std::ptr::null(),
+    let mut compressed_values_struct = CompressedValues {
+        data: ptr::null_mut(),
         len: 0,
     };
 
-    let code = unsafe { capi::decompress(compressed_values, &mut uncompressed_values) };
+    let configuration = CString::new(configuration)?;
 
-    if code != 0 {
-        unsafe { capi::freeUncompressedValues(&mut uncompressed_values) };
-        return Err(TerseError { code });
-    }
-
-    let out = unsafe {
-        let slice = std::slice::from_raw_parts(uncompressed_values.data, uncompressed_values.len);
-        slice.to_vec()
+    let tersets_error = unsafe {
+        capi::compress(
+            uncompressed_values_struct,
+            &mut compressed_values_struct,
+            method as u8,
+            configuration.as_ptr(),
+        )
     };
 
-    unsafe { capi::freeUncompressedValues(&mut uncompressed_values) };
+    if tersets_error != 0 {
+        unsafe { capi::freeCompressedValues(&mut compressed_values_struct) };
+        return Err(TerseTSError::TerseTS(tersets_error));
+    }
 
-    Ok(out)
+    let compressed_values = unsafe {
+        slice::from_raw_parts(
+            compressed_values_struct.data as *const u8,
+            compressed_values_struct.len,
+        )
+        .to_vec()
+    };
+
+    Ok(compressed_values)
 }
 
+/// Decompress a TerseTS-compressed slice of `u8` to a `Vec` of `f64`. If an error occurs it is
+/// returned.
+pub fn decompress(compressed_values: &[u8]) -> Result<Vec<f64>> {
+    let compressed_values_struct = CompressedValues {
+        data: compressed_values.as_ptr() as *mut u8,
+        len: compressed_values.len(),
+    };
+
+    let mut uncompressed_values_struct = UncompressedValues {
+        data: ptr::null(),
+        len: 0,
+    };
+
+    let tersets_error =
+        unsafe { capi::decompress(compressed_values_struct, &mut uncompressed_values_struct) };
+
+    if tersets_error != 0 {
+        unsafe { capi::freeUncompressedValues(&mut uncompressed_values_struct) };
+        return Err(TerseTSError::TerseTS(tersets_error));
+    }
+
+    let uncompressed_values = unsafe {
+        slice::from_raw_parts(
+            uncompressed_values_struct.data,
+            uncompressed_values_struct.len,
+        )
+        .to_vec()
+    };
+
+    Ok(uncompressed_values)
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_compress_decompress_loads_tersets_without_error() {
+    fn test_compress_decompress_loads_tersets_without_error_bound() {
         let compressed_values = compress(
             &[10.0, 20.0, 30.0, 40.0, 50.0],
             Method::SwingFilter,
             r#"{ "abs_error_bound": 0.0 }"#,
-        ).unwrap();
+        )
+        .unwrap();
 
         let uncompressed_values = decompress(&compressed_values).unwrap();
         assert_eq!(uncompressed_values, vec![10.0, 20.0, 30.0, 40.0, 50.0]);
     }
-
 }
