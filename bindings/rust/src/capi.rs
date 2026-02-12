@@ -23,12 +23,6 @@ pub(super) struct UncompressedValues {
     pub(super) len: usize,
 }
 
-impl Drop for UncompressedValues {
-    fn drop(&mut self) {
-        unsafe { freeUncompressedValues(self) };
-    }
-}
-
 /// A pointer to compressed values and the number of bytes.
 #[repr(C)]
 pub(super) struct CompressedValues {
@@ -36,14 +30,8 @@ pub(super) struct CompressedValues {
     pub(super) len: usize,
 }
 
-impl Drop for CompressedValues {
-    fn drop(&mut self) {
-        unsafe { freeCompressedValues(self) };
-    }
-}
-
 unsafe extern "C" {
-    /// Compress an [`UncompressedValues`] into a [`UncompressedValues`] using a TerseTS compression
+    /// Compress an [`UncompressedValues`] into a [`CompressedValues`] using a TerseTS compression
     /// `method` according to `configuration`.
     pub fn compress(
         uncompressed_values: UncompressedValues,

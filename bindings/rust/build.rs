@@ -58,5 +58,5 @@ fn main() {
     library_path.push("lib");
 
     println!("cargo::rustc-link-lib=static=tersets");
-    println!("cargo:rustc-link-search=native={}", library_path.display());
+    println!("cargo::rustc-link-search=native={}", library_path.display());
 }

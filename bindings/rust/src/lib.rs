@@ -87,6 +87,8 @@ pub fn compress(
         .to_vec()
     };
 
+    unsafe { capi::freeCompressedValues(&mut compressed_values_struct) };
+
     Ok(compressed_values)
 }
 
@@ -118,6 +120,8 @@ pub fn decompress(compressed_values: &[u8]) -> Result<Vec<f64>> {
         )
         .to_vec()
     };
+
+    unsafe { capi::freeUncompressedValues(&mut uncompressed_values_struct) };
 
     Ok(uncompressed_values)
 }

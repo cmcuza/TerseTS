@@ -107,5 +107,3 @@ jobs:
           version: 0.15.2
       - name: Zig Fmt Check
         run: zig fmt --check .
-      - name: Print Triple
-        run: rustc --version --verbose
