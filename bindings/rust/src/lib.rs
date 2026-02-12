@@ -22,7 +22,7 @@ use std::ptr;
 use std::slice;
 
 use capi::{CompressedValues, UncompressedValues};
-use error::{Result, TerseTSError};
+pub use error::{Result, TerseTSError};
 
 /// Mirror TerseTS Method Enum.
 #[repr(u8)]

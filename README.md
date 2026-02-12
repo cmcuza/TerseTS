@@ -284,29 +284,37 @@ TerseTS provides Rust bindings as a crate located in `bindings/rust`, which can 
 Compression methods are listed in the `Method` enum in the file `src/lib.rs`. Below is a usage example demonstrating how to use the TerseTS Rust API for compressing and decompressing time series data. 
 
 ```rust
-use tersets::{Method, compress, decompress};
+use tersets::{Method, Result, compress, decompress};
 
-// Input data.
-let uncompressed_values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+fn main() -> Result<()> {
+    // Input data.
+    let uncompressed_values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
 
-// Configuration for compression.
-// The supported compression methods are specified in tersets.zig and lib.rs.
-// The Rust-API provides a `Method` enum to access the available methods.
-let method = Method.SwingFilter;
-// The supported configurations are specified in configuration.zig.
-let configuration = "{\"abs_error_bound\": 0.1}";
+    // Configuration for compression.
+    // The supported compression methods are specified in tersets.zig and lib.rs.
+    // The Rust-API provides a `Method` enum to access the available methods.
+    let method = Method::SwingFilter;
+    // The supported configurations are specified in configuration.zig.
+    let configuration = "{\"abs_error_bound\": 0.1}";
 
-println!("Uncompressed data length: ", uncompressed_values.len());
+    println!("Uncompressed data length: {}", uncompressed_values.len());
 
-// Compress the data.
-let compressed_values = TerseTS.compress(uncompressed_values, method, configuration)
+    // Compress the data.
+    let compressed_values = compress(&uncompressed_values, method, configuration)?;
 
-println!("Compression successful. Compressed data length: ", compressed_values.len())
+    println!(
+        "Compression successful. Compressed data length: {}",
+        compressed_values.len()
+    );
 
-// Decompress the data.
-let decompressed_values = decompress(compressed_values)
+    // Decompress the data.
+    let decompressed_values = decompress(&compressed_values)?;
 
-println!("Decompression successful. Decompressed data length: ", decompressed_values.len())
+    println!(
+        "Decompression successful. Decompressed data length: {}",
+        decompressed_values.len()
+    );
+}
 ```
 
 </details>
