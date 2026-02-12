@@ -16,21 +16,34 @@
 
 use std::os::raw::c_char;
 
-// TODO: implement Drop that calls freeUncompressedValues().
+/// A pointer to uncompressed values and the number of values.
 #[repr(C)]
 pub(super) struct UncompressedValues {
     pub(super) data: *const f64,
     pub(super) len: usize,
 }
 
-// TODO: implement Drop that calls freeCompressedValues().
+impl Drop for UncompressedValues {
+    fn drop(&mut self) {
+        unsafe { freeUncompressedValues(self) };
+    }
+}
+
+/// A pointer to compressed values and the number of bytes.
 #[repr(C)]
 pub(super) struct CompressedValues {
     pub(super) data: *mut u8,
     pub(super) len: usize,
 }
 
+impl Drop for CompressedValues {
+    fn drop(&mut self) {
+        unsafe { freeCompressedValues(self) };
+    }
+}
+
 unsafe extern "C" {
+    /// Compress an `UncompressedValues` with a TerseTS compression `method` according to `configuration`.
     pub fn compress(
         uncompressed_values: UncompressedValues,
         compressed_values: *mut CompressedValues,
@@ -38,12 +51,15 @@ unsafe extern "C" {
         configuration: *const c_char,
     ) -> i32;
 
+    /// Decompress a TerseTS-compressed `CompressedValues` into an `UncompressedValues`.
     pub fn decompress(
         compressed_values: CompressedValues,
         uncompressed_values: *mut UncompressedValues,
     ) -> i32;
 
+    /// Free a `CompressedValues`.
     pub fn freeCompressedValues(compressed_values: *mut CompressedValues);
 
+    /// Free an `UncompressedValues`.
     pub fn freeUncompressedValues(uncompressed_values: *mut UncompressedValues);
 }
