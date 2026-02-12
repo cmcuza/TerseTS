@@ -271,14 +271,14 @@ TerseTS provides Rust bindings as a crate located in `bindings/rust`, which can 
 
 - **`compress(uncompressed_values, method, configuration)`:**
    - **Parameters:**
-      - `uncompressed_values`: An `AbstractVector{Float64}` representing the data to compress. 
-      - `method`: An enum value from `TerseTS.Method` specifying the compression method.
+      - `uncompressed_values`: A slice of `f64` representing the data to compress. 
+      - `method`: An enum value from `Method` specifying the compression method.
       - `configuration`: A JSON string specifying compression parameters (e.g., `{"abs_error_bound": 0.01}`).
    - **Returns:** Compressed data as `Result<Vec<u8>, TerseTSError>`.
 
 - **`decompress(compressed_values)`:**
    - **Parameters:**
-      - `compressed_values`: The compressed data as an `AbstractVector{UInt8}` to decompress.
+      - `compressed_values`: The compressed data as a slice of `u8` to decompress.
    - **Returns:** Decompressed values as an `Result<Vec<f64>, TerseTSError>`.
 
 Compression methods are listed in the `Method` enum in the file `src/lib.rs`. Below is a usage example demonstrating how to use the TerseTS Rust API for compressing and decompressing time series data. 
