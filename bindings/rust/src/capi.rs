@@ -43,7 +43,8 @@ impl Drop for CompressedValues {
 }
 
 unsafe extern "C" {
-    /// Compress an `UncompressedValues` with a TerseTS compression `method` according to `configuration`.
+    /// Compress an [`UncompressedValues`] into a [`UncompressedValues`] using a TerseTS compression
+    /// `method` according to `configuration`.
     pub fn compress(
         uncompressed_values: UncompressedValues,
         compressed_values: *mut CompressedValues,
@@ -51,15 +52,15 @@ unsafe extern "C" {
         configuration: *const c_char,
     ) -> i32;
 
-    /// Decompress a TerseTS-compressed `CompressedValues` into an `UncompressedValues`.
+    /// Decompress a TerseTS-compressed [`CompressedValues`] into an [`UncompressedValues`].
     pub fn decompress(
         compressed_values: CompressedValues,
         uncompressed_values: *mut UncompressedValues,
     ) -> i32;
 
-    /// Free a `CompressedValues`.
+    /// Free a [`CompressedValues`].
     pub fn freeCompressedValues(compressed_values: *mut CompressedValues);
 
-    /// Free an `UncompressedValues`.
+    /// Free an [`UncompressedValues`].
     pub fn freeUncompressedValues(uncompressed_values: *mut UncompressedValues);
 }
