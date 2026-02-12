@@ -83,6 +83,7 @@ jobs:
       working-directory: bindings/rust
     - name: Cargo Clippy
       run: cargo clippy --verbose --all-targets
+      working-directory: bindings/rust
     - name: Cargo Doc
       run: cargo doc --verbose --no-deps
       working-directory: bindings/rust
