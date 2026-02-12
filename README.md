@@ -314,6 +314,8 @@ fn main() -> Result<()> {
         "Decompression successful. Decompressed data length: {}",
         decompressed_values.len()
     );
+	
+    Ok(())
 }
 ```
 
