@@ -80,12 +80,15 @@ jobs:
       run: rustup update
     - name: Cargo Build
       run: cargo build --verbose --all-targets
+      working-directory: bindings/rust
     - name: Cargo Clippy
       run: cargo clippy --verbose --all-targets
     - name: Cargo Doc
       run: cargo doc --verbose --no-deps
+      working-directory: bindings/rust
     - name: Cargo Test
       run: cargo test --verbose --all-targets -- --nocapture
+      working-directory: bindings/rust
 
   zig_lint:
     name: Zig Lint
