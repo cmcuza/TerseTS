@@ -46,8 +46,8 @@ pub enum Method {
     SerfQT,
 }
 
-/// Compress a slice of `f64` in `uncompressed_values` to a `Vec` of `u8` with a TerseTS compression
-/// `method` according to `configuration`. If an error occurs it is returned.
+/// Compress a slice of [`f64`] in `uncompressed_values` to a [`Vec`] of [`u8`] with a TerseTS
+/// compression `method` according to `configuration`. If an error occurs it is returned.
 pub fn compress(
     uncompressed_values: &[f64],
     method: Method,
@@ -90,8 +90,8 @@ pub fn compress(
     Ok(compressed_values)
 }
 
-/// Decompress a TerseTS-compressed slice of `u8` to a `Vec` of `f64`. If an error occurs it is
-/// returned.
+/// Decompress a TerseTS-compressed slice of [`u8`] to a [`Vec`] of [`f64`]. If an error occurs it
+/// is returned.
 pub fn decompress(compressed_values: &[u8]) -> Result<Vec<f64>> {
     let compressed_values_struct = CompressedValues {
         data: compressed_values.as_ptr() as *mut u8,

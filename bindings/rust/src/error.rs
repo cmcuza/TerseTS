@@ -27,7 +27,7 @@ pub type Result<T> = StdResult<T, TerseTSError>;
 pub enum TerseTSError {
     /// Error returned by TerseTS.
     TerseTS(i32),
-    /// Error returned by `CString`.
+    /// Error returned by [`CString`].
     Nul(NulError),
 }
 
