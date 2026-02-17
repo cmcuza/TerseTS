@@ -15,22 +15,28 @@
 use std::env;
 use std::process::{self, Command};
 
+/// Compile TerseTS into a statically linked library and link it. unwrap() is deliberately used, as
+/// recovery is not possible if any of the unwrapped operations fail, so better to fail immediately.
 fn main() {
-    println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=../../build.zig");
-    println!("cargo:rerun-if-changed=../../src");
-    println!("cargo:rerun-if-env-changed=GITHUB_RUN_ID");
-
+    // Compute the repositories root for running zig build and linking.
     let current_directory = env::current_dir().unwrap();
     let repository_root = current_directory.parent().unwrap().parent().unwrap();
 
+    // Make the optimization level of TerseTS and Rust bindings match.
     let build_profile = env::var("PROFILE").unwrap();
     let optimize = match build_profile.as_str() {
         "debug" => "-Doptimize=Debug",
         "release" => "-Doptimize=ReleaseFast",
-        _ => "-Doptimize=Debug",
+        build_profile => {
+            println!(
+                "cargo::error=Profile must be debug (dev) or release, not {}.",
+                build_profile
+            );
+            process::exit(1);
+        }
     };
 
+    // Build the TerseTS library into a statically linked library.
     let output = Command::new("zig")
         .current_dir(repository_root)
         .args(["build", "-Dlinking=static", optimize])
@@ -38,15 +44,19 @@ fn main() {
         .unwrap();
 
     if !output.status.success() {
+        // Output is captured by cargo and used as commands.
         println!(
-            "cargo:warning=zig build failed: {}",
-            String::from_utf8_lossy(&output.stderr)
+            "cargo::error=Failed to build TerseTS as a static library due to {}.",
+            String::from_utf8(output.stderr).unwrap()
         );
         process::exit(1);
     }
 
-    let library_path = repository_root.join("zig-out").join("lib");
-    println!("cargo:rustc-link-search=native={}", library_path.display());
-    println!("cargo:rustc-link-lib=static=tersets");
-}
+    // Specify the name and location of the TerseTS library for the linker.
+    let mut library_path = repository_root.to_path_buf();
+    library_path.push("zig-out");
+    library_path.push("lib");
 
+    println!("cargo::rustc-link-lib=static=tersets");
+    println!("cargo::rustc-link-search=native={}", library_path.display());
+}
