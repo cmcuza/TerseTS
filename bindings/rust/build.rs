@@ -29,7 +29,7 @@ fn main() {
         "release" => "-Doptimize=ReleaseFast",
         build_profile => {
             println!(
-                "cargo::error=Profile must be debug (dev) or release, not {}.",
+                "cargo:error=Profile must be debug (dev) or release, not {}.",
                 build_profile
             );
             process::exit(1);
@@ -46,7 +46,7 @@ fn main() {
     if !output.status.success() {
         // Output is captured by cargo and used as commands.
         println!(
-            "cargo::error=Failed to build TerseTS as a static library due to {}.",
+            "cargo:error=Failed to build TerseTS as a static library due to {}.",
             String::from_utf8(output.stderr).unwrap()
         );
         process::exit(1);
@@ -57,11 +57,6 @@ fn main() {
     library_path.push("zig-out");
     library_path.push("lib");
 
-<<<<<<< HEAD
-    println!("cargo::rustc-link-lib=static={}", "tersets");
+    println!("cargo:rustc-link-lib=static=tersets");
     println!("cargo:rustc-link-search=native={}", library_path.display());
-=======
-    println!("cargo::rustc-link-lib=static=tersets");
-    println!("cargo::rustc-link-search=native={}", library_path.display());
->>>>>>> 28da94637fd9e4e228f1aee98d9135d0aade5031
 }
