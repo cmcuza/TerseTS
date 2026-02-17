@@ -25,7 +25,7 @@ fn main() {
 
     // Compute the repository root (bindings/rust -> bindings -> repo root)
     let current_directory = env::current_dir().unwrap();
-    let repository_root = current_directory.parent().unwrap().parent().unwrap();
+    let repository_root = current_directory.parent().unwrap().parent().unwrap().to_path_buf();
 
     // Match Rust profile to Zig optimize
     let build_profile = env::var("PROFILE").unwrap();
@@ -39,8 +39,9 @@ fn main() {
     };
 
     // Build TerseTS as a static library
+
     let output = Command::new("zig")
-        .current_dir(&repository_root)
+        .current_dir(repository_root.as_path())
         .args(["build", "-Dlinking=static", optimize])
         .output()
         .unwrap();
