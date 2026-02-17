@@ -47,8 +47,7 @@ fn main() {
         .args([
             "build",
             "-Dlinking=static",
-            optimize,
-            &format!("-Dtarget={}", target),
+            optimize
         ])
         .output()
         .unwrap();
