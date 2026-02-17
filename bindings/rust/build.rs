@@ -15,48 +15,62 @@
 use std::env;
 use std::process::{self, Command};
 
-/// Compile TerseTS into a statically linked library and link it. unwrap() is deliberately used, as
-/// recovery is not possible if any of the unwrapped operations fail, so better to fail immediately.
 fn main() {
-    // Compute the repositories root for running zig build and linking.
+    // Always rerun if these change
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=../../build.zig");
+    println!("cargo:rerun-if-changed=../../src");
+    // Force rerun on GitHub Actions so Zig build + link args are re-emitted even with caches
+    println!("cargo:rerun-if-env-changed=GITHUB_RUN_ID");
+
+    // Compute repo root (bindings/rust -> bindings -> repo root)
     let current_directory = env::current_dir().unwrap();
     let repository_root = current_directory.parent().unwrap().parent().unwrap();
 
-    // Make the optimization level of TerseTS and Rust bindings match.
+    // Match optimization level
     let build_profile = env::var("PROFILE").unwrap();
     let optimize = match build_profile.as_str() {
         "debug" => "-Doptimize=Debug",
         "release" => "-Doptimize=ReleaseFast",
-        build_profile => {
-            println!(
-                "cargo:error=Profile must be debug (dev) or release, not {}.",
-                build_profile
-            );
-            process::exit(1);
+        other => {
+            println!("cargo:warning=Unsupported PROFILE={other}, defaulting to Debug");
+            "-Doptimize=Debug"
         }
     };
 
-    // Build the TerseTS library into a statically linked library.
+    // Make Zig target match Cargo target (important for cross/CI)
+    let target = env::var("TARGET").unwrap();
+
+    // Build TerseTS
     let output = Command::new("zig")
         .current_dir(repository_root)
-        .args(["build", "-Dlinking=static", optimize])
+        .args([
+            "build",
+            "-Dlinking=static",
+            optimize,
+            &format!("-Dtarget={}", target),
+        ])
         .output()
         .unwrap();
 
     if !output.status.success() {
-        // Output is captured by cargo and used as commands.
         println!(
-            "cargo:error=Failed to build TerseTS as a static library due to {}.",
-            String::from_utf8(output.stderr).unwrap()
+            "cargo:warning=zig build failed: {}",
+            String::from_utf8_lossy(&output.stderr)
         );
         process::exit(1);
     }
 
-    // Specify the name and location of the TerseTS library for the linker.
-    let mut library_path = repository_root.to_path_buf();
-    library_path.push("zig-out");
-    library_path.push("lib");
+    // Link search path
+    let library_path = repository_root.join("zig-out").join("lib");
 
-    println!("cargo:rustc-link-lib=static=tersets");
     println!("cargo:rustc-link-search=native={}", library_path.display());
+    println!("cargo:rustc-link-lib=static=tersets");
+
+    // If at any point you link dynamically on macOS, this makes dyld find the library.
+    // (Harmless for static-only in many cases, but you can gate it if you prefer.)
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if target_os == "macos" {
+        println!("cargo:rustc-link-arg=-Wl,-rpath,{}", library_path.display());
+    }
 }
