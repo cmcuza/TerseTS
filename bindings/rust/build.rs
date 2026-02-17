@@ -57,6 +57,11 @@ fn main() {
     library_path.push("zig-out");
     library_path.push("lib");
 
+<<<<<<< HEAD
     println!("cargo::rustc-link-lib=static={}", "tersets");
     println!("cargo:rustc-link-search=native={}", library_path.display());
+=======
+    println!("cargo::rustc-link-lib=static=tersets");
+    println!("cargo::rustc-link-search=native={}", library_path.display());
+>>>>>>> 28da94637fd9e4e228f1aee98d9135d0aade5031
 }

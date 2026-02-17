@@ -20,6 +20,11 @@ on:
   push:
     branches: [ "main" ]
 
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+  RUSTDOCFLAGS: -D warnings
+
 jobs:
   zig_build_and_test:
     name: Zig Build and Test
@@ -31,6 +36,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+
+    # Zig
     - uses: mlugg/setup-zig@v2
       with:
         version: 0.15.2
@@ -46,6 +53,7 @@ jobs:
     - name: Zig Build Test ReleaseFast
       run: zig build test -Doptimize=ReleaseFast
 
+    # C
     - name: Clang Compile Header
       run: clang -Weverything tersets.h
       working-directory: bindings/c
@@ -53,18 +61,35 @@ jobs:
       run: gcc -Wall -Wextra tersets.h
       working-directory: bindings/c
 
-    - name: Python Run Unittest
-      run: python3 -m unittest --verbose
-      working-directory: bindings/python
-
+    # Julia
     - name: Set Up Julia
       uses: julia-actions/setup-julia@v1
       with:
         version: "1"
-
     - name: Julia Run Unittest
       run: julia Tests.jl
       working-directory: bindings/julia
+
+    # Python
+    - name: Python Run Unittest
+      run: python3 -m unittest --verbose
+      working-directory: bindings/python
+
+    # Rust
+    - name: Rustup Update
+      run: rustup update
+    - name: Cargo Build
+      run: cargo build --verbose --all-targets
+      working-directory: bindings/rust
+    - name: Cargo Clippy
+      run: cargo clippy --verbose --all-targets
+      working-directory: bindings/rust
+    - name: Cargo Doc
+      run: cargo doc --verbose --no-deps
+      working-directory: bindings/rust
+    - name: Cargo Test
+      run: cargo test --verbose --all-targets -- --nocapture
+      working-directory: bindings/rust
 
   zig_lint:
     name: Zig Lint
