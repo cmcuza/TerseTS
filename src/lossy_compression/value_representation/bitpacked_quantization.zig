@@ -79,7 +79,7 @@ pub fn compress(
         // If `bucket_size` is so small that adding it to `minimum_value` does nothing, then the
         // reconstruction grid collapses at `minimum_value` due to f64 precision.
         if (minimum_value + bucket_size == minimum_value) {
-            if (@abs(maximum_value - minimum_value) > error_bound) return Error.UnsupportedInput;
+            if (@as(f32, @floatCast(@abs(maximum_value - minimum_value))) > error_bound) return Error.UnsupportedInput;
         } else {
             // Check whether maximum_value is representable within the error bound under the
             // same quantize+reconstruct. If not, the method cannot be applied to this input since it
@@ -87,11 +87,11 @@ pub fn compress(
             const maximum_quantized_value: f64 = @round((maximum_value - minimum_value) / bucket_size);
             const reconstructed_maximum_value: f64 = minimum_value + maximum_quantized_value * bucket_size;
 
-            if (@abs(reconstructed_maximum_value - maximum_value) > error_bound) return Error.UnsupportedInput;
+            if (@as(f32, @floatCast(@abs(reconstructed_maximum_value - maximum_value))) > error_bound) return Error.UnsupportedInput;
         }
     }
 
-    // Append the minimum value to the header of the compressed values.
+    // Append the bucket size to the header of the compressed values.
     try shared_functions.appendValue(allocator, f64, bucket_size, compressed_values);
 
     //Intermediate quantized values.
@@ -221,7 +221,7 @@ pub fn decompress(
 
 test "bitpacked quantization can compress and decompress bounded values" {
     const allocator = testing.allocator;
-    // Use only tighted bounded random values for this test.
+    // Use only tightly bounded random values for this test.
     // BitPackedQuantization requires bounded values to operate correctly.
     // Other data distributions may generate unbounded values which are not supported.
     const data_distributions = &[_]tester.DataDistribution{.TightlyBoundedRandomValues};

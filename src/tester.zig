@@ -857,7 +857,7 @@ pub fn generateBoundedRandomValues(
 
     for (0..generateNumberOfValues(random)) |_| {
         // generate f64 values in the range [0, 1).
-        const bounded_value = generateBoundedRandomValue(f64, lower_bound, upper_bound, random_optional);
+        const bounded_value = generateBoundedRandomValue(f64, lower_bound, upper_bound, random);
         try uncompressed_values.append(allocator, bounded_value);
     }
 }
@@ -1060,21 +1060,21 @@ pub fn generateMixedBoundedValuesFunctions(
 
 /// Generate a random value of type `T` between `at_least` and `at_most` for use in testing using
 /// `random_optional`. `T` must be a floating-point type (e.g., `f32`, `f64`). The value is sampled
-/// logarithmically to ensure uniform coverage across orders of magnitude. If `random_optional` is not
-/// passed, a random number generator is created using the current time as seed.
+/// logarithmically to ensure better coverage across orders of magnitude. If `random_optional`
+/// is not passed, a random number generator is created using the current time as seed.
 pub fn generateBoundedRandomValue(comptime T: type, at_least: T, at_most: T, random_optional: ?Random) T {
     var random = resolveRandom(random_optional);
 
     const at_least_log = toLog(T, at_least);
     const at_most_log = toLog(T, at_most);
 
-    // Generate a random value in [0, 1) and scale it to the range [at_least, at_most].
+    // Generate a random value in [0, 1) and scale it within the logarithmic range [at_least_log, at_most_log].
     const rand_value = random.float(T);
     const log_sample = at_least_log + (at_most_log - at_least_log) * rand_value;
     // Transform back to the real number line.
     const value = fromLog(T, log_sample);
 
-    // Ensure the generated value is uniformly distributed across the range by avoiding bias.
+    // Clamp the logarithmically sampled value to [at_least, at_most].
     return math.clamp(value, at_least, at_most);
 }
 
@@ -1102,8 +1102,6 @@ pub fn generateNumberOfValues(random: Random) usize {
 pub fn getDefaultRandomGenerator() Random {
     if (default_seed == 0) {
         default_seed = @bitCast(time.milliTimestamp());
-        default_prng = std.Random.DefaultPrng.init(default_seed);
-    } else {
         default_prng = std.Random.DefaultPrng.init(default_seed);
     }
     return default_prng.random();

@@ -64,7 +64,7 @@ pub fn compressMidrange(
 
         // If the error bound is zero, we only append a new value if the next value is different.
         // Without this check low precision values would pass the error bound check and lose information.
-        // For example is minimum is 34.5e-301 and maximum is 4.5e-301, the error bound check would pass
+        // For example if minimum is 34.5e-301 and maximum is 4.5e-301, the error bound check would pass
         // since 34.5e-301 - 4.5e-301 == 0 due to precision loss.
         if (((error_bound == 0) and (nextMaximum != nextMinimum)) or (nextMaximum - nextMinimum) > 2 * error_bound) {
             const compressed_value: f64 = @floatCast((maximum + minimum) / 2);
@@ -125,7 +125,7 @@ pub fn compressMean(
 
         // If the error bound is zero, we only append a new value if the next value is different.
         // Without this check low precision values would pass the error bound check and lose information.
-        // For example is minimum is 34.5e-301 and maximum is 4.5e-301, the error bound check would pass
+        // For example if minimum is 34.5e-301 and maximum is 4.5e-301, the error bound check would pass
         // since 34.5e-301 - 4.5e-301 == 0 due to precision loss.
         if (error_bound == 0) {
             if (nextMaximum != nextMinimum) {
