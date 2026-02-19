@@ -41,9 +41,6 @@ jobs:
     - uses: mlugg/setup-zig@v2
       with:
         version: 0.15.2
-    - name: Clear Zig Cache
-      run: Remove-Item -Recurse -Force "$env:LOCALAPPDATA\zig" -ErrorAction SilentlyContinue
-      shell: pwsh
     - name: Zig Build Debug
       run: zig build -Doptimize=Debug
     - name: Zig Build ReleaseFast
@@ -74,6 +71,11 @@ jobs:
     - name: Python Run Unittest
       run: python3 -m unittest --verbose
       working-directory: bindings/python
+
+    # The presence of .dylib files breaks static linking on macOS.
+    - name: Clear Zig Cache and Zig Out
+      run: rm -rf .zig-cache zig-out
+      shell: bash
 
     # Rust
     - name: Rustup Update
