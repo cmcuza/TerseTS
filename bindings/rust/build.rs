@@ -39,7 +39,7 @@ fn main() {
     // Build the TerseTS library into a statically linked library.
     let output = Command::new("zig")
         .current_dir(repository_root)
-        .args(["build", "-Dlinking=static", optimize])
+        .args(["build", "-Dlinking=static", "-Dpic=true", optimize])
         .output()
         .unwrap();
 

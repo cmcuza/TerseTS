@@ -24,11 +24,18 @@ pub fn build(b: *std.Build) void {
         "Build a static or dynamic (default) library",
     ) orelse LinkMode.dynamic;
 
+    const pic = b.option(
+        bool,
+        "pic",
+        "Use Position Independent Code (PIC)",
+    ) orelse null;
+
     // Create root module.
     const root_module = b.createModule(.{
         .root_source_file = b.path("src/capi.zig"),
         .target = b.standardTargetOptions(.{}),
         .optimize = b.standardOptimizeOption(.{}),
+        .pic = pic,
     });
 
     // Task for compilation.
