@@ -349,16 +349,16 @@ pub fn rebuild(
     if (indices.len < 1 or coefficients.len < 1)
         return Error.CorruptedCompressedData;
 
-    // coefficients and indices must have same length:
-    //   coefficients = [shift_amount, slope0, intercept0, slope1, intercept1, ...]
-    //   indices   = [number_of_segments, type0, type1, ..., end0, end1, ...]
+    // Coefficients and indices must have same length:
+    // coefficients = [shift_amount, slope0, intercept0, slope1, intercept1, ...]
+    // indices = [number_of_segments, type0, type1, ..., end0, end1, ...]
     if (coefficients.len != indices.len)
         return Error.CorruptedCompressedData;
 
-    // shift_amount.
+    // Append shift_amount.
     try shared_functions.appendValue(allocator, f64, coefficients[0], compressed_values);
 
-    // number_of_segments.
+    // Append number_of_segments.
     const number_of_segments: u64 = indices[0];
     try shared_functions.appendValue(allocator, u64, number_of_segments, compressed_values);
 

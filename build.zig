@@ -29,6 +29,9 @@ pub fn build(b: *std.Build) void {
         "pic",
         "Use Position Independent Code (PIC)",
     ) orelse null;
+    // Paths to external libraries.
+    const pocketfft_path = b.path("lib/pocketfft");
+    const pocketfft_c_path = b.path("lib/pocketfft/pocketfft.c");
 
     // Create root module.
     const root_module = b.createModule(.{
@@ -49,6 +52,10 @@ pub fn build(b: *std.Build) void {
     if (linking == LinkMode.static) {
         library.bundle_compiler_rt = true;
     }
+
+    library.addIncludePath(pocketfft_path);
+    library.addCSourceFile(.{ .file = pocketfft_c_path, .flags = &.{"-std=c99"} });
+    library.linkLibC();
 
     b.installArtifact(library);
 

@@ -58,6 +58,13 @@ pub const AreaUnderCurveError = struct {
     area_under_curve_error: f32,
 };
 
+/// Configuration for domain transformation methods like DFT and DWT.
+/// The number of coefficients refers to the number of coefficients to retain.
+/// Example: { "number_of_coefficients": 10 }
+pub const DomainTransformation = struct {
+    number_of_coefficients: u32,
+};
+
 /// Empty configuration for methods that do not require any parameters.
 pub const EmptyConfiguration = struct {};
 
@@ -101,6 +108,10 @@ pub fn parse(
                 return error.InvalidConfiguration;
         },
         EmptyConfiguration => {},
+        DomainTransformation => {
+            if (parsed_value.number_of_coefficients <= 0)
+                return error.InvalidConfiguration;
+        },
         else => return error.InvalidConfiguration,
     }
     return parsed_value;
@@ -162,6 +173,15 @@ pub fn defaultConfigurationBuilder(
             );
         },
 
+        // Methods using domain transformation with number of coefficients.
+        .DiscreteFourierTransform => blk: {
+            const coefficients: u32 = 1; // Simple default value.
+            break :blk try getDefaultDomainTransformationConfiguration(
+                allocator,
+                coefficients,
+            );
+        },
+
         // Methods with empty configuration.
         .RunLengthEncoding => try allocator.dupe(u8, "{}"),
     };
@@ -196,6 +216,14 @@ fn getDefaultAUCConfiguration(allocator: Allocator, auc_error_bound: f32) ![]u8 
         allocator,
         "{{\"area_under_curve_error\": {d}}}",
         .{auc_error_bound},
+    );
+}
+
+fn getDefaultDomainTransformationConfiguration(allocator: Allocator, number_of_coefficients: u32) ![]u8 {
+    return try std.fmt.allocPrint(
+        allocator,
+        "{{\"number_of_coefficients\": {d}}}",
+        .{number_of_coefficients},
     );
 }
 
