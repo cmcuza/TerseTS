@@ -42,9 +42,8 @@ const piecewise_histogram = @import(
 const bitpacked_quantization = @import(
     "lossy_compression/value_representation/bitpacked_quantization.zig",
 );
-const serqt = @import(
-    "lossy_compression/value_representation/serf_qt.zig",
-);
+const serqt = @import("lossy_compression/value_representation/serf_qt.zig");
+const buff = @import("lossy_compression/value_representation/bounded_fast_floats.zig");
 
 // Import line simplification methods.
 const vw = @import("lossy_compression/line_simplification/visvalingam_whyatt.zig");
@@ -89,6 +88,7 @@ pub const Method = enum {
     RunLengthEncoding,
     NonLinearApproximation,
     SerfQT,
+    BitPackedBUFF,
 };
 
 /// Compress `uncompressed_values` using `method` and its `configuration` and returns the results
@@ -252,6 +252,14 @@ pub fn compress(
                 configuration,
             );
         },
+        .BitPackedBUFF => {
+            try buff.compressBitPackedBUFF(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                configuration,
+            );
+        },
     }
     try compressed_values.append(allocator, @intFromEnum(method));
     return compressed_values;
@@ -327,6 +335,13 @@ pub fn decompress(
         },
         .SerfQT => {
             try serqt.decompress(allocator, compressed_values_slice, &decompressed_values);
+        },
+        .BitPackedBUFF => {
+            try buff.decompressBitPackedBUFF(
+                allocator,
+                compressed_values_slice,
+                &decompressed_values,
+            );
         },
     }
 
@@ -464,13 +479,11 @@ pub fn extract(
         // corrupted streams or misinterpretation of the data during decompression.
         // In case of RLE, modifying the coefficients can disrupt the run-length
         // encoding scheme, also leading to incorrect decompression results.
-        .BitPackedQuantization => {
-            return Error.UnsupportedMethod;
-        },
-        .RunLengthEncoding => {
-            return Error.UnsupportedMethod;
-        },
-        .SerfQT => {
+        .BitPackedQuantization,
+        .RunLengthEncoding,
+        .BitPackedBUFF,
+        .SerfQT,
+        => {
             return Error.UnsupportedMethod;
         },
     }
@@ -602,13 +615,11 @@ pub fn rebuild(
         // corrupted streams or misinterpretation of the data during decompression.
         // In case of RLE, modifying the coefficients can disrupt the run-length
         // encoding scheme, also leading to incorrect decompression results.
-        .BitPackedQuantization => {
-            return Error.UnsupportedMethod;
-        },
-        .RunLengthEncoding => {
-            return Error.UnsupportedMethod;
-        },
-        .SerfQT => {
+        .BitPackedQuantization,
+        .BitPackedBUFF,
+        .SerfQT,
+        .RunLengthEncoding,
+        => {
             return Error.UnsupportedMethod;
         },
     }
@@ -649,7 +660,8 @@ test "extract and rebuild works for any compression method supported" {
 
         if (method == Method.BitPackedQuantization or
             method == Method.SerfQT or
-            method == Method.RunLengthEncoding)
+            method == Method.RunLengthEncoding or
+            method == Method.BitPackedBUFF)
         {
             // These compression methods are not supported for extraction
             // of the coefficients and indices. This is because even small

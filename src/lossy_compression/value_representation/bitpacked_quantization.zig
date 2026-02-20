@@ -32,7 +32,6 @@ const Allocator = mem.Allocator;
 
 const tersets = @import("../../tersets.zig");
 const shared_structs = @import("../../utilities/shared_structs.zig");
-const BitWriter = shared_structs.BitWriter;
 const configuration = @import("../../configuration.zig");
 const Method = tersets.Method;
 const Error = tersets.Error;

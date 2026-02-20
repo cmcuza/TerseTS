@@ -150,6 +150,7 @@ class Method(Enum):
     RunLengthEncoding = 14
     NonLinearApproximation = 15
     SerfQT = 16
+    BitPackedBUFF = 17
 
 
 # Public API. 

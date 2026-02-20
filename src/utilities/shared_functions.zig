@@ -71,6 +71,10 @@ pub fn appendValue(allocator: Allocator, comptime T: type, value: T, compressed_
             const value_as_bytes: [4]u8 = @bitCast(value);
             try compressed_values.appendSlice(allocator, value_as_bytes[0..]);
         },
+        u8, i8 => {
+            const value_as_bytes: u8 = @bitCast(value);
+            try compressed_values.append(allocator, value_as_bytes);
+        },
         else => @compileError("Unsupported type for append value function"),
     }
 }
@@ -333,6 +337,48 @@ pub fn ensureIndexWithinLength(index: u64, len: u64) Error!void {
 pub fn ensureEnoughBytesAreAvailable(total_bytes_available: []const u8, offset: u64, required_bytes: u64) Error!void {
     if (offset + required_bytes > total_bytes_available.len)
         return Error.CorruptedCompressedData;
+}
+
+/// Write a u64 `value` with `bit_writer` to a bit stream using a compact bit-packed encoding scheme.
+/// The encoding uses 2 header bits to indicate how many bits are required to represent `value`:
+/// 00 is 8 bits, 01 is 16 bits, 10 is 32 bits, and 11 is 64 bits. This encoding reduces the total
+/// number of bits when most values are small. The `WriterType` is the type of the underlying writer
+/// used by `bit_writer`. `bit_writer` is a pointer to the initialized `BitWriter` that receives the
+/// encoded bits. The function returns an error if any occurrs.
+pub fn bitpackU64(
+    comptime WriterType: type,
+    value: u64,
+    bit_writer: *BitWriter(.little, WriterType),
+) !void {
+    if (value <= 0xFF) { // 8-bits.
+        // Header: 00.
+        try bit_writer.writeBits(@as(u1, 0b0), 1);
+        try bit_writer.writeBits(@as(u1, 0b0), 1);
+        try bit_writer.writeBits(@as(u8, @intCast(value)), 8);
+    } else if (value <= 0xFFFF) { // 16-bits.
+        // Header: 01.
+        try bit_writer.writeBits(@as(u1, 0b0), 1);
+        try bit_writer.writeBits(@as(u1, 0b1), 1);
+        try bit_writer.writeBits(@as(u16, @intCast(value)), 16);
+    } else if (value <= 0xFFFFFFFF) { // 32-bits.
+        // Header: 10.
+        try bit_writer.writeBits(@as(u1, 0b1), 1);
+        try bit_writer.writeBits(@as(u1, 0b0), 1);
+        try bit_writer.writeBits(@as(u32, @intCast(value)), 32);
+    } else { // 64-bits (no compression).
+        // Header: 11.
+        try bit_writer.writeBits(@as(u1, 0b1), 1);
+        try bit_writer.writeBits(@as(u1, 0b1), 1);
+        try bit_writer.writeBits(@as(u64, value), 64);
+    }
+}
+
+/// Returns the number of bits needed to represent the given unsigned `value`. If `value` is 0, the
+/// function returns 0. This function uses the count leading zeros (clz) intrinsic to efficiently
+/// calculate the bit width.
+pub fn bitsNeededUnsigned(value: u64) u8 {
+    if (value == 0) return 0;
+    return @intCast(64 - @clz(value));
 }
 
 test "zigzag can encode and decode small signed integers correctly" {
