@@ -322,6 +322,19 @@ pub fn createQuantizationBucket(error_bound: f32) f64 {
     return @floatCast(1.998 * error_bound);
 }
 
+/// Helper function to ensure that the `index` is within range of the `len`.
+/// If not, returns `Error.CorruptedCompressedData`.
+pub fn ensureIndexWithinLength(index: u64, len: u64) Error!void {
+    if (index >= len) return Error.CorruptedCompressedData;
+}
+
+/// Helper function to ensure that the `offset` stays in-bounds of the `total_bytes_available`
+/// when the `required_bytes` are read. If not, returns `Error.CorruptedCompressedData`.
+pub fn ensureEnoughBytesAreAvailable(total_bytes_available: []const u8, offset: u64, required_bytes: u64) Error!void {
+    if (offset + required_bytes > total_bytes_available.len)
+        return Error.CorruptedCompressedData;
+}
+
 test "zigzag can encode and decode small signed integers correctly" {
     const default_random = tester.getDefaultRandomGenerator();
     const number_of_tests = tester.generateNumberOfValues(default_random);

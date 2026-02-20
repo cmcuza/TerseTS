@@ -13,8 +13,22 @@
 // limitations under the License.
 
 const std = @import("std");
+const LinkMode = std.builtin.LinkMode;
 
 pub fn build(b: *std.Build) void {
+
+    // Define build options.
+    const linking = b.option(
+        LinkMode,
+        "linking",
+        "Build a static or dynamic (default) library",
+    ) orelse LinkMode.dynamic;
+
+    const pic = b.option(
+        bool,
+        "pic",
+        "Use Position Independent Code (PIC)",
+    ) orelse null;
     // Paths to external libraries.
     const pocketfft_path = b.path("lib/pocketfft");
     const pocketfft_c_path = b.path("lib/pocketfft/pocketfft.c");
@@ -24,15 +38,20 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/capi.zig"),
         .target = b.standardTargetOptions(.{}),
         .optimize = b.standardOptimizeOption(.{}),
+        .pic = pic,
     });
 
     // Task for compilation.
     const library = b.addLibrary(.{
         .name = "tersets",
         .root_module = root_module,
-        .linkage = .dynamic,
+        .linkage = linking,
         .version = .{ .major = 0, .minor = 0, .patch = 1 },
     });
+
+    if (linking == LinkMode.static) {
+        library.bundle_compiler_rt = true;
+    }
 
     library.addIncludePath(pocketfft_path);
     library.addCSourceFile(.{ .file = pocketfft_c_path, .flags = &.{"-std=c99"} });

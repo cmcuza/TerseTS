@@ -20,6 +20,10 @@ on:
   push:
     branches: [ "main" ]
 
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+  RUSTDOCFLAGS: -D warnings
 
 jobs:
   zig_build_and_test:
@@ -28,17 +32,15 @@ jobs:
     runs-on: ${{ matrix.operating-system }}
     strategy:
       matrix:
-        # macos-15-intel is used instead of macos-latest as Zig compiles to x86_64 on mac.
-        operating-system: [ubuntu-latest, macos-15-intel, windows-latest]
+        operating-system: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
     - uses: actions/checkout@v4
+
+    # Zig
     - uses: mlugg/setup-zig@v2
       with:
-        version: 0.15.1  # Use a stable Zig version.
-    - name: Clear Zig Cache
-      run: Remove-Item -Recurse -Force "$env:LOCALAPPDATA\zig" -ErrorAction SilentlyContinue
-      shell: pwsh
+        version: 0.15.2
     - name: Zig Build Debug
       run: zig build -Doptimize=Debug
     - name: Zig Build ReleaseFast
@@ -48,6 +50,7 @@ jobs:
     - name: Zig Build Test ReleaseFast
       run: zig build test -Doptimize=ReleaseFast
 
+    # C
     - name: Clang Compile Header
       run: clang -Weverything tersets.h
       working-directory: bindings/c
@@ -55,9 +58,40 @@ jobs:
       run: gcc -Wall -Wextra tersets.h
       working-directory: bindings/c
 
-    - name: Python Run unittest
+    # Julia
+    - name: Set Up Julia
+      uses: julia-actions/setup-julia@v1
+      with:
+        version: "1"
+    - name: Julia Run Unittest
+      run: julia Tests.jl
+      working-directory: bindings/julia
+
+    # Python
+    - name: Python Run Unittest
       run: python3 -m unittest --verbose
       working-directory: bindings/python
+
+    # The presence of .dylib files breaks static linking on macOS.
+    - name: Clear Zig Cache and Zig Out
+      run: rm -rf .zig-cache zig-out
+      shell: bash
+
+    # Rust
+    - name: Rustup Update
+      run: rustup update
+    - name: Cargo Build
+      run: cargo build --verbose --all-targets
+      working-directory: bindings/rust
+    - name: Cargo Clippy
+      run: cargo clippy --verbose --all-targets
+      working-directory: bindings/rust
+    - name: Cargo Doc
+      run: cargo doc --verbose --no-deps
+      working-directory: bindings/rust
+    - name: Cargo Test
+      run: cargo test --verbose --all-targets -- --nocapture
+      working-directory: bindings/rust
 
   zig_lint:
     name: Zig Lint
@@ -72,6 +106,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
         with:
-          version: 0.14.0  # Use a stable Zig version
+          version: 0.15.2
       - name: Zig Fmt Check
         run: zig fmt --check .

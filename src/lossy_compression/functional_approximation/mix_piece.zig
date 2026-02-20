@@ -45,18 +45,18 @@ const DiscretePoint = shared_structs.DiscretePoint;
 const UngroupedSegment = struct {
     slope: f64,
     intercept: f64,
-    timestamp: usize,
+    index: usize,
 };
 
 /// Struct for the grouping of cross intercept groups.
-const InterceptTimestampPair = struct {
+const InterceptIndexPair = struct {
     intercept: f64,
-    timestamp: usize,
+    index: usize,
 };
 
 /// HashMap for cross_intercept_groups.
 const CrossInterceptGroupsMap = shared_structs.HashMapf64(
-    ArrayList(InterceptTimestampPair),
+    ArrayList(InterceptIndexPair),
 );
 
 /// Compresses `uncompressed_values` within `error_bound` using the "Mix-Piece" algorithm.
@@ -81,7 +81,7 @@ pub fn compress(
     const error_bound: f32 = parsed_configuration.abs_error_bound;
 
     if (error_bound == 0.0) {
-        return Error.UnsupportedErrorBound;
+        return Error.InvalidConfiguration;
     }
 
     // Mix-Piece Phase 1: Compute segments metadata.
@@ -211,7 +211,7 @@ pub fn compress(
         compressed_values,
     );
 
-    // The last timestamp must be stored, otherwise the end time during decompression is unknown.
+    // The last index must be stored, otherwise the end index during decompression is unknown.
     try shared_functions.appendValue(allocator, usize, uncompressed_values.len, compressed_values);
 }
 
@@ -240,7 +240,7 @@ pub fn decompress(
     if (part1_count > 0) {
         // We need to parse part1_count intercept groups.
         // Each group has: intercept, slopes_count,
-        // then for each slope: slope, timestamps_count, timestamps.
+        // then for each slope: slope, indices_count, indices.
         for (0..part1_count) |_| {
             const intercept = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
 
@@ -249,19 +249,19 @@ pub fn decompress(
             for (0..slopes_count) |_| {
                 const slope = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
 
-                const timestamps_count = try shared_functions.readOffsetValue(
+                const indices_count = try shared_functions.readOffsetValue(
                     usize,
                     compressed_values,
                     &offset,
                 );
 
-                var timestamp: usize = 0;
-                for (0..timestamps_count) |_| {
+                var index: usize = 0;
+                for (0..indices_count) |_| {
                     const delta = try shared_functions.readOffsetValue(usize, compressed_values, &offset);
 
-                    timestamp += delta;
+                    index += delta;
                     try all_segments.append(allocator, .{
-                        .start_time = timestamp,
+                        .start_index = index,
                         .lower_bound_slope = slope,
                         .upper_bound_slope = slope,
                         .intercept = intercept,
@@ -274,21 +274,21 @@ pub fn decompress(
     // Part 2. Parse Cross Intercept Groups.
     if (part2_count > 0) {
         // We need to parse part2_count slope groups.
-        // Each group has: slope, pair_count, then for each pair: intercept, timestamp_delta.
+        // Each group has: slope, pair_count, then for each pair: intercept, index_delta.
         for (0..part2_count) |_| {
             const slope = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
 
             const pair_count = try shared_functions.readOffsetValue(usize, compressed_values, &offset);
 
-            var timestamp: usize = 0;
+            var index: usize = 0;
             for (0..pair_count) |_| {
                 const intercept = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
 
                 const delta = try shared_functions.readOffsetValue(usize, compressed_values, &offset);
 
-                timestamp += delta;
+                index += delta;
                 try all_segments.append(allocator, .{
-                    .start_time = timestamp,
+                    .start_index = index,
                     .lower_bound_slope = slope,
                     .upper_bound_slope = slope,
                     .intercept = intercept,
@@ -299,8 +299,8 @@ pub fn decompress(
 
     // Part 3. Parse Ungrouped Segments.
     if (part3_count > 0) {
-        // Each segment has: slope, intercept, timestamp_delta.
-        var timestamp: usize = 0;
+        // Each segment has: slope, intercept, index_delta.
+        var index: usize = 0;
         for (0..part3_count) |_| {
             const slope = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
 
@@ -308,9 +308,9 @@ pub fn decompress(
 
             const delta = try shared_functions.readOffsetValue(usize, compressed_values, &offset);
 
-            timestamp += delta;
+            index += delta;
             try all_segments.append(allocator, .{
-                .start_time = timestamp,
+                .start_index = index,
                 .lower_bound_slope = slope,
                 .upper_bound_slope = slope,
                 .intercept = intercept,
@@ -318,33 +318,277 @@ pub fn decompress(
         }
     }
 
-    // Sort all segments by timestamp.
+    // Sort all segments by index.
     mem.sort(shared_structs.SegmentMetadata, all_segments.items, {}, struct {
         fn compare(_: void, a: shared_structs.SegmentMetadata, b: shared_structs.SegmentMetadata) bool {
-            return a.start_time < b.start_time;
+            return a.start_index < b.start_index;
         }
     }.compare);
 
-    const final_timestamp = try shared_functions.readOffsetValue(usize, compressed_values, &offset);
+    const final_index = try shared_functions.readOffsetValue(usize, compressed_values, &offset);
 
     // Decompress each segment separately.
     for (0..all_segments.items.len) |i| {
         const segment = all_segments.items[i];
-        const start_time = segment.start_time;
-        const end_time = if (i + 1 < all_segments.items.len)
-            all_segments.items[i + 1].start_time
+        const start_index = segment.start_index;
+        const end_index = if (i + 1 < all_segments.items.len)
+            all_segments.items[i + 1].start_index
         else
-            final_timestamp;
-
+            final_index;
         // Generate points for the current segment.
         try sp.decompressSegment(
             allocator,
             segment,
-            start_time,
-            end_time,
+            start_index,
+            end_index,
             decompressed_values,
         );
     }
+}
+
+/// Extracts `indices` and `coefficients` from MixPiece's `compressed_values`. MixPiece consists
+/// of three parts, each beginning with a header count: (part1_count, part2_count, part3_count).
+/// These counts determine how many variable-length groups follow in each part. A `indices`
+/// ArrayList stores all counts and deltas, while a `coefficients` ArrayList stores intercepts
+/// and slopes extracted from the representation. Because MixPiece contains several nested and
+/// length-dependent structures, any loss of information on the indices, including incorrect
+/// group counts or delta values, can lead to unexpected failures during decompression. Only
+/// lightweight structural checks are performed. Deeper validation must be ensured by the caller.
+/// The required details of the encoding are documented in `src/functional_approximation/mix_piece.zig`.
+/// If the buffer does not match the expected header or runs out of data mid-structure, the function
+/// returns `Error.CorruptedCompressedData`. The `allocator` handles the memory allocations of the
+/// output arrays. Allocation errors are propagated.
+pub fn extract(
+    allocator: Allocator,
+    compressed_values: []const u8,
+    indices: *ArrayList(u64),
+    coefficients: *ArrayList(f64),
+) Error!void {
+    // Compressed representation must contain at least the 3 header fields.
+    var offset: u64 = 3 * @sizeOf(u64);
+    if (compressed_values.len < offset)
+        return Error.CorruptedCompressedData;
+
+    const header = mem.bytesAsSlice(u64, compressed_values[0..offset]);
+    const part1_count = header[0];
+    const part2_count = header[1];
+    const part3_count = header[2];
+
+    try indices.append(allocator, part1_count);
+    try indices.append(allocator, part2_count);
+    try indices.append(allocator, part3_count);
+
+    // Mix-Piece Phase 3: Populate the three data structures. Separately handle three parts.
+    // Part 1: segment groups that share the same intercept.
+    // Part 2: segment groups that don't share the same intercept but the same slope.
+    // Part 3: segment unmerged segments.
+
+    // Part 1: Intercept groups.
+    for (0..part1_count) |_| {
+        try shared_functions.ensureEnoughBytesAreAvailable(compressed_values, offset, @sizeOf(f64));
+        const intercept = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
+        try coefficients.append(allocator, intercept);
+
+        try shared_functions.ensureEnoughBytesAreAvailable(compressed_values, offset, @sizeOf(u64));
+        const slopes_count = try shared_functions.readOffsetValue(u64, compressed_values, &offset);
+        try indices.append(allocator, slopes_count);
+
+        for (0..slopes_count) |_| {
+            try shared_functions.ensureEnoughBytesAreAvailable(compressed_values, offset, @sizeOf(f64));
+            const slope = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
+            try coefficients.append(allocator, slope);
+
+            try shared_functions.ensureEnoughBytesAreAvailable(compressed_values, offset, @sizeOf(u64));
+            const indices_count = try shared_functions.readOffsetValue(u64, compressed_values, &offset);
+            try indices.append(allocator, indices_count);
+
+            for (0..indices_count) |_| {
+                try shared_functions.ensureEnoughBytesAreAvailable(compressed_values, offset, @sizeOf(u64));
+                const delta = try shared_functions.readOffsetValue(u64, compressed_values, &offset);
+                try indices.append(allocator, delta);
+            }
+        }
+    }
+
+    // Part 2: Slope groups.
+    for (0..part2_count) |_| {
+        try shared_functions.ensureEnoughBytesAreAvailable(compressed_values, offset, @sizeOf(f64));
+        const slope = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
+        try coefficients.append(allocator, slope);
+
+        try shared_functions.ensureEnoughBytesAreAvailable(compressed_values, offset, @sizeOf(u64));
+        const pair_count = try shared_functions.readOffsetValue(u64, compressed_values, &offset);
+        try indices.append(allocator, pair_count);
+
+        for (0..pair_count) |_| {
+            try shared_functions.ensureEnoughBytesAreAvailable(compressed_values, offset, @sizeOf(f64));
+            const intercept = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
+            try coefficients.append(allocator, intercept);
+
+            try shared_functions.ensureEnoughBytesAreAvailable(compressed_values, offset, @sizeOf(u64));
+            const delta = try shared_functions.readOffsetValue(u64, compressed_values, &offset);
+            try indices.append(allocator, delta);
+        }
+    }
+
+    // Part 3: Ungrouped segments.
+    for (0..part3_count) |_| {
+        try shared_functions.ensureEnoughBytesAreAvailable(compressed_values, offset, @sizeOf(f64) * 2 + @sizeOf(u64));
+
+        const slope = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
+        try coefficients.append(allocator, slope);
+
+        const intercept = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
+        try coefficients.append(allocator, intercept);
+
+        const delta = try shared_functions.readOffsetValue(u64, compressed_values, &offset);
+        try indices.append(allocator, delta);
+    }
+
+    // Final index.
+    try shared_functions.ensureEnoughBytesAreAvailable(compressed_values, offset, @sizeOf(u64));
+    const final_index = try shared_functions.readOffsetValue(u64, compressed_values, &offset);
+    try indices.append(allocator, final_index);
+
+    // No extra data should remain.
+    if (offset != compressed_values.len)
+        return Error.CorruptedCompressedData;
+}
+
+/// Rebuilds MixPiece's `compressed_values` from the provided `indices` and `coefficients`.
+/// The `indices` array must begin with the three part counts:
+/// [part1_count, part2_count, part3_count].
+/// Based on these counts, the function reconstructs the variable-length groups for each part
+/// by consuming the arrays in the order required by MixPiece. Any loss of information on the
+/// indices, including corrupted group counts or mismatched delta sequences, may cause unexpected
+/// failures during decompression. The function assumes the input arrays are logically consistent
+/// and performs only structural validation. If the reconstructed stream does not consume all
+/// required coefficients or indices, or if extra data remains after processing a part, the
+/// function returns `Error.UnsupportedInput`. The `allocator` handles the memory allocations of
+/// the output arrays. Allocation errors are propagated.
+pub fn rebuild(
+    allocator: Allocator,
+    indices: []const u64,
+    coefficients: []const f64,
+    compressed_values: *ArrayList(u8),
+) Error!void {
+    // Must contain at least the three part counts.
+    if (indices.len < 3)
+        return Error.CorruptedCompressedData;
+
+    const part1_count = indices[0];
+    const part2_count = indices[1];
+    const part3_count = indices[2];
+
+    try shared_functions.appendValue(allocator, u64, part1_count, compressed_values);
+    try shared_functions.appendValue(allocator, u64, part2_count, compressed_values);
+    try shared_functions.appendValue(allocator, u64, part3_count, compressed_values);
+
+    var indices_index: u64 = 3;
+    var coefficients_index: u64 = 0;
+
+    // Part 1: Intercept groups.
+    for (0..part1_count) |_| {
+        // intercept.
+        try shared_functions.ensureIndexWithinLength(coefficients_index, coefficients.len);
+        const intercept = coefficients[coefficients_index];
+        try shared_functions.appendValue(allocator, f64, intercept, compressed_values);
+        coefficients_index += 1;
+
+        // slopes_count.
+        try shared_functions.ensureIndexWithinLength(indices_index, indices.len);
+        const slopes_count = indices[indices_index];
+        try shared_functions.appendValue(allocator, u64, slopes_count, compressed_values);
+        indices_index += 1;
+
+        // slope groups.
+        for (0..slopes_count) |_| {
+            // slope.
+            try shared_functions.ensureIndexWithinLength(coefficients_index, coefficients.len);
+            const slope = coefficients[coefficients_index];
+            try shared_functions.appendValue(allocator, f64, slope, compressed_values);
+            coefficients_index += 1;
+
+            // indices_count.
+            try shared_functions.ensureIndexWithinLength(indices_index, indices.len);
+            const indices_count = indices[indices_index];
+            try shared_functions.appendValue(allocator, u64, indices_count, compressed_values);
+            indices_index += 1;
+
+            // deltas.
+            for (0..indices_count) |_| {
+                try shared_functions.ensureIndexWithinLength(indices_index, indices.len);
+                const delta = indices[indices_index];
+                try shared_functions.appendValue(allocator, u64, delta, compressed_values);
+                indices_index += 1;
+            }
+        }
+    }
+
+    // Part 2: Slope groups.
+    for (0..part2_count) |_| {
+        // slope.
+        try shared_functions.ensureIndexWithinLength(coefficients_index, coefficients.len);
+        const slope = coefficients[coefficients_index];
+        try shared_functions.appendValue(allocator, f64, slope, compressed_values);
+        coefficients_index += 1;
+
+        // pair_count.
+        try shared_functions.ensureIndexWithinLength(indices_index, indices.len);
+        const pair_count = indices[indices_index];
+        try shared_functions.appendValue(allocator, u64, pair_count, compressed_values);
+        indices_index += 1;
+
+        // (intercept, delta) pairs.
+        for (0..pair_count) |_| {
+            // intercept.
+            try shared_functions.ensureIndexWithinLength(coefficients_index, coefficients.len);
+            const intercept = coefficients[coefficients_index];
+            try shared_functions.appendValue(allocator, f64, intercept, compressed_values);
+            coefficients_index += 1;
+
+            // delta.
+            try shared_functions.ensureIndexWithinLength(indices_index, indices.len);
+            const delta = indices[indices_index];
+            try shared_functions.appendValue(allocator, u64, delta, compressed_values);
+            indices_index += 1;
+        }
+    }
+
+    // Part 3: Ungrouped segments.
+    for (0..part3_count) |_| {
+        // slope.
+        try shared_functions.ensureIndexWithinLength(coefficients_index, coefficients.len);
+        const slope = coefficients[coefficients_index];
+        try shared_functions.appendValue(allocator, f64, slope, compressed_values);
+        coefficients_index += 1;
+
+        // intercept.
+        try shared_functions.ensureIndexWithinLength(coefficients_index, coefficients.len);
+        const intercept = coefficients[coefficients_index];
+        try shared_functions.appendValue(allocator, f64, intercept, compressed_values);
+        coefficients_index += 1;
+
+        // delta.
+        try shared_functions.ensureIndexWithinLength(indices_index, indices.len);
+        const delta = indices[indices_index];
+        try shared_functions.appendValue(allocator, u64, delta, compressed_values);
+        indices_index += 1;
+    }
+
+    // Final index.
+    try shared_functions.ensureIndexWithinLength(indices_index, indices.len);
+    const final_index = indices[indices_index];
+    try shared_functions.appendValue(allocator, u64, final_index, compressed_values);
+    indices_index += 1;
+
+    // No extra indices allowed.
+    if (indices_index != indices.len)
+        return Error.CorruptedCompressedData;
+
+    // No extra coefficients allowed.
+    if (coefficients_index != coefficients.len)
+        return Error.CorruptedCompressedData;
 }
 
 /// Mix-Piece Phase 1: Compute `SegmentMetadata` for each segment that can be approximated
@@ -373,7 +617,7 @@ fn computeSegmentsMetadata(
         return Error.UnsupportedInput;
 
     // Initialize the `start_point` with the first uncompressed value.
-    var start_point: DiscretePoint = .{ .time = 0, .value = uncompressed_values[0] };
+    var start_point: DiscretePoint = .{ .index = 0, .value = uncompressed_values[0] };
 
     // The quantization can only be done using the original error bound. Afterwards, we add
     // `shared_structs.ErrorBoundMargin` to avoid exceeding the error bound during decompression.
@@ -392,21 +636,21 @@ fn computeSegmentsMetadata(
     var last_valid_ceil: usize = 0;
 
     // The first point is already part of `current_segment`, the next point is at index one.
-    for (1..uncompressed_values.len) |current_timestamp| {
+    for (1..uncompressed_values.len) |current_index| {
 
         // Check if the current point is NaN, infinite or a reduced precision f64.
         // If so, return an error.
-        if (!math.isFinite(uncompressed_values[current_timestamp]) or
-            @abs(uncompressed_values[current_timestamp]) > tester.max_test_value)
+        if (!math.isFinite(uncompressed_values[current_index]) or
+            @abs(uncompressed_values[current_index]) > tester.max_test_value)
             return Error.UnsupportedInput;
 
         const end_point: DiscretePoint = .{
-            .time = current_timestamp,
-            .value = uncompressed_values[current_timestamp],
+            .index = current_index,
+            .value = uncompressed_values[current_index],
         };
 
         // `segment_size` of type f64 to avoid casting from usize when computing other variables.
-        const segment_size: f64 = @floatFromInt(current_timestamp - start_point.time);
+        const segment_size: f64 = @floatFromInt(current_index - start_point.index);
 
         // Check floor quantization bounds.
         if (floor_valid) {
@@ -419,7 +663,7 @@ fn computeSegmentsMetadata(
                 (lower_limit_floor > (end_point.value + adjusted_error_bound)))
             {
                 floor_valid = false;
-                last_valid_floor = current_timestamp - 1;
+                last_valid_floor = current_index - 1;
             } else {
                 // Update floor bounds.
                 const new_upper_bound_slope: f64 =
@@ -447,7 +691,7 @@ fn computeSegmentsMetadata(
                 (lower_limit_ceil > (end_point.value + adjusted_error_bound)))
             {
                 ceil_valid = false;
-                last_valid_ceil = current_timestamp - 1;
+                last_valid_ceil = current_index - 1;
             } else {
                 // Update ceil bounds.
                 const new_upper_bound_slope: f64 =
@@ -469,7 +713,7 @@ fn computeSegmentsMetadata(
             if (last_valid_floor >= last_valid_ceil) {
                 // Use floor quantization.
                 try segments_metadata.append(allocator, .{
-                    .start_time = start_point.time,
+                    .start_index = start_point.index,
                     .intercept = quantized_intercept_floor,
                     .upper_bound_slope = upper_bound_slope_floor,
                     .lower_bound_slope = lower_bound_slope_floor,
@@ -477,7 +721,7 @@ fn computeSegmentsMetadata(
             } else {
                 // Use ceil quantization.
                 try segments_metadata.append(allocator, .{
-                    .start_time = start_point.time,
+                    .start_index = start_point.index,
                     .intercept = quantized_intercept_ceil,
                     .upper_bound_slope = upper_bound_slope_ceil,
                     .lower_bound_slope = lower_bound_slope_ceil,
@@ -498,13 +742,13 @@ fn computeSegmentsMetadata(
             lower_bound_slope_ceil = -math.floatMax(f64);
             floor_valid = true;
             ceil_valid = true;
-            last_valid_floor = current_timestamp;
-            last_valid_ceil = current_timestamp;
+            last_valid_floor = current_index;
+            last_valid_ceil = current_index;
         }
     }
 
     // Handle the final segment.
-    const segment_size = uncompressed_values.len - start_point.time;
+    const segment_size = uncompressed_values.len - start_point.index;
     if (segment_size > 0) {
         // Choose the quantization that remained valid longer.
         if (floor_valid and !ceil_valid) {
@@ -514,7 +758,7 @@ fn computeSegmentsMetadata(
                 lower_bound_slope_floor = 0;
             }
             try segments_metadata.append(allocator, .{
-                .start_time = start_point.time,
+                .start_index = start_point.index,
                 .intercept = quantized_intercept_floor,
                 .upper_bound_slope = upper_bound_slope_floor,
                 .lower_bound_slope = lower_bound_slope_floor,
@@ -526,14 +770,14 @@ fn computeSegmentsMetadata(
                 lower_bound_slope_ceil = 0;
             }
             try segments_metadata.append(allocator, .{
-                .start_time = start_point.time,
+                .start_index = start_point.index,
                 .intercept = quantized_intercept_ceil,
                 .upper_bound_slope = upper_bound_slope_ceil,
                 .lower_bound_slope = lower_bound_slope_ceil,
             });
         } else {
             // Both are valid or both invalid - choose the one that is closer to the original value.
-            const original_value = uncompressed_values[start_point.time];
+            const original_value = uncompressed_values[start_point.index];
             if (@round(original_value / error_bound) == @ceil(original_value / error_bound)) {
                 // Ceil quantization.
                 if (segment_size == 1) {
@@ -541,7 +785,7 @@ fn computeSegmentsMetadata(
                     lower_bound_slope_ceil = 0;
                 }
                 try segments_metadata.append(allocator, .{
-                    .start_time = start_point.time,
+                    .start_index = start_point.index,
                     .intercept = quantized_intercept_ceil,
                     .upper_bound_slope = upper_bound_slope_ceil,
                     .lower_bound_slope = lower_bound_slope_ceil,
@@ -553,7 +797,7 @@ fn computeSegmentsMetadata(
                     lower_bound_slope_floor = 0;
                 }
                 try segments_metadata.append(allocator, .{
-                    .start_time = start_point.time,
+                    .start_index = start_point.index,
                     .intercept = quantized_intercept_floor,
                     .upper_bound_slope = upper_bound_slope_floor,
                     .lower_bound_slope = lower_bound_slope_floor,
@@ -576,9 +820,9 @@ fn mergeSegmentsMetadata(
     cross_intercept_groups: *ArrayList(shared_structs.SegmentMetadata), // 'groups' in paper.
     ungrouped_segments: *ArrayList(shared_structs.SegmentMetadata), // 'rest' in paper.
 ) !void {
-    // Temporary storage for timestamps being merged in Part 1.
-    var timestamps_array = ArrayList(usize).empty;
-    defer timestamps_array.deinit(allocator);
+    // Temporary storage for indices being merged in Part 1.
+    var indices_array = ArrayList(usize).empty;
+    defer indices_array.deinit(allocator);
 
     // Temporary storage for segments that couldn't be grouped in Part 1.
     var single_segment_groups = ArrayList(shared_structs.SegmentMetadata).empty;
@@ -620,12 +864,12 @@ fn mergeSegmentsMetadata(
 
         // Initialize the first group with the first segment.
         var current_group: shared_structs.SegmentMetadata = .{
-            .start_time = 0.0, // Not used for group metadata.
+            .start_index = 0.0, // Not used for group metadata.
             .intercept = segments_same_intercept_val.items[0].intercept,
             .lower_bound_slope = segments_same_intercept_val.items[0].lower_bound_slope,
             .upper_bound_slope = segments_same_intercept_val.items[0].upper_bound_slope,
         };
-        try timestamps_array.append(allocator, segments_same_intercept_val.items[0].start_time);
+        try indices_array.append(allocator, segments_same_intercept_val.items[0].start_index);
 
         // Process remaining segments for this intercept value.
         for (segments_same_intercept_val.items[1..]) |segment| {
@@ -634,7 +878,7 @@ fn mergeSegmentsMetadata(
                 segment.upper_bound_slope >= current_group.lower_bound_slope)
             {
                 // Segments can be grouped - update the group's interval.
-                try timestamps_array.append(allocator, segment.start_time);
+                try indices_array.append(allocator, segment.start_index);
                 current_group.lower_bound_slope = @max(
                     current_group.lower_bound_slope,
                     segment.lower_bound_slope,
@@ -645,11 +889,11 @@ fn mergeSegmentsMetadata(
                 );
             } else {
                 // Cannot merge - finalize current group.
-                if (timestamps_array.items.len > 1) {
+                if (indices_array.items.len > 1) {
                     // Multiple segments in group - add to same_intercept_groups.
-                    for (timestamps_array.items) |timestamp| {
+                    for (indices_array.items) |index| {
                         try same_intercept_groups.append(allocator, .{
-                            .start_time = timestamp,
+                            .start_index = index,
                             .intercept = current_group.intercept,
                             .lower_bound_slope = current_group.lower_bound_slope,
                             .upper_bound_slope = current_group.upper_bound_slope,
@@ -658,7 +902,7 @@ fn mergeSegmentsMetadata(
                 } else {
                     // Single segment - save for Part 2 processing.
                     try single_segment_groups.append(allocator, .{
-                        .start_time = timestamps_array.items[0],
+                        .start_index = indices_array.items[0],
                         .intercept = current_group.intercept,
                         .lower_bound_slope = current_group.lower_bound_slope,
                         .upper_bound_slope = current_group.upper_bound_slope,
@@ -666,22 +910,22 @@ fn mergeSegmentsMetadata(
                 }
 
                 // Start new group with current segment.
-                timestamps_array.clearRetainingCapacity();
+                indices_array.clearRetainingCapacity();
                 current_group = .{
-                    .start_time = 0.0,
+                    .start_index = 0,
                     .intercept = segment.intercept,
                     .lower_bound_slope = segment.lower_bound_slope,
                     .upper_bound_slope = segment.upper_bound_slope,
                 };
-                try timestamps_array.append(allocator, segment.start_time);
+                try indices_array.append(allocator, segment.start_index);
             }
         }
 
         // Handle the final group for this intercept value.
-        if (timestamps_array.items.len > 1) {
-            for (timestamps_array.items) |timestamp| {
+        if (indices_array.items.len > 1) {
+            for (indices_array.items) |index| {
                 try same_intercept_groups.append(allocator, .{
-                    .start_time = timestamp,
+                    .start_index = index,
                     .intercept = current_group.intercept,
                     .lower_bound_slope = current_group.lower_bound_slope,
                     .upper_bound_slope = current_group.upper_bound_slope,
@@ -689,13 +933,13 @@ fn mergeSegmentsMetadata(
             }
         } else {
             try single_segment_groups.append(allocator, .{
-                .start_time = timestamps_array.items[0],
+                .start_index = indices_array.items[0],
                 .intercept = current_group.intercept,
                 .lower_bound_slope = current_group.lower_bound_slope,
                 .upper_bound_slope = current_group.upper_bound_slope,
             });
         }
-        timestamps_array.clearRetainingCapacity();
+        indices_array.clearRetainingCapacity();
     }
 
     // Part 2: Group remaining ungrouped segments across different intercept values.
@@ -707,22 +951,22 @@ fn mergeSegmentsMetadata(
         sp.compareMetadataBySlope,
     );
 
-    // For cross-intercept grouping, track both intercept and timestamp values for each segment.
+    // For cross-intercept grouping, track both intercept and indices values for each segment.
     var cross_intercept_segment_info =
-        ArrayList(struct { intercept: f64, start_time: usize }).empty;
+        ArrayList(struct { intercept: f64, start_index: usize }).empty;
     defer cross_intercept_segment_info.deinit(allocator);
 
     if (single_segment_groups.items.len > 0) {
         // Initialize with the first ungrouped segment.
         var current_cross_group: shared_structs.SegmentMetadata = .{
-            .start_time = 0.0, // Not used for group metadata.
+            .start_index = 0, // Not used for group metadata.
             .intercept = 0.0, // Will vary for each segment in the group.
             .lower_bound_slope = single_segment_groups.items[0].lower_bound_slope,
             .upper_bound_slope = single_segment_groups.items[0].upper_bound_slope,
         };
         try cross_intercept_segment_info.append(allocator, .{
             .intercept = single_segment_groups.items[0].intercept,
-            .start_time = single_segment_groups.items[0].start_time,
+            .start_index = single_segment_groups.items[0].start_index,
         });
 
         // Process remaining ungrouped segments.
@@ -742,7 +986,7 @@ fn mergeSegmentsMetadata(
                 );
                 try cross_intercept_segment_info.append(allocator, .{
                     .intercept = segment.intercept,
-                    .start_time = segment.start_time,
+                    .start_index = segment.start_index,
                 });
             } else {
                 // Cannot merge - finalize current cross-intercept group.
@@ -750,7 +994,7 @@ fn mergeSegmentsMetadata(
                     // Multiple segments - add to cross_intercept_groups.
                     for (cross_intercept_segment_info.items) |info| {
                         try cross_intercept_groups.append(allocator, .{
-                            .start_time = info.start_time,
+                            .start_index = info.start_index,
                             .intercept = info.intercept,
                             .lower_bound_slope = current_cross_group.lower_bound_slope,
                             .upper_bound_slope = current_cross_group.upper_bound_slope,
@@ -760,7 +1004,7 @@ fn mergeSegmentsMetadata(
                     // Single segment - add to ungrouped_segments.
                     for (cross_intercept_segment_info.items) |info| {
                         try ungrouped_segments.append(allocator, .{
-                            .start_time = info.start_time,
+                            .start_index = info.start_index,
                             .intercept = info.intercept,
                             .lower_bound_slope = current_cross_group.lower_bound_slope,
                             .upper_bound_slope = current_cross_group.upper_bound_slope,
@@ -771,14 +1015,14 @@ fn mergeSegmentsMetadata(
                 // Start new cross-intercept group.
                 cross_intercept_segment_info.clearRetainingCapacity();
                 current_cross_group = .{
-                    .start_time = 0.0,
+                    .start_index = 0.0,
                     .intercept = 0.0,
                     .lower_bound_slope = segment.lower_bound_slope,
                     .upper_bound_slope = segment.upper_bound_slope,
                 };
                 try cross_intercept_segment_info.append(allocator, .{
                     .intercept = segment.intercept,
-                    .start_time = segment.start_time,
+                    .start_index = segment.start_index,
                 });
             }
         }
@@ -787,7 +1031,7 @@ fn mergeSegmentsMetadata(
         if (cross_intercept_segment_info.items.len > 1) {
             for (cross_intercept_segment_info.items) |info| {
                 try cross_intercept_groups.append(allocator, .{
-                    .start_time = info.start_time,
+                    .start_index = info.start_index,
                     .intercept = info.intercept,
                     .lower_bound_slope = current_cross_group.lower_bound_slope,
                     .upper_bound_slope = current_cross_group.upper_bound_slope,
@@ -796,7 +1040,7 @@ fn mergeSegmentsMetadata(
         } else if (cross_intercept_segment_info.items.len == 1) {
             for (cross_intercept_segment_info.items) |info| {
                 try ungrouped_segments.append(allocator, .{
-                    .start_time = info.start_time,
+                    .start_index = info.start_index,
                     .intercept = info.intercept,
                     .lower_bound_slope = current_cross_group.lower_bound_slope,
                     .upper_bound_slope = current_cross_group.upper_bound_slope,
@@ -810,27 +1054,27 @@ fn mergeSegmentsMetadata(
         shared_structs.SegmentMetadata,
         same_intercept_groups.items,
         {},
-        sp.compareMetadataByStartTime,
+        sp.compareMetadataByStartIndex,
     );
 
     mem.sort(
         shared_structs.SegmentMetadata,
         cross_intercept_groups.items,
         {},
-        sp.compareMetadataByStartTime,
+        sp.compareMetadataByStartIndex,
     );
 
     mem.sort(
         shared_structs.SegmentMetadata,
         ungrouped_segments.items,
         {},
-        sp.compareMetadataByStartTime,
+        sp.compareMetadataByStartIndex,
     );
 }
 
 /// Mix-Piece Phase 3.1. Populate the `SegmentMetadata` HashMap from intercept points in
 /// `same_intercept_groups` to a HashMap from the approximation slope to an array list of
-/// timestamps and store it in `same_intercept_groups_map`. The `allocator` is used to
+/// indices and store it in `same_intercept_groups_map`. The `allocator` is used to
 /// allocate memory of intermediates.
 fn populateSameInterceptGroupsHashMap(
     allocator: Allocator,
@@ -843,28 +1087,28 @@ fn populateSameInterceptGroupsHashMap(
             segment_metadata.upper_bound_slope) / 2;
 
         // Get or put the inner HashMap entry for the given `intercept` wich will contain the
-        // slopes and timestamps associated to it.
+        // slopes and indices associated to it.
         const hash_to_hash_result = try same_intercept_groups_map.getOrPut(intercept);
         if (!hash_to_hash_result.found_existing) {
             hash_to_hash_result.value_ptr.* = shared_structs.HashMapf64(
                 ArrayList(usize),
             ).init(allocator);
         }
-        // Get or put the ArrayList of timestamps mapped to the given `slope` which is at the same
+        // Get or put the ArrayList of indices mapped to the given `slope` which is at the same
         // time associated to the given `intercept`.
         const hash_to_array_result = try hash_to_hash_result.value_ptr.*.getOrPut(slope);
         if (!hash_to_array_result.found_existing) {
             hash_to_array_result.value_ptr.* = ArrayList(usize).empty;
         }
-        try hash_to_array_result.value_ptr.*.append(allocator, segment_metadata.start_time);
+        try hash_to_array_result.value_ptr.*.append(allocator, segment_metadata.start_index);
     }
 }
 
 /// Mix-Piece Phase 3.2. Populate HashMap of `cross_intercept_groups` by grouping the segments by
-/// their slope and stores intercept-timestamp pairs and stores it in `cross_intercept_groups_map`.
+/// their slope and stores intercept-index pairs and stores it in `cross_intercept_groups_map`.
 /// The output format is a HashMap from slope to an ArrayList of corresponding to:
 /// a_j; k_j; b_j,1; t_j,1; b_j,k_j; t_j,k_j, where a_j is the slope, k_j is the number of
-/// intercept-timestamp pairs, b_j,i; t_j,i are the intercept and timestamp pairs.
+/// intercept-index pairs, b_j,i; t_j,i are the intercept and index pairs.
 /// The `allocator` is used to allocate memory for intermediates.
 fn populateCrossInterceptGroupsAsHashMap(
     allocator: Allocator,
@@ -879,22 +1123,22 @@ fn populateCrossInterceptGroupsAsHashMap(
         const hash_result = try cross_intercept_groups_map.getOrPut(slope);
         if (!hash_result.found_existing) {
             // Initialize a new ArrayList for this slope.
-            hash_result.value_ptr.* = ArrayList(InterceptTimestampPair).empty;
+            hash_result.value_ptr.* = ArrayList(InterceptIndexPair).empty;
         }
 
-        // Create an InterceptTimestampPair and add it to the list for this slope.
-        const intercept_timestamp_pair = InterceptTimestampPair{
+        // Create an InterceptIndexPair and add it to the list for this slope.
+        const intercept_index_pair = InterceptIndexPair{
             .intercept = segment_metadata.intercept,
-            .timestamp = segment_metadata.start_time,
+            .index = segment_metadata.start_index,
         };
 
-        try hash_result.value_ptr.*.append(allocator, intercept_timestamp_pair);
+        try hash_result.value_ptr.*.append(allocator, intercept_index_pair);
     }
 }
 
 /// Mix-Piece Phase 3.3. Populate `ungrouped_segments` of SegmentMetadata in `ungrouped_segments_array`
 /// ArrayList of UngroupedSegment structs. The final representation is a byte array containing the
-/// slopes a_i, intercepts b_j, and timestamps t_k per segment.
+/// slopes a_i, intercepts b_j, and indices t_k per segment.
 fn populateUngroupedSegmentsArray(
     allocator: Allocator,
     ungrouped_segments: ArrayList(shared_structs.SegmentMetadata),
@@ -909,7 +1153,7 @@ fn populateUngroupedSegmentsArray(
         const ungrouped_segment = UngroupedSegment{
             .slope = slope,
             .intercept = ungrouped_segments.items[index].intercept,
-            .timestamp = ungrouped_segments.items[index].start_time,
+            .index = ungrouped_segments.items[index].start_index,
         };
 
         // Append to the output array (ArrayList handles memory allocation internally).
@@ -919,12 +1163,12 @@ fn populateUngroupedSegmentsArray(
 
 /// Mix-Piece Phase 4.1. Create a compressed representation from the 'merged_segments_metadata_map'
 /// that can be decoded during decompression and stored in `compressed_values`. The compressed
-/// representation is a byte array containing the intercepts, slopes and timestamps per segment.
+/// representation is a byte array containing the intercepts, slopes and indices per segment.
 /// Specifically, the compressed representation has the following structure:
 /// [b_1, N_1, a_11, M_11, t_1, t_2, ..., a_12, M_12, t_1, ...., b_2, N_2, a_21, M_21, t1, t2, ...,
 ///  b_n, N_n, a_n1, M_n1, t_1, ...], where b_i are the intercepts, N_i are the number of slopes
 /// associated to intercept b_i, a_ij are the slopes associated to intercept b_i, M_ij are
-/// the number of timestamps associated to the slope a_ij, and t_k are the timestamps.
+/// the number of indices associated to the slope a_ij, and t_k are the indices.
 fn createCompressedRepresentationMergedSegments(
     allocator: Allocator,
     merged_segments_metadata_map: shared_structs.HashMapf64(shared_structs.HashMapf64(ArrayList(usize))),
@@ -946,14 +1190,14 @@ fn createCompressedRepresentationMergedSegments(
             const current_slope = hash_to_array_entry.key_ptr.*;
             try shared_functions.appendValue(allocator, f64, current_slope, compressed_values);
 
-            // Append the number of timestamps M_ij associated to `current_slope` a_ij.
+            // Append the number of indices M_ij associated to `current_slope` a_ij.
             try shared_functions.appendValue(allocator, usize, hash_to_array_entry.value_ptr.*.items.len, compressed_values);
-            var previous_timestamp: usize = 0;
+            var previous_index: usize = 0;
 
-            // Iterate over the ArrayList to append the timestamps t_k.
-            for (hash_to_array_entry.value_ptr.*.items) |timestamp| {
-                try shared_functions.appendValue(allocator, usize, timestamp - previous_timestamp, compressed_values);
-                previous_timestamp = timestamp;
+            // Iterate over the ArrayList to append the indices t_k.
+            for (hash_to_array_entry.value_ptr.*.items) |index| {
+                try shared_functions.appendValue(allocator, usize, index - previous_index, compressed_values);
+                previous_index = index;
             }
         }
     }
@@ -961,17 +1205,17 @@ fn createCompressedRepresentationMergedSegments(
 
 /// Mix-Piece Phase 4.2. Create compressed representation from the 'cross_intercept_groups_map'
 /// that can decoded during decompression and store it in `compressed_values`. The compressed
-/// representation is a byte array containing the slopes a_j, intercept-timestamps pairs and
+/// representation is a byte array containing the slopes a_j, intercept-indicess pairs and
 /// necessary metadata for proper decoding. Specifically, the compressed representation has
 /// the following structure: [a_j, k_j, b_j,1, t_j,1, b_j,2, t_j,2, ..., b_j,k_j, t_j,k_j]
-/// where a_j is the  slope, k_j is the  number of intercept-timestamp pairs for this slope
-/// b_j,i is the i-th intercept for slope a_j, t_j,i is the i-th timestamp for slope a_j.
+/// where a_j is the  slope, k_j is the  number of intercept-index pairs for this slope
+/// b_j,i is the i-th intercept for slope a_j, t_j,i is the i-th index for slope a_j.
 fn createCompressedRepresentationCrossInterceptGroups(
     allocator: Allocator,
     cross_intercept_groups_map: CrossInterceptGroupsMap,
     compressed_values: *ArrayList(u8),
 ) !void {
-    // Iterate over the HashMap to append each slope and its associated intercept-timestamp pairs.
+    // Iterate over the HashMap to append each slope and its associated intercept-index pairs.
     var slope_iterator = cross_intercept_groups_map.iterator();
     while (slope_iterator.next()) |slope_entry| {
         const current_slope: f64 = slope_entry.key_ptr.*;
@@ -979,37 +1223,37 @@ fn createCompressedRepresentationCrossInterceptGroups(
         // Append the slope a_j.
         try shared_functions.appendValue(allocator, f64, current_slope, compressed_values);
 
-        // Append the number of intercept-timestamp pairs k_j for this slope.
+        // Append the number of intercept-index pairs k_j for this slope.
         try shared_functions.appendValue(allocator, usize, slope_entry.value_ptr.*.items.len, compressed_values);
 
-        // Store previous timestamp for delta encoding.
-        var previous_timestamp: usize = 0;
+        // Store previous index for delta encoding.
+        var previous_index: usize = 0;
 
-        // Iterate over all intercept-timestamp pairs for this slope.
+        // Iterate over all intercept-index pairs for this slope.
         for (slope_entry.value_ptr.*.items) |pair| {
             // Append the intercept b_j,i.
             try shared_functions.appendValue(allocator, f64, pair.intercept, compressed_values);
 
-            // Append the timestamp t_j,i.
-            try shared_functions.appendValue(allocator, usize, pair.timestamp - previous_timestamp, compressed_values);
-            previous_timestamp = pair.timestamp;
+            // Append the index t_j,i.
+            try shared_functions.appendValue(allocator, usize, pair.index - previous_index, compressed_values);
+            previous_index = pair.index;
         }
     }
 }
 
 /// Mix-Piece Phase 4.3. Create compressed representation from the 'ungrouped_segments_array'
 /// that can be decoded during decompression and store it in `compressed_values`. The compressed
-/// representation is a byte array containing the slopes a_j, intercept-timestamps pairs and
+/// representation is a byte array containing the slopes a_j, intercept-indices pairs and
 /// necessary metadata for proper decoding. Specifically, the compressed representation has
 /// the following structure: [a_j, k_j, b_j,1, t_j,1, b_j,2, t_j,2, ..., b_j,k_j, t_j,k_j]
-/// where a_j is the  slope, k_j is the  number of intercept-timestamp pairs for this slope
-/// b_j,i is the i-th intercept for slope a_j, t_j,i is the i-th timestamp for slope a_j.
+/// where a_j is the  slope, k_j is the  number of intercept-index pairs for this slope
+/// b_j,i is the i-th intercept for slope a_j, t_j,i is the i-th index for slope a_j.
 fn createCompressedRepresentationUngroupedSegments(
     allocator: Allocator,
     ungrouped_segments_array: ArrayList(UngroupedSegment),
     compressed_values: *ArrayList(u8),
 ) !void {
-    var previous_timestamp: usize = 0;
+    var previous_index: usize = 0;
 
     // Iterate over all ungrouped segments.
     for (ungrouped_segments_array.items) |segment| {
@@ -1019,9 +1263,9 @@ fn createCompressedRepresentationUngroupedSegments(
         // Append the intercept b_i.
         try shared_functions.appendValue(allocator, f64, segment.intercept, compressed_values);
 
-        // Append the timestamp t_i (delta encoded for consistency with other phases).
-        try shared_functions.appendValue(allocator, usize, segment.timestamp - previous_timestamp, compressed_values);
-        previous_timestamp = segment.timestamp;
+        // Append the index t_i (delta encoded for consistency with other phases).
+        try shared_functions.appendValue(allocator, usize, segment.index - previous_index, compressed_values);
+        previous_index = segment.index;
     }
 }
 
@@ -1314,5 +1558,63 @@ test "check mixpiece configuration parsing" {
         uncompressed_values,
         &compressed_values,
         method_configuration,
+    );
+}
+
+test "rebuildMixPiece rejects malformed header-only input" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).empty;
+    defer compressed.deinit(allocator);
+
+    // indices must contain at least 3 elements for header, but coefficients are missing.
+    const indices = [_]u64{ 1, 0, 0 };
+    const coefficients = [_]f64{}; // no intercept thus corrupted.
+
+    try testing.expectError(
+        Error.CorruptedCompressedData,
+        rebuild(allocator, indices[0..], coefficients[0..], &compressed),
+    );
+}
+
+test "rebuildMixPiece rejects mismatched Part1 group structure" {
+    // To fully understand this test, refer to the MixPiece implementation.
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).empty;
+    defer compressed.deinit(allocator);
+
+    // part1_count = 1, but missing slope data.
+    const indices = [_]u64{
+        1, // part1_count.
+        0, // part2_count.
+        0, // part3_count.
+        1, // slopes_count for group 0.
+        0, // indices_count for slope (but missing deltas + final index).
+    };
+
+    const coefficients = [_]f64{
+        5.0, // intercept.
+        // No slope thus the data is corrupted.
+    };
+
+    try testing.expectError(
+        Error.CorruptedCompressedData,
+        rebuild(allocator, indices[0..], coefficients[0..], &compressed),
+    );
+}
+
+test "rebuildMixPiece rejects missing final index" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).empty;
+    defer compressed.deinit(allocator);
+
+    const indices = [_]u64{
+        0, 0, 0,
+        // Missing final_index.
+    };
+
+    const coefficients = [_]f64{}; // No coefficients needed for zero parts.
+    try testing.expectError(
+        Error.CorruptedCompressedData,
+        rebuild(allocator, indices[0..], coefficients[0..], &compressed),
     );
 }

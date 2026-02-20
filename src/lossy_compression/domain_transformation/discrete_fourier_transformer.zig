@@ -13,11 +13,15 @@
 // limitations under the License.
 
 //! This module implements Discrete Fourier Transform (DFT) using the PocketFFT library implemented at:
-//! https://gitlab.mpcdf.mpg.de/mtr/pocketfft
+//! https://gitlab.mpcdf.mpg.de/mtr/pocketfft.
 //! It provides functions to compress and decompress data using DFT by retaining a specified number of
-//! frequency coefficients based on their magnitudes. The compression function transforms the input data into the frequency domain,
-//! selects the top-K coefficients, and stores them along with necessary metadata. The decompression function reconstructs the original data
-//! approximately by performing an inverse DFT using the retained coefficients.
+//! frequency coefficients based on their magnitudes. The compression function transforms the input data
+//! into the frequency domain, selects the top-K coefficients, and stores them along with necessary metadata.
+//! The decompression function reconstructs the original data approximately by performing an inverse DFT
+//! using the retained coefficients. The module also includes an `extract` function to retrieve the preserved
+//! frequency coefficients from the compressed data without performing a full decompression. Additonally, a
+//! rebuild function is provided to reconstruct the signal from the extracted coefficients. Error handling is
+//! implemented to manage invalid configurations and corrupted compressed data.
 
 const std = @import("std");
 const mem = std.mem;
@@ -54,6 +58,11 @@ pub fn compress(
 ) Error!void {
     const number_of_bins: usize = uncompressed_values.len / 2 + 1;
 
+    // Validate input length. The maximum length is constrained by the header format.
+    // This is a practical limit to ~ 4 billion samples, which should be sufficient.
+    if (uncompressed_values.len > 0xFFFFFFFF)
+        return Error.UnsupportedInput;
+
     const parsed_configuration = try configuration.parse(
         allocator,
         configuration.DomainTransformation,
@@ -61,8 +70,8 @@ pub fn compress(
     );
     const number_of_coefficients: u32 = parsed_configuration.number_of_coefficients;
 
-    if (number_of_coefficients == 0 or number_of_coefficients > number_of_bins)
-        return Error.UnsupportedErrorBound;
+    if (number_of_coefficients > number_of_bins)
+        return Error.InvalidConfiguration;
 
     // PocketFFT works in-place.
     const pocketfft_buffer = try allocator.alloc(f64, uncompressed_values.len);
@@ -188,7 +197,7 @@ pub fn decompress(
     decompressed_values: *ArrayList(f64),
 ) Error!void {
     if (compressed_values.len < 16)
-        return Error.CorruptedCompressedData; // u32 + u64 + f64
+        return Error.CorruptedCompressedData; // u32 + u64 + f64.
 
     var offset: usize = 0;
 
@@ -198,7 +207,8 @@ pub fn decompress(
     const N: u32 =
         try shared_functions.readOffsetValue(u32, compressed_values, &offset);
 
-    // Just in case, validate N.
+    // Just in case, validate N. TerseTS API should prevent any array with length less than 2
+    // from being compressed, but we check here to be safe.
     if (N < 2)
         return Error.CorruptedCompressedData;
 
@@ -253,6 +263,158 @@ pub fn decompress(
     try decompressed_values.ensureTotalCapacity(allocator, N);
     for (0..N) |i_val| {
         try decompressed_values.append(allocator, pocketfft_buffer[i_val]);
+    }
+}
+
+/// Extracts `indices` and `coefficients` from Discrete Fourier Transform's `compressed_values`.
+/// The `compressed_values` encodes: real and imaginary parts of the preserved coefficients, and
+/// their corresponding indices. The first 16 bytes of `compressed_values` are reserved in the
+/// `indices` array for the header information (number of coefficients, original length, DC coefficient).
+/// The `indices` ArrayList stores the indices of the preserved coefficients, and the `coefficients`
+/// ArrayList stores the real and imaginary parts of the preserved coefficients in an interleaved manner
+/// (real, imaginary, real, imaginary, ...). Any loss of information on the indices, for example,
+/// incorrect header information, or missing indices, can lead to incorrect reconstruction of the signal
+/// during decompression. Only structural checks are performed. The caller must ensure semantic validity.
+/// If the compressed stream does not follow the expected representation, `Error.CorruptedCompressedData`
+/// is returned. The `allocator` handles the memory allocations of the output arrays.
+/// Allocation errors are propagated.
+pub fn extract(
+    allocator: Allocator,
+    compressed_values: []const u8,
+    indices: *ArrayList(u64),
+    coefficients: *ArrayList(f64),
+) Error!void {
+    if (compressed_values.len < 16)
+        return Error.CorruptedCompressedData; // u32 + u64 + f64.
+
+    var offset: usize = 0;
+
+    // Read header information.
+    const preserve_top_coefficients: u64 =
+        @intCast(try shared_functions.readOffsetValue(u32, compressed_values, &offset));
+    const N: u64 =
+        @intCast(try shared_functions.readOffsetValue(u32, compressed_values, &offset));
+
+    // Store header information in the indices array for reference during reconstruction.
+    try indices.append(allocator, preserve_top_coefficients);
+    try indices.append(allocator, N);
+
+    // Read DC coefficient and store it in the coefficients array for reference during reconstruction.
+    const dc_real: f64 =
+        try shared_functions.readOffsetValue(f64, compressed_values, &offset);
+
+    try coefficients.append(allocator, dc_real);
+
+    // Just in case, validate N. TerseTS API should prevent any array with length less than 2
+    // from being compressed, but we check here to be safe.
+    if (N < 2)
+        return Error.CorruptedCompressedData;
+
+    const number_of_bins: usize = @intCast(N / 2 + 1);
+
+    // Validate number of coefficients to preserve.
+    if (preserve_top_coefficients == 0 or preserve_top_coefficients > number_of_bins)
+        return Error.CorruptedCompressedData;
+
+    // Skip DC coefficient.
+    offset += 8;
+
+    // Read preserved coefficients.
+    for (0..preserve_top_coefficients - 1) |_| {
+        const index =
+            try shared_functions.readOffsetValue(u64, compressed_values, &offset);
+        const real =
+            try shared_functions.readOffsetValue(f64, compressed_values, &offset);
+        const imaginary =
+            try shared_functions.readOffsetValue(f64, compressed_values, &offset);
+
+        if (index == 0 or index >= number_of_bins)
+            return Error.CorruptedCompressedData;
+
+        try indices.append(allocator, index);
+        try coefficients.append(allocator, real);
+        try coefficients.append(allocator, imaginary);
+    }
+}
+
+/// Rebuilds Discrete Fourier Transform's `compressed_values` from the given `indices` and
+/// `coefficients`. The encoding consists of top coefficients to preserve, original length,
+/// DC coefficient, and the indices and values of the preserved coefficients. The `indices`
+/// ArrayList is expected to contain the indices of the preserved coefficients, and the
+/// `coefficients` ArrayList is expected to contain the real and imaginary parts of the
+/// preserved coefficients in an interleaved manner (real, imaginary, real, imaginary, ...).
+/// Any loss or misalignment of indices information, for example, wrong number of elements,
+/// or top coefficient count can lead to failures during decompression. The function checks
+/// for structural consistency and returns `Error.CorruptedCompressedData` for malformed input.
+/// The `allocator` handles the memory allocations of the output arrays. Allocation errors are propagated.
+pub fn rebuild(
+    allocator: Allocator,
+    indices: []const u64,
+    coefficients: []const f64,
+    compressed_values: *ArrayList(u8),
+) Error!void {
+    // Must contain at least shift_amount and number_of_segments.
+    if (indices.len < 1 or coefficients.len < 1)
+        return Error.CorruptedCompressedData;
+
+    // Coefficients must be at least 2 times the number of indices (real and imaginary parts).
+    // We remove the header from the indices count, since the first two indices are reserved for
+    // the number of coefficients and original length.
+    if (coefficients.len * 2 < indices.len - 2) {
+        return Error.CorruptedCompressedData;
+    }
+
+    // Store header of the compressed data.
+    // 1) Number of retained coefficients (u32).
+    // 2) Original length (u32).
+    // 3) DC coefficient (f64).
+    const preserve_top_coefficients: u64 = indices[0];
+    const N: u64 = indices[1];
+    const dc_real: f64 = coefficients[0];
+
+    try shared_functions.appendValue(
+        allocator,
+        u32,
+        @as(u32, @intCast(preserve_top_coefficients)),
+        compressed_values,
+    );
+    try shared_functions.appendValue(
+        allocator,
+        u32,
+        @as(u32, @intCast(N)),
+        compressed_values,
+    );
+    try shared_functions.appendValue(
+        allocator,
+        f64,
+        dc_real,
+        compressed_values,
+    );
+
+    // Append preserved coefficients.
+    for (1..indices.len) |i| {
+        const index = indices[i];
+        const real = coefficients[2 * i - 1];
+        const imaginary = coefficients[2 * i];
+
+        try shared_functions.appendValue(
+            allocator,
+            u64,
+            index,
+            compressed_values,
+        );
+        try shared_functions.appendValue(
+            allocator,
+            f64,
+            real,
+            compressed_values,
+        );
+        try shared_functions.appendValue(
+            allocator,
+            f64,
+            imaginary,
+            compressed_values,
+        );
     }
 }
 

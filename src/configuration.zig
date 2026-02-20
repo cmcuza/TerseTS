@@ -109,12 +109,122 @@ pub fn parse(
         },
         EmptyConfiguration => {},
         DomainTransformation => {
-            if (parsed_value.number_of_coefficients < 0)
+            if (parsed_value.number_of_coefficients <= 0)
                 return error.InvalidConfiguration;
         },
         else => return error.InvalidConfiguration,
     }
     return parsed_value;
+}
+
+pub fn defaultConfigurationBuilder(
+    allocator: Allocator,
+    method: tersets.Method,
+) ![]u8 {
+    return switch (method) {
+        // Methods using absolute error: float objective.
+        .PoorMansCompressionMidrange,
+        .PoorMansCompressionMean,
+        .SwingFilter,
+        .SwingFilterDisconnected,
+        .SlideFilter,
+        .SimPiece,
+        .MixPiece,
+        .ABCLinearApproximation,
+        .NonLinearApproximation,
+        .SerfQT,
+        .BitPackedQuantization,
+        => blk: {
+            const error_bound: f32 = 0.1; // Simple default value.
+            break :blk try getDefaultAbsoluteErrorConfiguration(
+                allocator,
+                error_bound,
+            );
+        },
+
+        // Methods using histogram bins: integer objective.
+        .PiecewiseConstantHistogram,
+        .PiecewiseLinearHistogram,
+        => blk: {
+            const bins: u32 = 2; // Minimum allowed value.
+            break :blk try getDefaultHistogramConfiguration(
+                allocator,
+                bins,
+            );
+        },
+
+        // Methods using aggregated RMSE bound.
+        .BottomUp,
+        .SlidingWindow,
+        => blk: {
+            const rmse: f32 = 0.1; // Simple default value.
+            break :blk try getDefaultAggregatedConfiguration(
+                allocator,
+                rmse,
+            );
+        },
+
+        // Methods using AUC error bound.
+        .VisvalingamWhyatt => blk: {
+            const auc: f32 = 0.1; // Simple default value.
+            break :blk try getDefaultAUCConfiguration(
+                allocator,
+                auc,
+            );
+        },
+
+        // Methods using domain transformation with number of coefficients.
+        .DiscreteFourierTransform => blk: {
+            const coefficients: u32 = 1; // Simple default value.
+            break :blk try getDefaultDomainTransformationConfiguration(
+                allocator,
+                coefficients,
+            );
+        },
+
+        // Methods with empty configuration.
+        .RunLengthEncoding => try allocator.dupe(u8, "{}"),
+    };
+}
+
+fn getDefaultAbsoluteErrorConfiguration(allocator: Allocator, error_bound: f32) ![]u8 {
+    return try std.fmt.allocPrint(
+        allocator,
+        "{{\"abs_error_bound\": {d}}}",
+        .{error_bound},
+    );
+}
+
+fn getDefaultHistogramConfiguration(allocator: Allocator, number_bins: u32) ![]u8 {
+    return try std.fmt.allocPrint(
+        allocator,
+        "{{\"histogram_bins_number\": {d}}}",
+        .{number_bins},
+    );
+}
+
+fn getDefaultAggregatedConfiguration(allocator: Allocator, aggregated_error_bound: f32) ![]u8 {
+    return try std.fmt.allocPrint(
+        allocator,
+        "{{\"aggregate_error_type\": \"rmse\", \"aggregate_error_bound\": {d}}}",
+        .{aggregated_error_bound},
+    );
+}
+
+fn getDefaultAUCConfiguration(allocator: Allocator, auc_error_bound: f32) ![]u8 {
+    return try std.fmt.allocPrint(
+        allocator,
+        "{{\"area_under_curve_error\": {d}}}",
+        .{auc_error_bound},
+    );
+}
+
+fn getDefaultDomainTransformationConfiguration(allocator: Allocator, number_of_coefficients: u32) ![]u8 {
+    return try std.fmt.allocPrint(
+        allocator,
+        "{{\"number_of_coefficients\": {d}}}",
+        .{number_of_coefficients},
+    );
 }
 
 test "parse valid AbsoluteErrorBound" {
