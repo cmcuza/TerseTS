@@ -10,6 +10,13 @@
  *  \author Martin Reinecke
  */
 
+/*
+To make it as explicit as possible that this code is copied from:
+https://gitlab.mpcdf.mpg.de/mtr/pocketfft/-/raw/master/pocketfft.h?ref_type=heads
+No attempt to make it consistent with TerseTS has been made.
+*/
+
+
 #ifndef POCKETFFT_H
 #define POCKETFFT_H
 

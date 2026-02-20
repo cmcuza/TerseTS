@@ -682,8 +682,7 @@ test "extract and rebuild works for any compression method supported" {
 
         if (method == Method.BitPackedQuantization or
             method == Method.SerfQT or
-            method == Method.RunLengthEncoding or
-            method == Method.DiscreteFourierTransform)
+            method == Method.RunLengthEncoding)
         {
             // These compression methods are not supported for extraction
             // of the coefficients and indices. This is because even small

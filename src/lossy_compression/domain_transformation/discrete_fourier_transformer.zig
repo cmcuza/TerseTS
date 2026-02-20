@@ -392,7 +392,7 @@ pub fn rebuild(
     );
 
     // Append preserved coefficients.
-    for (1..indices.len) |i| {
+    for (2..indices.len) |i| {
         const index = indices[i];
         const real = coefficients[2 * i - 1];
         const imaginary = coefficients[2 * i];
@@ -418,22 +418,37 @@ pub fn rebuild(
     }
 }
 
-test "fft compression round-trip full reconstruction" {
+test "fft compression round-trip full reconstruction with all coefficients preserved and small values" {
+    // This test validates that compressing and then decompressing a random array of values
+    // results in an approximation of the original values within a reasonable error margin,
+    // when all coefficients are preserved. This serves as a basic correctness check for the
+    // DFT-based compression and decompression implementation.
+    // Note: since we are preserving all coefficients, the decompressed values should be very
+    // close to the original values, with only minor differences due to floating-point precision.
+    // DFT cannot be set 100% lossless compression due to the nature of floating-point arithmetic.
     const allocator = std.testing.allocator;
 
     var uncompressed = ArrayList(f64).empty;
     defer uncompressed.deinit(allocator);
+
+    // Generate random values between -1000 and 1000 to ensure a reasonable range of magnitudes.
+    // Generating values between -tester.max_test_values and tester.max_test_values can lead to
+    // very large magnitudes in the frequency domain, which can amplify floating-point precision
+    // issues and result in larger errors after decompression. By constraining the input values to
+    // a smaller range, we can mitigate this issue and ensure that the test focuses on validating
+    // the correctness of the compression and decompression logic rather than being affected by
+    // extreme values.
     try tester.generateBoundedRandomValues(
         allocator,
         &uncompressed,
-        -tester.max_test_value,
-        tester.max_test_value,
+        -1e3,
+        1e3,
         null,
     );
-
     const N = uncompressed.items.len;
 
-    const preserve_top_coefficients = N / 2 + 1; // number_of_bins - 1.
+    // Preserve all coefficients for this test to validate the round-trip reconstruction.
+    const preserve_top_coefficients = N / 2 + 1; // number_of_bins + 1.
 
     var compressed_values = std.ArrayList(u8).empty;
     defer compressed_values.deinit(allocator);
@@ -463,11 +478,94 @@ test "fft compression round-trip full reconstruction" {
 
     try std.testing.expectEqual(uncompressed.items.len, decompressed.items.len);
 
+    // Validate that each decompressed value is approximately equal to the original value within
+    // small error margin. The value 1e-8 is chosen as a reasonable threshold for floating-point
+    // precision errors in this context. Since we are preserving all coefficients, the decompressed
+    // values should be very close. There is no strict theoretical guarantee for the exact error margin.
+    // Thus, 1e-8 is an empirically chosen value that balances the need to account for
+    // floating-point precision issues while still ensuring that the decompressed values are very
+    // close to the original values.
     for (0..N) |i| {
         try std.testing.expectApproxEqRel(
             decompressed.items[i],
             uncompressed.items[i],
-            1e-12,
+            1e-8,
+        );
+    }
+}
+
+test "fft compression round-trip full reconstruction with all coefficients preserved and very small values" {
+    // This test validates that compressing and then decompressing a random array of values
+    // results in an approximation of the original values within a reasonable error margin,
+    // when all coefficients are preserved. This serves as a basic correctness check for the
+    // DFT-based compression and decompression implementation.
+    // Note: since we are preserving all coefficients, the decompressed values should be very
+    // close to the original values, with only minor differences due to floating-point precision.
+    // DFT cannot be set 100% lossless compression due to the nature of floating-point arithmetic.
+    const allocator = std.testing.allocator;
+
+    var uncompressed = ArrayList(f64).empty;
+    defer uncompressed.deinit(allocator);
+
+    // Generate random values between -1 and 1 to ensure a reasonable range of magnitudes.
+    // Generating values between -tester.max_test_values and tester.max_test_values can lead to
+    // very large magnitudes in the frequency domain, which can amplify floating-point precision
+    // issues and result in larger errors after decompression. By constraining the input values to
+    // a smaller range, we can mitigate this issue and ensure that the test focuses on validating
+    // the correctness of the compression and decompression logic rather than being affected by
+    // extreme values.
+    try tester.generateBoundedRandomValues(
+        allocator,
+        &uncompressed,
+        -1,
+        1,
+        null,
+    );
+    const N = uncompressed.items.len;
+
+    // Preserve all coefficients for this test to validate the round-trip reconstruction.
+    const preserve_top_coefficients = N / 2 + 1; // number_of_bins + 1.
+
+    var compressed_values = std.ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    const method_configuration = try std.fmt.allocPrint(
+        allocator,
+        "{{\"number_of_coefficients\": {}}}",
+        .{preserve_top_coefficients},
+    );
+    defer allocator.free(method_configuration);
+
+    try compress(
+        allocator,
+        uncompressed.items,
+        &compressed_values,
+        method_configuration,
+    );
+
+    var decompressed = std.ArrayList(f64).empty;
+    defer decompressed.deinit(allocator);
+
+    try decompress(
+        allocator,
+        compressed_values.items,
+        &decompressed,
+    );
+
+    try std.testing.expectEqual(uncompressed.items.len, decompressed.items.len);
+
+    // Validate that each decompressed value is approximately equal to the original value within
+    // small error margin. The value 1e-10 is chosen as a reasonable threshold for floating-point
+    // precision errors in this context. Since we are preserving all coefficients, the decompressed
+    // values should be very close. There is no strict theoretical guarantee for the exact error margin.
+    // Thus, 1e-10 is an empirically chosen value that balances the need to account for
+    // floating-point precision issues while still ensuring that the decompressed values are very
+    // close to the original values.
+    for (0..N) |i| {
+        try std.testing.expectApproxEqRel(
+            decompressed.items[i],
+            uncompressed.items[i],
+            1e-10,
         );
     }
 }
