@@ -115,8 +115,9 @@ const noise_scale: f64 = 0.005; // 0.5%
 
 /// Different data distributions used for testing.
 pub const DataDistribution = enum {
+    TightlyBoundedRandomValues,
     LinearFunctions,
-    QuadradicFunctions,
+    QuadraticFunctions,
     ExponentialFunctions,
     PowerFunctions,
     SqrtFunctions,
@@ -146,6 +147,13 @@ pub fn testErrorBoundedCompressionMethod(
     for (data_distributions) |dist| {
         const error_bound: f32 = random.float(f32) + 1e-4; // Ensure a non-zero error bound.
         switch (dist) {
+            .TightlyBoundedRandomValues => try testGeneratedErrorBoundedCompression(
+                allocator,
+                generateRandomTightlyBoundedValues,
+                method,
+                error_bound,
+                "Tightly Bounded Values",
+            ),
             .LinearFunctions => try testGeneratedErrorBoundedCompression(
                 allocator,
                 generateRandomLinearFunctions,
@@ -153,7 +161,7 @@ pub fn testErrorBoundedCompressionMethod(
                 error_bound,
                 "Linear Functions",
             ),
-            .QuadradicFunctions => try testGeneratedErrorBoundedCompression(
+            .QuadraticFunctions => try testGeneratedErrorBoundedCompression(
                 allocator,
                 generateRandomQuadraticFunctions,
                 method,
@@ -251,13 +259,19 @@ pub fn testLosslessMethod(
 ) !void {
     for (data_distributions) |dist| {
         switch (dist) {
+            .TightlyBoundedRandomValues => try testGeneratedLosslessCompression(
+                allocator,
+                generateRandomTightlyBoundedValues,
+                method,
+                "Tightly Bounded Values",
+            ),
             .LinearFunctions => try testGeneratedLosslessCompression(
                 allocator,
                 generateRandomLinearFunctions,
                 method,
                 "Linear Functions",
             ),
-            .QuadradicFunctions => try testGeneratedLosslessCompression(
+            .QuadraticFunctions => try testGeneratedLosslessCompression(
                 allocator,
                 generateRandomQuadraticFunctions,
                 method,
@@ -638,10 +652,10 @@ pub fn replaceNormalValues(
     }
 }
 
-/// Generate a random `f64` value using `random_opt`. If `random_opt` is not passed, a random number
+/// Generate a random `f64` value using `random_optional`. If `random_optional` is not passed, a random number
 /// generator is created.
-pub fn generateRandomValue(random_opt: ?Random) f64 {
-    var random = resolveRandom(random_opt);
+pub fn generateRandomValue(random_optional: ?Random) f64 {
+    var random = resolveRandom(random_optional);
 
     // rand can only generate f64 values in the range [0, 1).
     const random_value = @as(f64, @bitCast(random.int(u64)));
@@ -777,6 +791,30 @@ pub fn generateDefaultBoundedValues(allocator: Allocator, values: *ArrayList(f64
     try generateBoundedRandomValues(allocator, values, -1e15, 1e15, random);
 }
 
+/// Wrapper around `generateBoundedRandomValues` with a default range. The function generates
+/// a random number of `f64` values between a smaller randomly generated range for use in testing using
+/// `random` and adds them to `uncompressed_values`. This range can be represented by a `f64`
+/// without losing precision, thus it is used as a default range for testing purposes.
+pub fn generateRandomTightlyBoundedValues(allocator: Allocator, values: *ArrayList(f64), random: Random) !void {
+    const reduction_factor = generateBoundedRandomValue(
+        f64,
+        1e2,
+        1e6,
+        random,
+    );
+    // Generate random lower and upper bounds within [-max_test_value/1e4, max_test_value/1e4].
+    const lower_bound = generateBoundedRandomValue(
+        f64,
+        -max_test_value / reduction_factor,
+        max_test_value / reduction_factor,
+        random,
+    );
+
+    const upper_bound: f64 = @abs(lower_bound) * reduction_factor;
+
+    try generateBoundedRandomValues(allocator, values, lower_bound, upper_bound, random);
+}
+
 /// Generate a random number of `f64` values values between -1e15 and 1e15 for use in testing using
 /// `random` and add them to `uncompressed_values`. The function also replaces some of the
 /// generated values with NaNs and infinities with almost probability one.
@@ -813,16 +851,14 @@ pub fn generateBoundedRandomValues(
     uncompressed_values: *ArrayList(f64),
     lower_bound: f64,
     upper_bound: f64,
-    random_opt: ?Random,
+    random_optional: ?Random,
 ) !void {
-    const random = resolveRandom(random_opt);
+    const random = resolveRandom(random_optional);
 
     for (0..generateNumberOfValues(random)) |_| {
         // generate f64 values in the range [0, 1).
-        const random_value: f64 = random.float(f64);
-        const bounded_value = lower_bound + random_value * (upper_bound - lower_bound);
-        const clamped_value = math.clamp(bounded_value, -clamped_max_value, clamped_max_value);
-        try uncompressed_values.append(allocator, clamped_value);
+        const bounded_value = generateBoundedRandomValue(f64, lower_bound, upper_bound, random);
+        try uncompressed_values.append(allocator, bounded_value);
     }
 }
 
@@ -854,7 +890,7 @@ pub fn generateRandomLinearFunction(allocator: Allocator, uncompressed_values: *
 
 /// Generate a random number of `f64` values following a power function with random coefficients
 /// theta_1 * x ^ theta_2, and add them to `uncompressed_values`. Small random noise is added to
-/// each value. The generated values are bounded within [-1e15, 1e15]. If `random_opt` is
+/// each value. The generated values are bounded within [-1e15, 1e15]. If `random_optional` is
 /// not passed, a random number generator is created.
 pub fn generateRandomPowerFunction(allocator: Allocator, uncompressed_values: *ArrayList(f64), random: Random) !void {
 
@@ -875,7 +911,7 @@ pub fn generateRandomPowerFunction(allocator: Allocator, uncompressed_values: *A
 
 /// Generate a random number of `f64` values following a sinusoidal function with random amplitude,
 /// frequency, and additive noise. The output values are guaranteed to be finite and lie within the
-/// range [-1e15, 1e15]. The values are generated using `random_opt` and returned in
+/// range [-1e15, 1e15]. The values are generated using `random_optional` and returned in
 /// `uncompressed_values`. If an error occurs, it is returned.
 pub fn generateRandomSinusoidalFunction(
     allocator: Allocator,
@@ -904,7 +940,7 @@ pub fn generateRandomSinusoidalFunction(
 
 /// Generate a random number of `f64` values following a quadratic function with random coefficients
 /// theta_1 * x ^ 2 + theta_2, and add them to `uncompressed_values`. Small random noise is added to
-/// each value. The generated values are bounded within [-1e15, 1e15]. If `random_opt` is
+/// each value. The generated values are bounded within [-1e15, 1e15]. If `random_optional` is
 /// not passed, a random number generator is created.
 pub fn generateRandomQuadraticFunction(allocator: Allocator, uncompressed_values: *ArrayList(f64), random: Random) !void {
     // theta_1 in [-1e6, 1e6] (log-uniform).
@@ -928,7 +964,7 @@ pub fn generateRandomQuadraticFunction(allocator: Allocator, uncompressed_values
 
 /// Generate a random number of `f64` values following a square root function with random coefficients
 /// theta_1 * sqrt(x) + theta_2, and add them to `uncompressed_values`. Small random noise is added to
-/// each value. The generated values are bounded within [-1e15, 1e15]. If `random_opt` is
+/// each value. The generated values are bounded within [-1e15, 1e15]. If `random_optional` is
 /// not passed, a random number generator is created.
 pub fn generateRandomSqrtFunction(allocator: Allocator, uncompressed_values: *ArrayList(f64), random: Random) !void {
     // theta_1 in [-1e10, 1e10] (log-uniform).
@@ -952,7 +988,7 @@ pub fn generateRandomSqrtFunction(allocator: Allocator, uncompressed_values: *Ar
 
 /// Generate a random number of `f64` values following a exponential function with random coefficients
 /// theta_1 * e ^ (x * theta_2), and add them to `uncompressed_values`. Small random noise is added to
-/// each value. The generated values are bounded within [-1e15, 1e15]. If `random_opt` is
+/// each value. The generated values are bounded within [-1e15, 1e15]. If `random_optional` is
 /// not passed, a random number generator is created.
 pub fn generateRandomExponentialFunction(allocator: Allocator, uncompressed_values: *ArrayList(f64), random: Random) !void {
 
@@ -1023,21 +1059,30 @@ pub fn generateMixedBoundedValuesFunctions(
 }
 
 /// Generate a random value of type `T` between `at_least` and `at_most` for use in testing using
-/// `random_opt`. `T` must be a floating-point type (e.g., `f32`, `f64`). If random_opt is not
-/// passed, a random number generator is created using the current time as seed.
-pub fn generateBoundedRandomValue(comptime T: type, at_least: T, at_most: T, random_opt: ?Random) T {
-    var random = resolveRandom(random_opt);
+/// `random_optional`. `T` must be a floating-point type (e.g., `f32`, `f64`). The value is sampled
+/// logarithmically to ensure better coverage across orders of magnitude. If `random_optional`
+/// is not passed, a random number generator is created using the current time as seed.
+pub fn generateBoundedRandomValue(comptime T: type, at_least: T, at_most: T, random_optional: ?Random) T {
+    var random = resolveRandom(random_optional);
 
-    const rand_value: T = random.float(T);
-    const bounded_value = at_least + (at_most - at_least) * rand_value;
-    return bounded_value;
+    const at_least_log = toLog(T, at_least);
+    const at_most_log = toLog(T, at_most);
+
+    // Generate a random value in [0, 1) and scale it within the logarithmic range [at_least_log, at_most_log].
+    const rand_value = random.float(T);
+    const log_sample = at_least_log + (at_most_log - at_least_log) * rand_value;
+    // Transform back to the real number line.
+    const value = fromLog(T, log_sample);
+
+    // Clamp the logarithmically sampled value to [at_least, at_most].
+    return math.clamp(value, at_least, at_most);
 }
 
 /// Generate a random value of type `T` between `at_least` and `at_most` for use in testing using
-/// `random_opt`. `T` must be an integer-point type (e.g., `i32`, `usize`). If random_opt is not
+/// `random_optional`. `T` must be an integer-point type (e.g., `i32`, `usize`). If random_optional is not
 /// passed, a random number generator is created using the current time as seed.
-pub fn generateBoundRandomInteger(comptime T: type, at_least: T, at_most: T, random_opt: ?Random) T {
-    var random = resolveRandom(random_opt);
+pub fn generateBoundRandomInteger(comptime T: type, at_least: T, at_most: T, random_optional: ?Random) T {
+    var random = resolveRandom(random_optional);
 
     const rand_value: T = random.intRangeAtMost(T, at_least, at_most);
     return rand_value;
@@ -1062,10 +1107,10 @@ pub fn getDefaultRandomGenerator() Random {
     return default_prng.random();
 }
 
-/// Returns a `Random` object. If `random_opt` is provided, it is returned directly. Otherwise,
+/// Returns a `Random` object. If `random_optional` is provided, it is returned directly. Otherwise,
 /// this function returns the default `Random` instance.
-pub fn resolveRandom(random_opt: ?Random) Random {
-    return random_opt orelse getDefaultRandomGenerator();
+pub fn resolveRandom(random_optional: ?Random) Random {
+    return random_optional orelse getDefaultRandomGenerator();
 }
 
 /// Adds noise to a given value based on `noise_scale`. This ensures that the noise is proportional
@@ -1075,4 +1120,18 @@ fn addNoise(value: f64) f64 {
     const rand_factor = getDefaultRandomGenerator().float(f64) - 0.5;
     const noise = rand_factor * noise_scale * @abs(value);
     return value + noise;
+}
+
+/// Convert a value to a logarithmic scale using base 10. The function handles both positive
+/// and negative values by preserving the sign.
+fn toLog(comptime T: type, value: T) T {
+    const sign: T = if (value < 0) @as(T, -1.0) else @as(T, 1.0);
+    return sign * @log10(@abs(value) + 1.0);
+}
+
+/// Convert a value from a logarithmic scale back to its original scale using base 10. The function
+/// handles both positive and negative values by preserving the sign.
+fn fromLog(comptime T: type, value: T) T {
+    const sign: T = if (value < 0) @as(T, -1.0) else @as(T, 1.0);
+    return sign * (math.pow(T, 10.0, @abs(value)) - 1.0);
 }

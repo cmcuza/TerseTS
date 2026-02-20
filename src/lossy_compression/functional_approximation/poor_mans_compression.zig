@@ -62,7 +62,11 @@ pub fn compressMidrange(
         const nextMinimum = @min(value, minimum);
         const nextMaximum = @max(value, maximum);
 
-        if ((nextMaximum - nextMinimum) > 2 * error_bound) {
+        // If the error bound is zero, we only append a new value if the next value is different.
+        // Without this check low precision values would pass the error bound check and lose information.
+        // For example if minimum is 34.5e-301 and maximum is 4.5e-301, the error bound check would pass
+        // since 34.5e-301 - 4.5e-301 == 0 due to precision loss.
+        if (((error_bound == 0) and (nextMaximum != nextMinimum)) or (nextMaximum - nextMinimum) > 2 * error_bound) {
             const compressed_value: f64 = @floatCast((maximum + minimum) / 2);
             try shared_functions.appendValueAndIndexToArrayList(
                 allocator,
@@ -119,22 +123,47 @@ pub fn compressMean(
         const nextLength = length + 1;
         const nextAverage = (average * length + value) / nextLength;
 
-        if ((nextMaximum - nextAverage > error_bound) or (nextAverage - nextMinimum > error_bound)) {
-            try shared_functions.appendValueAndIndexToArrayList(
-                allocator,
-                @floatCast(average),
-                index,
-                compressed_values,
-            );
-            minimum = value;
-            maximum = value;
-            length = 1;
-            average = value;
+        // If the error bound is zero, we only append a new value if the next value is different.
+        // Without this check low precision values would pass the error bound check and lose information.
+        // For example if minimum is 34.5e-301 and maximum is 4.5e-301, the error bound check would pass
+        // since 34.5e-301 - 4.5e-301 == 0 due to precision loss.
+        if (error_bound == 0) {
+            if (nextMaximum != nextMinimum) {
+                const compressed_value: f64 = @floatCast(maximum);
+                try shared_functions.appendValueAndIndexToArrayList(
+                    allocator,
+                    compressed_value,
+                    index,
+                    compressed_values,
+                );
+                minimum = value;
+                maximum = value;
+                length = 1;
+                average = value;
+            } else {
+                minimum = nextMinimum;
+                maximum = nextMaximum;
+                length = nextLength;
+                average = nextAverage;
+            }
         } else {
-            minimum = nextMinimum;
-            maximum = nextMaximum;
-            length = nextLength;
-            average = nextAverage;
+            if ((nextMaximum - nextAverage > error_bound) or (nextAverage - nextMinimum > error_bound)) {
+                try shared_functions.appendValueAndIndexToArrayList(
+                    allocator,
+                    @floatCast(average),
+                    index,
+                    compressed_values,
+                );
+                minimum = value;
+                maximum = value;
+                length = 1;
+                average = value;
+            } else {
+                minimum = nextMinimum;
+                maximum = nextMaximum;
+                length = nextLength;
+                average = nextAverage;
+            }
         }
         index += 1;
     }
@@ -221,7 +250,7 @@ test "midrange can always compress and decompress with zero error bound" {
         allocator,
         tester.generateRandomValues,
         Method.PoorMansCompressionMidrange,
-        0,
+        0.0,
         shared_functions.isWithinErrorBound,
     );
 }
@@ -255,7 +284,7 @@ test "mean can always compress and decompress with zero error bound" {
         allocator,
         tester.generateRandomValues,
         Method.PoorMansCompressionMean,
-        0,
+        0.0,
         shared_functions.isWithinErrorBound,
     );
 }
@@ -345,4 +374,68 @@ test "rebuildPMC rejects mismatched input lengths" {
         coefficients[0..],
         &compressed,
     ));
+}
+
+test "PMC-midrange successfully compress and decompress values with similar values and zero error bound" {
+    const allocator = testing.allocator;
+
+    const random_value = tester.generateBoundedRandomValue(f64, -math.floatMax(f64), math.floatMax(f64), null);
+    const uncompressed_values = &[5]f64{ random_value, random_value, random_value, random_value, random_value };
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
+
+    const method_configuration =
+        \\ {"abs_error_bound": 0.0}
+    ;
+
+    try compressMidrange(
+        allocator,
+        uncompressed_values,
+        &compressed_values,
+        method_configuration,
+    );
+
+    try decompress(
+        allocator,
+        compressed_values.items,
+        &decompressed_values,
+    );
+
+    try testing.expectEqualSlices(f64, uncompressed_values, decompressed_values.items);
+}
+
+test "PMC-mean successfully compress and decompress values with similar values and zero error bound" {
+    const allocator = testing.allocator;
+
+    const random_value = tester.generateBoundedRandomValue(f64, -math.floatMax(f64), math.floatMax(f64), null);
+    const uncompressed_values = &[5]f64{ random_value, random_value, random_value, random_value, random_value };
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
+
+    const method_configuration =
+        \\ {"abs_error_bound": 0.0}
+    ;
+
+    try compressMean(
+        allocator,
+        uncompressed_values,
+        &compressed_values,
+        method_configuration,
+    );
+
+    try decompress(
+        allocator,
+        compressed_values.items,
+        &decompressed_values,
+    );
+
+    try testing.expectEqualSlices(f64, uncompressed_values, decompressed_values.items);
 }

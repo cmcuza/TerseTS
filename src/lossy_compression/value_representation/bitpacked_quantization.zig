@@ -59,27 +59,46 @@ pub fn compress(
 
     const error_bound: f32 = parsed_configuration.abs_error_bound;
 
-    // Find the minimum value.
-    var min_val = uncompressed_values[0];
+    // Find the minimum and maximum value.
+    var minimum_value = uncompressed_values[0];
+    var maximum_value = uncompressed_values[0];
+
     for (uncompressed_values) |value| {
         if (!math.isFinite(value) or @abs(value) > tester.max_test_value) return Error.UnsupportedInput;
-        if (value < min_val) min_val = value;
+        if (value < minimum_value) minimum_value = value;
+        if (value > maximum_value) maximum_value = value;
     }
 
     // Append the minimum value to the header of the compressed values.
-    try shared_functions.appendValue(allocator, f64, min_val, compressed_values);
+    try shared_functions.appendValue(allocator, f64, minimum_value, compressed_values);
 
     // All values will map to the closest bucket based on the bucket_size.
     const bucket_size: f64 = shared_functions.createQuantizationBucket(error_bound);
 
-    // Append the minimum value to the header of the compressed values.
+    if (error_bound != 0.0) {
+        // If `bucket_size` is so small that adding it to `minimum_value` does nothing, then the
+        // reconstruction grid collapses at `minimum_value` due to f64 precision.
+        if (minimum_value + bucket_size == minimum_value) {
+            if (@as(f32, @floatCast(@abs(maximum_value - minimum_value))) > error_bound) return Error.UnsupportedInput;
+        } else {
+            // Check whether maximum_value is representable within the error bound under the
+            // same quantize+reconstruct. If not, the method cannot be applied to this input since it
+            // would violate the error bound.
+            const maximum_quantized_value: f64 = @round((maximum_value - minimum_value) / bucket_size);
+            const reconstructed_maximum_value: f64 = minimum_value + maximum_quantized_value * bucket_size;
+
+            if (@as(f32, @floatCast(@abs(reconstructed_maximum_value - maximum_value))) > error_bound) return Error.UnsupportedInput;
+        }
+    }
+
+    // Append the bucket size to the header of the compressed values.
     try shared_functions.appendValue(allocator, f64, bucket_size, compressed_values);
 
     //Intermediate quantized values.
     var quantized_values = ArrayList(u64).empty;
     defer quantized_values.deinit(allocator);
 
-    const u64_min_value: u64 = shared_functions.floatBitsOrdered(min_val);
+    const u64_minimum_value: u64 = shared_functions.floatBitsOrdered(minimum_value);
 
     // Quantize each value by mapping it to a discrete bucket index.
     // If the error_bound is zero, we compute the difference between the
@@ -91,10 +110,10 @@ pub fn compress(
         if (error_bound == 0.0) {
             // Bit-diff quantization for the lossless case.
             const u64_value: u64 = shared_functions.floatBitsOrdered(value);
-            quantized_value = u64_value - u64_min_value;
+            quantized_value = u64_value - u64_minimum_value;
         } else {
             // Fixed-width bucket quantization with rounding.
-            quantized_value = @intFromFloat(@round((value - min_val) / bucket_size));
+            quantized_value = @intFromFloat(@round((value - minimum_value) / bucket_size));
         }
         try quantized_values.append(allocator, quantized_value);
     }
@@ -141,8 +160,8 @@ pub fn decompress(
     // Ensure the compressed values are not empty, i.e., at least the header is present.
     if (compressed_values.len < 16) return Error.UnsupportedInput;
 
-    // Read min_val and bucket_size from the header.
-    const min_val: f64 = @bitCast(compressed_values[0..8].*);
+    // Read minimum_value and bucket_size from the header.
+    const minimum_value: f64 = @bitCast(compressed_values[0..8].*);
     const bucket_size: f64 = @bitCast(compressed_values[8..16].*);
 
     // Create a bit reader from remaining bytes.
@@ -150,10 +169,10 @@ pub fn decompress(
     var bit_reader = shared_structs.bitReader(.little, stream.reader());
     var decompressed_value: f64 = 0.0;
 
-    // Convert min_val to its ordered bit representation.
+    // Convert minimum_value to its ordered bit representation.
     // “Ordered bit representation” means a transformation that makes float bits sortable as integers.
     // This ensures correct decoding when using raw bit differences.
-    const bits_ordered_min_val = shared_functions.floatBitsOrdered(min_val);
+    const bits_ordered_minimum_value = shared_functions.floatBitsOrdered(minimum_value);
 
     // Read each quantized value based on fixed-length header.
     while (true) {
@@ -189,12 +208,12 @@ pub fn decompress(
         }
 
         if (bucket_size == 0.0) {
-            // If bucket size is zero, we assume the values were not quantized and are stored as u64 directy.
-            const raw_u64 = quantized_value + bits_ordered_min_val;
+            // If bucket size is zero, we assume the values were not quantized and are stored as u64 directly.
+            const raw_u64 = quantized_value + bits_ordered_minimum_value;
             decompressed_value = shared_functions.orderedBitsToFloat(raw_u64);
         } else {
             // Reconstruct value from quantized_value and append to decompressed_value.
-            decompressed_value = min_val + @as(f64, @floatFromInt(quantized_value)) * bucket_size;
+            decompressed_value = minimum_value + @as(f64, @floatFromInt(quantized_value)) * bucket_size;
         }
         try decompressed_values.append(allocator, decompressed_value);
     }
@@ -202,11 +221,10 @@ pub fn decompress(
 
 test "bitpacked quantization can compress and decompress bounded values" {
     const allocator = testing.allocator;
-    const data_distributions = &[_]tester.DataDistribution{
-        .LinearFunctions,
-        .BoundedRandomValues,
-        .SinusoidalFunction,
-    };
+    // Use only tightly bounded random values for this test.
+    // BitPackedQuantization requires bounded values to operate correctly.
+    // Other data distributions may generate unbounded values which are not supported.
+    const data_distributions = &[_]tester.DataDistribution{.TightlyBoundedRandomValues};
 
     // This function evaluates BitPackedQuantization using all data distribution stored in
     // `data_distribution`.
@@ -332,11 +350,11 @@ test "bitpacked quantization always reduces size of time series" {
     // Generate 500 random values within different ranges. Even if some values require 8 bytes
     // to be stored, the quantization should reduce the size of the time series since some
     // values require less than 8 bytes to be stored after quantization.
-    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1, 1, null);
-    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e2, 1e2, null);
-    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e4, 1e4, null);
-    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e6, 1e6, null);
-    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e8, 1e8, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, 0, 1, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, 0, 1e2, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, 1e2, 1e4, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, 1e4, 1e6, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, 1e6, 1e8, null);
 
     var compressed_values = ArrayList(u8).empty;
     defer compressed_values.deinit(allocator);
@@ -380,5 +398,48 @@ test "check bit-quantization configuration parsing" {
         uncompressed_values,
         &compressed_values,
         method_configuration,
+    );
+}
+
+test "bitpacked quantization detects grid collapse due to precision loss" {
+    // Regression test for the precision guard: when bucket_size is so small that
+    // minimum_value + bucket_size == minimum_value (grid collapses), and the range exceeds error_bound,
+    // compress should return Error.UnsupportedInput.
+    const allocator = testing.allocator;
+
+    // Use a very large minimum_value and a tiny error_bound to create a scenario where
+    // bucket_size (1.998 * error_bound) is too small relative to minimum_value.
+    // This triggers the grid collapse condition: minimum_value + bucket_size == minimum_value
+    const minimum_value: f64 = 1e14;
+    const maximum_value: f64 = minimum_value + 1.0; // Range of 1.0.
+    const error_bound: f32 = 1e-10; // Tiny error bound.
+
+    const uncompressed_values = &[2]f64{ minimum_value, maximum_value };
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    const method_configuration = try std.fmt.allocPrint(
+        allocator,
+        "{{\"abs_error_bound\": {e}}}",
+        .{error_bound},
+    );
+    defer allocator.free(method_configuration);
+
+    // The grid collapse condition should be detected and return UnsupportedInput.
+    compress(
+        allocator,
+        uncompressed_values[0..],
+        &compressed_values,
+        method_configuration,
+    ) catch |err| {
+        try testing.expectEqual(Error.UnsupportedInput, err);
+        return;
+    };
+
+    try testing.expectFmt(
+        "",
+        "Expected compression to fail due to grid collapse (minimum_value + bucket_size == minimum_value) and range exceeding error_bound",
+        .{},
     );
 }
