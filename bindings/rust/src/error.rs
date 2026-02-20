@@ -16,6 +16,7 @@
 
 use std::error::Error;
 use std::ffi::NulError;
+use std::fmt::Result as FmtResult;
 use std::fmt::{Display, Formatter};
 use std::result::Result as StdResult;
 
@@ -32,7 +33,8 @@ pub enum TerseTSError {
 }
 
 impl Display for TerseTSError {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    /// Convert this [`TerseTSError`] to a string and write it to `f` for printing.
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
             Self::TerseTS(reason) => write!(f, "TerseTS Error: {reason}"),
             Self::Nul(reason) => write!(f, "Nul Error: {reason}"),
@@ -41,6 +43,7 @@ impl Display for TerseTSError {
 }
 
 impl Error for TerseTSError {
+    /// Return any [`Error`] that caused this [`TerseTSError`].
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::TerseTS(_reason) => None,
@@ -50,6 +53,7 @@ impl Error for TerseTSError {
 }
 
 impl From<NulError> for TerseTSError {
+    /// Automatically convert [`NulError`] to [`TerseTSError`], e.g, with the question mark operator.
     fn from(error: NulError) -> Self {
         Self::Nul(error)
     }
