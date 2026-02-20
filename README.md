@@ -167,6 +167,54 @@ int main(void) {
    
 </details>
 
+<a id="julia-usage-example"></a>
+<details>
+<summary><strong>Julia Usage Example</strong></summary>
+
+TerseTS provides Julia bindings located in `bindings/julia/TerseTS.jl`, which can be directly imported into a Julia program using `include("TerseTS.jl")`. The bindings automatically load the native library, and all dynamically allocated memory is deallocated internally in a safe way. The two main functions `compress()` and `decompress()` are exposed as follows:
+
+- **`compress(uncompressed_values, method, configuration)`:**
+   - **Parameters:**
+      - `uncompressed_values`: An `AbstractVector{Float64}` representing the data to compress. 
+      - `method`: An enum value from `TerseTS.Method` specifying the compression method.
+      - `configuration`: A JSON string specifying compression parameters (e.g., `{"abs_error_bound": 0.01}`).
+   - **Returns:** Compressed data as `AbstractVector{UInt8}` or an error raised as a Julia exception.
+
+- **`decompress(compressed_values)`:**
+   - **Parameters:**
+      - `compressed_values`: The compressed data as an `AbstractVector{UInt8}` to decompress.
+   - **Returns:** Decompressed values as an `AbstractVector{Float64}` or an error is raised as a Julia exception.
+
+Compression methods are listed in the `Method` enum in the file `TerseTS.jl`. Below is a usage example demonstrating how to use the TerseTS Julia API for compressing and decompressing time series data. 
+
+```julia
+include("TerseTS.jl")
+
+# Input data.
+uncompressed_values = [1.0, 2.0, 3.0, 4.0, 5.0]
+
+# Configuration for compression.
+# The supported compression methods are specified in tersets.zig and TerseTS.jl.
+# The Julia-API provides a `Method` enum to access the available methods.
+method = TerseTS.SwingFilter
+# The supported configurations are specified in configuration.zig.
+configuration = "{\"abs_error_bound\": 0.1}"
+
+print("Uncompressed data length: ", length(uncompressed_values))
+
+# Compress the data.
+compressed_values = TerseTS.compress(uncompressed_values, method, configuration)
+
+print("Compression successful. Compressed data length: ", length(compressed_values))
+
+# Decompress the data.
+decompressed_values = TerseTS.decompress(compressed_values)
+
+print("Decompression successful. Decompressed data length: ", length(decompressed_values))
+```
+
+</details>
+
 <a id="python-usage-example"></a>
 <details>
 <summary><strong>Python Usage Example</strong></summary>
@@ -215,50 +263,60 @@ print("Decompression successful. Decompressed data length: ", len(decompressed_v
 
 </details>
 
-<a id="julia-usage-example"></a>
+<a id="rust-usage-example"></a>
 <details>
-<summary><strong>Julia Usage Example</strong></summary>
+<summary><strong>Rust Usage Example</strong></summary>
 
-TerseTS provides Julia bindings located in `bindings/julia/TerseTS.jl`, which can be directly imported into a Julia program using `include("TerseTS.jl")`. The bindings automatically load the native library, and all dynamically allocated memory is deallocated internally in a safe way. The two main functions `compress()` and `decompress()` are exposed as follows:
+TerseTS provides Rust bindings as a crate located in `bindings/rust`, which can be directly used as a dependency in a Rust project by adding `tersets = { git = "https://github.com/cmcuza/TerseTS.git" }` to `Cargo.toml`. The bindings automatically compile and statically link the TerseTS library, and all dynamically allocated memory is deallocated internally in a safe way. The two main functions `compress()` and `decompress()` are exposed as follows:
 
-- **`compress(values, method, configuration)`:**
+- **`compress(uncompressed_values, method, configuration)`:**
    - **Parameters:**
-      - `values`: An `AbstractVector{Float64}` representing the data to compress. 
-      - `method`: An enum value from `TerseTS.Method` specifying the compression method.
+      - `uncompressed_values`: A slice of `f64` representing the data to compress. 
+      - `method`: An enum value from `Method` specifying the compression method.
       - `configuration`: A JSON string specifying compression parameters (e.g., `{"abs_error_bound": 0.01}`).
-   - **Returns:** Compressed data as `AbstractVector{UInt8}` or an error raised as a Julia exception.
+   - **Returns:** Compressed data as `Result<Vec<u8>, TerseTSError>`.
 
-- **`decompress(values)`:**
+- **`decompress(compressed_values)`:**
    - **Parameters:**
-      - `values`: The compressed data as an `AbstractVector{UInt8}` to decompress.
-   - **Returns:** Decompressed values as an `AbstractVector{Float64}` or an error is raised as a Julia exception.
+      - `compressed_values`: The compressed data as a slice of `u8` to decompress.
+   - **Returns:** Decompressed values as an `Result<Vec<f64>, TerseTSError>`.
 
-Compression methods are listed in the `Method` enum in the file `TerseTS.jl`. Below is a usage example demonstrating how to use the TerseTS Julia API for compressing and decompressing time series data. 
+Compression methods are listed in the `Method` enum in the file `src/lib.rs`. Below is a usage example demonstrating how to use the TerseTS Rust API for compressing and decompressing time series data. 
 
-```julia
-include("TerseTS.jl")
+```rust
+use tersets::{Method, Result, compress, decompress};
 
-# Input data.
-uncompressed_values = [1.0, 2.0, 3.0, 4.0, 5.0]
+fn main() -> Result<()> {
+    // Input data.
+    let uncompressed_values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
 
-# Configuration for compression.
-# The supported compression methods are specified in tersets.zig and TerseTS.jl.
-# The Julia-API provides a `Method` enum to access the available methods.
-method = TerseTS.SwingFilter
-# The supported configurations are specified in configuration.zig.
-configuration = "{\"abs_error_bound\": 0.1}"
+    // Configuration for compression.
+    // The supported compression methods are specified in tersets.zig and lib.rs.
+    // The Rust-API provides a `Method` enum to access the available methods.
+    let method = Method::SwingFilter;
+    // The supported configurations are specified in configuration.zig.
+    let configuration = "{\"abs_error_bound\": 0.1}";
 
-print("Uncompressed data length: ", length(uncompressed_values))
+    println!("Uncompressed data length: {}", uncompressed_values.len());
 
-# Compress the data.
-compressed_values = TerseTS.compress(uncompressed_values, method, configuration)
+    // Compress the data.
+    let compressed_values = compress(&uncompressed_values, method, configuration)?;
 
-print("Compression successful. Compressed data length: ", length(compressed_values))
+    println!(
+        "Compression successful. Compressed data length: {}",
+        compressed_values.len()
+    );
 
-# Decompress the data.
-decompressed_values = TerseTS.decompress(compressed_values)
+    // Decompress the data.
+    let decompressed_values = decompress(&compressed_values)?;
 
-print("Decompression successful. Decompressed data length: ", length(decompressed_values))
+    println!(
+        "Decompression successful. Decompressed data length: {}",
+        decompressed_values.len()
+    );
+	
+    Ok(())
+}
 ```
 
 </details>
