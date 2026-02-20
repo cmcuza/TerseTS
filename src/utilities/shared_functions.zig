@@ -72,8 +72,8 @@ pub fn appendValue(allocator: Allocator, comptime T: type, value: T, compressed_
             try compressed_values.appendSlice(allocator, value_as_bytes[0..]);
         },
         u8, i8 => {
-            const value_as_bytes: [1]u8 = @bitCast(value);
-            try compressed_values.appendSlice(allocator, value_as_bytes[0..]);
+            const value_as_bytes: u8 = @bitCast(value);
+            try compressed_values.append(allocator, value_as_bytes);
         },
         else => @compileError("Unsupported type for append value function"),
     }

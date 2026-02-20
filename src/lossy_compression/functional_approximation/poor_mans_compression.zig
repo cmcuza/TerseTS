@@ -66,19 +66,36 @@ pub fn compressMidrange(
         // Without this check low precision values would pass the error bound check and lose information.
         // For example if minimum is 34.5e-301 and maximum is 4.5e-301, the error bound check would pass
         // since 34.5e-301 - 4.5e-301 == 0 due to precision loss.
-        if (((error_bound == 0) and (nextMaximum != nextMinimum)) or (nextMaximum - nextMinimum) > 2 * error_bound) {
-            const compressed_value: f64 = @floatCast((maximum + minimum) / 2);
-            try shared_functions.appendValueAndIndexToArrayList(
-                allocator,
-                compressed_value,
-                index,
-                compressed_values,
-            );
-            minimum = value;
-            maximum = value;
+        if (error_bound == 0) {
+            if (nextMaximum != nextMinimum) {
+                const compressed_value: f64 = @floatCast(maximum);
+                try shared_functions.appendValueAndIndexToArrayList(
+                    allocator,
+                    compressed_value,
+                    index,
+                    compressed_values,
+                );
+                minimum = value;
+                maximum = value;
+            } else {
+                minimum = nextMinimum;
+                maximum = nextMaximum;
+            }
         } else {
-            minimum = nextMinimum;
-            maximum = nextMaximum;
+            if ((nextMaximum - nextMinimum) > 2 * error_bound) {
+                const compressed_value: f64 = @floatCast((maximum + minimum) / 2);
+                try shared_functions.appendValueAndIndexToArrayList(
+                    allocator,
+                    compressed_value,
+                    index,
+                    compressed_values,
+                );
+                minimum = value;
+                maximum = value;
+            } else {
+                minimum = nextMinimum;
+                maximum = nextMaximum;
+            }
         }
         index += 1;
     }

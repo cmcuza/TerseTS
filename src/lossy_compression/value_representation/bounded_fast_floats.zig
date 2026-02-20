@@ -48,26 +48,26 @@ const tester = @import("../../tester.zig");
 const Error = tersets.Error;
 const Method = tersets.Method;
 
-/// Target precision lookup table from Table 2 in the paper. Each entry corresponds to the
+/// Decimal precision lookup table from Table 2 in the paper. Each entry corresponds to the
 /// number of bits needed in the fractional part to achieve the specified decimal digit precision.
 /// Index 0 corresponds to 1 decimal digit precision, index 1 to 2 decimal digits, and so on.
 /// Up to 10 decimal digits of precision are supported.
-const target_precision_lookup: [10]u6 = .{ 5, 8, 11, 15, 18, 21, 25, 28, 31, 35 };
+const decimal_precision_lookup: [10]u6 = .{ 5, 8, 11, 15, 18, 21, 25, 28, 31, 35 };
 
 /// Normalization factor for converting fractional part to f64.
 const normalization_factor: f64 = math.pow(f64, 2.0, 53.0);
 
 /// f64 decomposition constants.
-const mantissa_bits: u6 = 52; // mantissa bits.
+const mantissa_bits: u6 = 52; // Mantissa bits.
 const total_fractional_bits: u6 = 53; // 53 bits for 1.F.
 const exponent_bias: i32 = 1023; // Bias for f64 exponent.
 
 /// Fixed-point representation structure. The structure holds the `sign`, `integer_part`,
 /// and `fractional_part` of the fixed-point number.
 const FixedPointRepresentation = struct {
-    sign: u8, // 0 or 1.
-    integer_part: u64, // integer bits as an integer.
-    fractional_part: u64, // fractional bits as an integer.
+    sign: u1, // 0 or 1.
+    integer_part: u64, // Integer bits as an integer.
+    fractional_part: u64, // Fractional bits as an integer.
 };
 
 /// Compresses an array of f64 `uncompressed_values` using the BitPackedBUFF variant of the BUFF
@@ -75,9 +75,9 @@ const FixedPointRepresentation = struct {
 /// `compressed_values`. The function utilizes an `allocator` for memory management during the
 /// compression process. This variant of BUFF uses bit-packing to store the fixed-point
 /// representations of the floating-point values directly. The integer parts are delta and zigzag
-/// encoded before bit-packing. The fractional part is truncated based on the target precision
+/// encoded before bit-packing. The fractional part is truncated based on the decimal precision
 /// before storing the fixed-point representations. The `method_configuration` should include the
-/// target precision for compression. The function returns an error if the configuration is invalid
+/// decimal precision for compression. The function returns an error if the configuration is invalid
 /// or if the input values contain unsupported values (e.g., NaN, infinity).
 pub fn compressBitPackedBUFF(
     allocator: Allocator,
@@ -87,15 +87,22 @@ pub fn compressBitPackedBUFF(
 ) Error!void {
     const parsed_configuration = try configuration.parse(
         allocator,
-        configuration.TargetPrecision,
+        configuration.DecimalPrecision,
         method_configuration,
     );
 
-    if (parsed_configuration.target_precision > 10) {
+    if (parsed_configuration.decimal_precision > 10) {
         // Limiting to 10 decimal digits of precision based on Table 2.
         // Precision 11 and above do not provide significant
         // compression benefits compared to the overhead of storing them.
         return Error.InvalidConfiguration;
+    }
+
+    if (uncompressed_values.len >= math.maxInt(u32)) {
+        // We use u32 to store the number of values in the header, so we need to ensure that we do not exceed that limit.
+        // Seems like a reasonable limit for most use-cases and allows us to keep the header size smaller.
+        // Still, we check this explicitly to provide a clear error message instead of silently truncating the number of values.
+        return Error.UnsupportedInput;
     }
 
     var fixed_point_representation_array =
@@ -105,20 +112,21 @@ pub fn compressBitPackedBUFF(
         );
     defer fixed_point_representation_array.deinit(allocator);
 
-    // Track minimum integer part for optimizations explained in Section 3.1.2.
+    // Track minimum integer part for optimization explained in Section 3.1.2.
+    // Basically, we can reduce the integer parts by the minimum integer part to save bits when encoding.
     var minimum_integer_part: u64 = std.math.maxInt(u64);
 
-    const decoded_target_precision: u6 =
-        target_precision_lookup[parsed_configuration.target_precision - 1];
+    const decoded_decimal_precision: u6 =
+        decimal_precision_lookup[parsed_configuration.decimal_precision - 1];
 
-    // Number of bits to drop from the fractional part based on target precision.
-    const bits_to_drop: u6 = 53 - decoded_target_precision;
+    // Number of bits to drop from the fractional part based on decimal precision.
+    const bits_to_drop: u6 = 53 - decoded_decimal_precision;
 
     // Decompose each value into a fixed point representation. Truncate the fractional
-    // part based on the target precision and update the minimum integer part.
+    // part based on the decimal precision and update the minimum integer part.
     for (uncompressed_values) |value| {
         var fixed_point_representation = try decomposeF64ToFixedPointRepresentation(value);
-        // Apply the target precision by truncating the fractional part.
+        // Apply the decimal precision by truncating the fractional part.
         const truncated_fractional_part: u64 = fixed_point_representation.fractional_part >> bits_to_drop;
         fixed_point_representation.fractional_part = truncated_fractional_part;
 
@@ -139,6 +147,7 @@ pub fn compressBitPackedBUFF(
 
     // Apply delta and zigzag encoding for later bitpacking the integer parts.
     // Find the maximum number of bits needed to encode the integer part.
+    // TerseTS API ensures that the number of values is at least 2, so the for loop is safe.
     var maximum_number_of_bits_needed: u8 = 0;
     for (1..fixed_point_representation_array.items.len) |index| {
         const current_element: i64 = @intCast(fixed_point_representation_array.items[index].integer_part);
@@ -157,21 +166,23 @@ pub fn compressBitPackedBUFF(
     }
 
     // Ensure we never use a bit-width of 0 when there are deltas to encode.
+    // A bit-width of 0 would mean we cannot encode any information about the integer part changes.
+    // However, even if all deltas are 0, we still need at least 1 bit to represent that information.
     if (delta_encoded_integer_parts.items.len > 0 and maximum_number_of_bits_needed == 0) {
         maximum_number_of_bits_needed = 1;
     }
 
     // Prepare the header information:
-    // 1) decoded target precision (u8).
-    // 2) maximum number of bits needed for integer part (u8).
-    // 3) number of values (u32).
-    // 4) minimum integer part (u64).
-    // 5) first value (fixed-point representation).
+    // 1) Decoded decimal precision (u8).
+    // 2) Maximum number of bits needed for integer part (u8).
+    // 3) Number of values (u32).
+    // 4) Minimum integer part (u64).
+    // 5) First value (fixed-point representation).
     // Total header size = 1 + 1 + 4 + 8 + 8 = 22 bytes.
     try shared_functions.appendValue(
         allocator,
         u8,
-        decoded_target_precision,
+        decoded_decimal_precision,
         compressed_values,
     );
 
@@ -189,7 +200,7 @@ pub fn compressBitPackedBUFF(
         @as(u32, @intCast(uncompressed_values.len)),
         compressed_values,
     );
-    // We could use variable length encoding here but for simplicity we use u64.
+    // Store the minimum integer part for later use during decompression.
     try shared_functions.appendValue(
         allocator,
         u64,
@@ -207,27 +218,28 @@ pub fn compressBitPackedBUFF(
         compressed_values,
     );
 
-    // Prepare the bit writer for compressed output. From now on, we write using only the bit writer.
+    // Prepare the bit writer for compressed output. From now on, we write using only the bit writer
+    // instead of the shared_functions.appendValue.
     const writer = compressed_values.writer(allocator);
     var bit_writer = shared_structs.bitWriter(.little, writer);
 
     // Write the first value's fractional part and sign.
     try bit_writer.writeBits(
         first_fixed_point_representation.fractional_part,
-        decoded_target_precision,
+        decoded_decimal_precision,
     );
     try bit_writer.writeBits(@as(u1, @intCast(first_fixed_point_representation.sign)), 1);
 
     // Apply bitpacking encoding for the rest of the values.
-    // 1) delta encoded integer part with maximum_number_of_bits_needed bits.
-    // 2) fractional part with decoded_target_precision bits.
-    // 3) sign with 1 bit.
+    // 1) Delta encoded integer part with maximum_number_of_bits_needed bits.
+    // 2) Fractional part with decoded_decimal_precision bits.
+    // 3) Sign with 1 bit.
     for (1..fixed_point_representation_array.items.len) |index| {
         const fixed_point_representation = fixed_point_representation_array.items[index];
         const encoded_delta_integer_part: u64 = delta_encoded_integer_parts.items[index - 1];
 
         try bit_writer.writeBits(encoded_delta_integer_part, maximum_number_of_bits_needed);
-        try bit_writer.writeBits(fixed_point_representation.fractional_part, decoded_target_precision);
+        try bit_writer.writeBits(fixed_point_representation.fractional_part, decoded_decimal_precision);
         try bit_writer.writeBits(@as(u1, @intCast(fixed_point_representation.sign)), 1);
     }
 
@@ -248,22 +260,23 @@ pub fn decompressBitPackedBUFF(
     if (compressed_values.len < 22) return Error.UnsupportedInput;
 
     // Read the header information:
-    // 1) decoded target precision (u8).
+    // 1) decoded decimal precision (u8).
     // 2) maximum number of bits needed for integer part (u8).
     // 3) number of values (u32).
     // 4) minimum integer part (u64).
     // 5) first value (fixed-point representation).
-    const decoded_target_precision: u8 = compressed_values[0];
+    const decoded_decimal_precision: u8 = compressed_values[0];
 
-    if (decoded_target_precision == 0 or decoded_target_precision > 53) {
-        // Invalid target precision in the header.
+    // Check if the decoded decimal precision has not been corrupted and is within the valid range.
+    if (decoded_decimal_precision == 0 or decoded_decimal_precision > 53) {
+        // Invalid decimal precision in the header.
         return Error.CorruptedCompressedData;
     }
 
     const maximum_number_of_bits_needed_for_integers: u8 = compressed_values[1];
     const number_of_values: u32 = @bitCast(compressed_values[2..6].*);
     const minimum_integer_part: u64 = @bitCast(compressed_values[6..14].*);
-    const shifted_bits: u6 = @intCast(53 - decoded_target_precision);
+    const shifted_bits: u6 = @intCast(53 - decoded_decimal_precision);
 
     // Read the first value's integer part from the fixed-point representation.
     var integer_part: u64 = @bitCast(compressed_values[14..22].*);
@@ -273,10 +286,10 @@ pub fn decompressBitPackedBUFF(
     // Read the first value's fractional part and sign.
     var fractional_part: u64 = bit_reader.readBitsNoEof(
         u64,
-        decoded_target_precision,
+        decoded_decimal_precision,
     ) catch return Error.ByteStreamError;
     fractional_part <<= shifted_bits; // Align to 53 bits.
-    var sign: u8 = bit_reader.readBitsNoEof(u8, 1) catch return Error.ByteStreamError;
+    var sign: u1 = bit_reader.readBitsNoEof(u1, 1) catch return Error.ByteStreamError;
 
     // Reconstruct the first value and append to decompressed values.
     var fix_point_representation: FixedPointRepresentation = .{
@@ -289,7 +302,7 @@ pub fn decompressBitPackedBUFF(
 
     // For-loop to read and reconstruct the rest of the values.
     // 1) delta encoded integer part with maximum_number_of_bits_needed bits.
-    // 2) fractional part with decoded_target_precision bits.
+    // 2) fractional part with decoded_decimal_precision bits.
     // 3) sign with 1 bit.
     var previous_integer_part: i64 = @intCast(integer_part);
     for (1..number_of_values) |_| {
@@ -301,12 +314,11 @@ pub fn decompressBitPackedBUFF(
         const signed_delta_integer: i64 = shared_functions.decodeZigZag(delta_encoded_integer_part);
         previous_integer_part += signed_delta_integer;
 
-        fractional_part = bit_reader.readBitsNoEof(u64, decoded_target_precision) catch
+        fractional_part = bit_reader.readBitsNoEof(u64, decoded_decimal_precision) catch
             return Error.ByteStreamError;
         fractional_part <<= shifted_bits; // Align to 53 bits.
 
-        sign = bit_reader.readBitsNoEof(u8, 1) catch
-            return Error.ByteStreamError;
+        sign = bit_reader.readBitsNoEof(u1, 1) catch return Error.ByteStreamError;
 
         // Add back the minimum integer part.
         integer_part = @as(u64, @intCast(previous_integer_part)) + minimum_integer_part;
@@ -328,12 +340,12 @@ pub fn decompressBitPackedBUFF(
 fn decomposeF64ToFixedPointRepresentation(value: f64) Error!FixedPointRepresentation {
     const exponent_mask: u64 = 0x7FF; // 11 bits.
     const mantissa_mask: u64 = 0x000F_FFFF_FFFF_FFFF; // 52 bits.
-    const remove_sign_mask: u64 = 0x7FFF_FFFF_FFFF_FFFF;
+    const remove_sign_mask: u64 = 0x7FFF_FFFF_FFFF_FFFF; // // 63 bits.
 
     const value_as_u64: u64 = @bitCast(value);
 
     // Extract the sign of the float.
-    const sign: u8 = @intCast(value_as_u64 >> 63);
+    const sign: u1 = @intCast(value_as_u64 >> 63);
 
     // Remove the sign-bit for the decomposition.
     const value_without_sign: u64 = value_as_u64 & remove_sign_mask;
@@ -345,6 +357,8 @@ fn decomposeF64ToFixedPointRepresentation(value: f64) Error!FixedPointRepresenta
     // Reject NaNs, and infinities (exponent all zeros is also used for subnormals).
     // If exponent is all zeros and mantissa is non-zero, it's a subnormal number.
     // Otherwise, it is zero which we can handle.
+    // This can only happen if the compressed values are corrupted.
+    // The compression phase checks should prevent this from happening.
     if (exponent == exponent_mask or exponent == 0) {
         if (mantissa == 0) {
             // Handle zero value.
@@ -357,17 +371,19 @@ fn decomposeF64ToFixedPointRepresentation(value: f64) Error!FixedPointRepresenta
         return Error.UnsupportedInput;
     }
 
-    // Unbiased exponent.
+    // Extract unbiased exponent.
     const unbiased_exponent: i32 = @as(i32, @intCast(exponent)) - exponent_bias;
 
     // Build significand equal to 1.F as 53 bits in a u64.
     const significand: u64 = (@as(u64, 1) << mantissa_bits) | mantissa;
 
     // Handle two cases:
-    //   1) unbiased_exponent >= 0: `value` >= 1.0, split into integer and fractional bits.
-    //   2) unbiased_exponent < 0 : `value` in (0, 1.0), integer part is 0.
+    // 1) unbiased_exponent >= 0: `value` >= 1.0, split into integer and fractional bits.
+    // 2) unbiased_exponent < 0 : `value` in (0, 1.0), integer part is 0.
     if (unbiased_exponent >= 0) {
         // Unsupported input if more than 53 bits are needed for the integer part.
+        // This can only happen if the data has been corrupted since the
+        // compression phase checks should prevent this from happening.
         if (unbiased_exponent + 1 > total_fractional_bits) {
             return Error.UnsupportedInput;
         }
@@ -400,7 +416,7 @@ fn decomposeF64ToFixedPointRepresentation(value: f64) Error!FixedPointRepresenta
         const scaling_exponent: i32 = @intCast(-(unbiased_exponent + 1));
 
         // If the scaling exponent is larger than or equal to 64, the value is too small
-        // to be represented with our fixed-point representation.
+        // to be represented with fixed-point representation. This can only happen if the data has been corrupted.
         if (scaling_exponent >= 64)
             return Error.UnsupportedInput;
 
@@ -484,8 +500,8 @@ test "decompose f64 array to fixed point representation works correctly with exp
 test "decompose and reconstruct f64 array to fixed point representation at a known precision level works correctly with fixed values" {
     const test_values: [6]f64 = .{ 0.125, 12.375, -0.1, 0.0, 3.14159, -256.75 };
 
-    const target_precision: u8 = 5;
-    const bits_to_drop: u6 = 53 - target_precision_lookup[target_precision - 1];
+    const decimal_precision: u8 = 5;
+    const bits_to_drop: u6 = 53 - decimal_precision_lookup[decimal_precision - 1];
 
     for (test_values) |value| {
         const result = try decomposeF64ToFixedPointRepresentation(value);
@@ -517,8 +533,8 @@ test "decompose and reconstruct f64 array to fixed point representation at a kno
         tester.getDefaultRandomGenerator(),
     );
 
-    const target_precision: u8 = tester.generateBoundRandomInteger(u8, 1, 10, null);
-    const bits_to_drop: u6 = 53 - target_precision_lookup[target_precision - 1];
+    const decimal_precision: u8 = tester.generateBoundRandomInteger(u8, 1, 10, null);
+    const bits_to_drop: u6 = 53 - decimal_precision_lookup[decimal_precision - 1];
 
     for (uncompressed_values.items) |value| {
         const result = try decomposeF64ToFixedPointRepresentation(value);
@@ -535,13 +551,13 @@ test "decompose and reconstruct f64 array to fixed point representation at a kno
         const truncated_reconstructed_value =
             constructF64FromFixedPointRepresentation(new_result);
 
-        const tolerance: f64 = math.pow(f64, 10.0, -@as(f64, @floatFromInt(target_precision)));
+        const tolerance: f64 = math.pow(f64, 10.0, -@as(f64, @floatFromInt(decimal_precision)));
 
         try testing.expectApproxEqAbs(truncated_reconstructed_value, value, tolerance);
     }
 }
 
-test "buff bitpacked can compress and decompress with random values within target precision" {
+test "buff bitpacked can compress and decompress with random values within decimal precision" {
     const allocator: Allocator = testing.allocator;
     var uncompressed_values: ArrayList(f64) = ArrayList(f64).empty;
     defer uncompressed_values.deinit(allocator);
@@ -555,12 +571,12 @@ test "buff bitpacked can compress and decompress with random values within targe
     var compressed_values: ArrayList(u8) = ArrayList(u8).empty;
     defer compressed_values.deinit(allocator);
 
-    const target_precision: u8 = tester.generateBoundRandomInteger(u8, 2, 10, null);
+    const decimal_precision: u8 = tester.generateBoundRandomInteger(u8, 2, 10, null);
 
     const method_configuration = try std.fmt.allocPrint(
         allocator,
-        "{{\"target_precision\": {d}}}",
-        .{target_precision},
+        "{{\"decimal_precision\": {d}}}",
+        .{decimal_precision},
     );
     defer allocator.free(method_configuration);
 
@@ -580,7 +596,7 @@ test "buff bitpacked can compress and decompress with random values within targe
         &decompressed_values,
     );
 
-    const tolerance: f64 = math.pow(f64, 10.0, -@as(f64, @floatFromInt(target_precision)));
+    const tolerance: f64 = math.pow(f64, 10.0, -@as(f64, @floatFromInt(decimal_precision)));
     for (uncompressed_values.items, 0..) |original_value, index| {
         const decompressed_value = decompressed_values.items[index];
         try testing.expectApproxEqAbs(original_value, decompressed_value, tolerance);
