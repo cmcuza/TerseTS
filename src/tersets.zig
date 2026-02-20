@@ -479,13 +479,11 @@ pub fn extract(
         // corrupted streams or misinterpretation of the data during decompression.
         // In case of RLE, modifying the coefficients can disrupt the run-length
         // encoding scheme, also leading to incorrect decompression results.
-        .BitPackedQuantization => {
-            return Error.UnsupportedMethod;
-        },
-        .RunLengthEncoding => {
-            return Error.UnsupportedMethod;
-        },
-        .SerfQT => {
+        .BitPackedQuantization,
+        .RunLengthEncoding,
+        .BitPackedBUFF,
+        .SerfQT,
+        => {
             return Error.UnsupportedMethod;
         },
     }
@@ -617,13 +615,11 @@ pub fn rebuild(
         // corrupted streams or misinterpretation of the data during decompression.
         // In case of RLE, modifying the coefficients can disrupt the run-length
         // encoding scheme, also leading to incorrect decompression results.
-        .BitPackedQuantization => {
-            return Error.UnsupportedMethod;
-        },
-        .RunLengthEncoding => {
-            return Error.UnsupportedMethod;
-        },
-        .SerfQT => {
+        .BitPackedQuantization,
+        .BitPackedBUFF,
+        .SerfQT,
+        .RunLengthEncoding,
+        => {
             return Error.UnsupportedMethod;
         },
     }
@@ -664,7 +660,8 @@ test "extract and rebuild works for any compression method supported" {
 
         if (method == Method.BitPackedQuantization or
             method == Method.SerfQT or
-            method == Method.RunLengthEncoding)
+            method == Method.RunLengthEncoding or
+            method == Method.BitPackedBUFF)
         {
             // These compression methods are not supported for extraction
             // of the coefficients and indices. This is because even small

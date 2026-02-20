@@ -172,6 +172,16 @@ pub fn defaultConfigurationBuilder(
             );
         },
 
+        // Methods using target precision.
+        .BitPackedBUFF => blk: {
+            const precision: u8 = 4; // Simple default value.
+            break :blk try std.fmt.allocPrint(
+                allocator,
+                "{{\"target_precision\": {d}}}",
+                .{precision},
+            );
+        },
+
         // Methods with empty configuration.
         .RunLengthEncoding => try allocator.dupe(u8, "{}"),
     };
