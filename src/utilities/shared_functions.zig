@@ -326,6 +326,19 @@ pub fn createQuantizationBucket(error_bound: f32) f64 {
     return @floatCast(1.998 * error_bound);
 }
 
+/// Helper function to ensure that the `index` is within range of the `len`.
+/// If not, returns `Error.CorruptedCompressedData`.
+pub fn ensureIndexWithinLength(index: u64, len: u64) Error!void {
+    if (index >= len) return Error.CorruptedCompressedData;
+}
+
+/// Helper function to ensure that the `offset` stays in-bounds of the `total_bytes_available`
+/// when the `required_bytes` are read. If not, returns `Error.CorruptedCompressedData`.
+pub fn ensureEnoughBytesAreAvailable(total_bytes_available: []const u8, offset: u64, required_bytes: u64) Error!void {
+    if (offset + required_bytes > total_bytes_available.len)
+        return Error.CorruptedCompressedData;
+}
+
 /// Write a u64 `value` with `bit_writer` to a bit stream using a compact bit-packed encoding scheme.
 /// The encoding uses 2 header bits to indicate how many bits are required to represent `value`:
 /// 00 is 8 bits, 01 is 16 bits, 10 is 32 bits, and 11 is 64 bits. This encoding reduces the total
