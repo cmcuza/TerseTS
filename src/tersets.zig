@@ -52,7 +52,7 @@ const sliding_window = @import("lossy_compression/line_simplification/sliding_wi
 const bottom_up = @import("lossy_compression/line_simplification/bottom_up.zig");
 
 // Import domain transform methods.
-const dft = @import("lossy_compression/domain_transformation/discrete_fourier_transformer.zig");
+const dft = @import("lossy_compression/domain_transformation/discrete_fourier_transform.zig");
 
 // Import lossless compression methods.
 const rle_enconding = @import("lossless_compression/run_length_encoding.zig");

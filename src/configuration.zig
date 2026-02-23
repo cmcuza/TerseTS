@@ -26,6 +26,7 @@ const testing = std.testing;
 const json = std.json;
 const Allocator = std.mem.Allocator;
 const tersets = @import("tersets.zig");
+const tester = @import("tester.zig");
 
 /// Configuration for methods that require an absolute error bound.
 /// Example: { "abs_error_bound": 0.1 }
@@ -100,7 +101,7 @@ pub fn parse(
                 return error.InvalidConfiguration;
         },
         HistogramBinsNumber => {
-            if (parsed_value.histogram_bins_number < 0)
+            if (parsed_value.histogram_bins_number == 0)
                 return error.InvalidConfiguration;
         },
         AggregateError => {
@@ -109,7 +110,7 @@ pub fn parse(
         },
         EmptyConfiguration => {},
         DomainTransformation => {
-            if (parsed_value.number_of_coefficients <= 0)
+            if (parsed_value.number_of_coefficients == 0)
                 return error.InvalidConfiguration;
         },
         else => return error.InvalidConfiguration,
@@ -121,6 +122,9 @@ pub fn defaultConfigurationBuilder(
     allocator: Allocator,
     method: tersets.Method,
 ) ![]u8 {
+    const random_f32 = tester.generateBoundedRandomValue(f32, 0.0, 10.0, null);
+    const random_u32 = tester.generateBoundRandomInteger(u32, 2, 10, null);
+
     return switch (method) {
         // Methods using absolute error: float objective.
         .PoorMansCompressionMidrange,
@@ -135,10 +139,9 @@ pub fn defaultConfigurationBuilder(
         .SerfQT,
         .BitPackedQuantization,
         => blk: {
-            const error_bound: f32 = 0.1; // Simple default value.
             break :blk try getDefaultAbsoluteErrorConfiguration(
                 allocator,
-                error_bound,
+                random_f32,
             );
         },
 
@@ -146,10 +149,9 @@ pub fn defaultConfigurationBuilder(
         .PiecewiseConstantHistogram,
         .PiecewiseLinearHistogram,
         => blk: {
-            const bins: u32 = 2; // Minimum allowed value.
             break :blk try getDefaultHistogramConfiguration(
                 allocator,
-                bins,
+                random_u32,
             );
         },
 
@@ -157,28 +159,25 @@ pub fn defaultConfigurationBuilder(
         .BottomUp,
         .SlidingWindow,
         => blk: {
-            const rmse: f32 = 0.1; // Simple default value.
             break :blk try getDefaultAggregatedConfiguration(
                 allocator,
-                rmse,
+                random_f32,
             );
         },
 
         // Methods using AUC error bound.
         .VisvalingamWhyatt => blk: {
-            const auc: f32 = 0.1; // Simple default value.
             break :blk try getDefaultAUCConfiguration(
                 allocator,
-                auc,
+                random_f32,
             );
         },
 
         // Methods using domain transformation with number of coefficients.
         .DiscreteFourierTransform => blk: {
-            const coefficients: u32 = 1; // Simple default value.
             break :blk try getDefaultDomainTransformationConfiguration(
                 allocator,
-                coefficients,
+                random_u32,
             );
         },
 

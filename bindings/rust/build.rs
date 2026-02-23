@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::env;
+use cc::Build;
 use std::process::{self, Command};
 
 /// Compile TerseTS into a statically linked library and link it. unwrap() is deliberately used, as
@@ -35,6 +36,11 @@ fn main() {
             process::exit(1);
         }
     };
+
+    Build::new()
+        .include("../../lib/pocketfft")
+        .file("../../lib/pocketfft/pocketfft.c")
+        .compile("pocketfft");
 
     // Build the TerseTS library into a statically linked library.
     let output = Command::new("zig")

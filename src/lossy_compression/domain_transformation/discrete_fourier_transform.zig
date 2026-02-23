@@ -19,7 +19,7 @@
 //! into the frequency domain, selects the top-K coefficients, and stores them along with necessary metadata.
 //! The decompression function reconstructs the original data approximately by performing an inverse DFT
 //! using the retained coefficients. The module also includes an `extract` function to retrieve the preserved
-//! frequency coefficients from the compressed data without performing a full decompression. Additonally, a
+//! frequency coefficients from the compressed data without performing a full decompression. Additionally, a
 //! rebuild function is provided to reconstruct the signal from the extracted coefficients. Error handling is
 //! implemented to manage invalid configurations and corrupted compressed data.
 
@@ -82,9 +82,8 @@ pub fn compress(
 
     // Create FFT plan.
     const plan = make_rfft_plan(uncompressed_values.len);
-    defer destroy_rfft_plan(plan);
-
     if (plan == null) return Error.UnsupportedInput;
+    defer destroy_rfft_plan(plan);
 
     // Perform forward FFT.
     if (rfft_forward(plan, pocketfft_buffer.ptr, 1.0) != 0)
@@ -316,9 +315,6 @@ pub fn extract(
     if (preserve_top_coefficients == 0 or preserve_top_coefficients > number_of_bins)
         return Error.CorruptedCompressedData;
 
-    // Skip DC coefficient.
-    offset += 8;
-
     // Read preserved coefficients.
     for (0..preserve_top_coefficients - 1) |_| {
         const index =
@@ -354,7 +350,7 @@ pub fn rebuild(
     compressed_values: *ArrayList(u8),
 ) Error!void {
     // Must contain at least shift_amount and number_of_segments.
-    if (indices.len < 1 or coefficients.len < 1)
+    if (indices.len < 2 or coefficients.len < 1)
         return Error.CorruptedCompressedData;
 
     // Coefficients must be at least 2 times the number of indices (real and imaginary parts).
@@ -394,8 +390,8 @@ pub fn rebuild(
     // Append preserved coefficients.
     for (2..indices.len) |i| {
         const index = indices[i];
-        const real = coefficients[2 * i - 1];
-        const imaginary = coefficients[2 * i];
+        const real = coefficients[(i - 1) * 2 - 1];
+        const imaginary = coefficients[(i - 1) * 2];
 
         try shared_functions.appendValue(
             allocator,
@@ -448,7 +444,7 @@ test "fft compression round-trip full reconstruction with all coefficients prese
     const N = uncompressed.items.len;
 
     // Preserve all coefficients for this test to validate the round-trip reconstruction.
-    const preserve_top_coefficients = N / 2 + 1; // number_of_bins + 1.
+    const preserve_top_coefficients = N / 2 + 1; // number_of_coefficients.
 
     var compressed_values = std.ArrayList(u8).empty;
     defer compressed_values.deinit(allocator);
