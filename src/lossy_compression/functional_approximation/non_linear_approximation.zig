@@ -94,7 +94,7 @@ pub fn compress(
     const error_bound: f32 = parsed_configuration.abs_error_bound - shared_structs.ErrorBoundMargin;
 
     // Validates that the input contains at least 2 data points for meaningful compression.
-    if (error_bound == 0.0) return Error.UnsupportedErrorBound;
+    if (error_bound == 0.0) return Error.InvalidConfiguration;
 
     const preprocessing = try shiftValues(allocator, uncompressed_data, error_bound);
     defer if (preprocessing.shift_amount != 0.0) allocator.free(preprocessing.shifted_data);
@@ -115,12 +115,12 @@ pub fn compress(
 
     const segments_count = optimal_approximation.items.len;
     // Store the number of segments used in the partitioning.
-    try shared_functions.appendValue(allocator, u32, @intCast(segments_count), compressed_values);
+    try shared_functions.appendValue(allocator, u64, @intCast(segments_count), compressed_values);
 
     // All function types are stored using 4 bits each, so we can pack 2 per byte.
     // This saves space in the compressed representation.
     // For it, we first calculate the number of bytes needed to store all function types.
-    const packed_len: usize = (segments_count + 1) / 2; // ceil(segments_count/2).
+    const packed_len: u64 = (segments_count + 1) / 2; // Equal to (segments_count/2).
 
     // Allocates space for packed function types (2 per byte).
     var packed_function_types = try allocator.alloc(u8, packed_len);
@@ -133,7 +133,7 @@ pub fn compress(
     // Approximations are packed in order: [0,1], [2,3], ...
     for (optimal_approximation.items, 0..) |approximation, idx| {
         const code: u8 = @intCast(@intFromEnum(approximation.function_type));
-        const byte_idx: usize = idx / 2;
+        const byte_idx: u64 = idx / 2;
         const is_high_nibble: bool = (idx % 2) == 0;
         if (is_high_nibble) {
             // Store the function type in the high nibble (bits 4-7).
@@ -151,7 +151,7 @@ pub fn compress(
         // The end point is exclusive, so it indicates where the next segment starts.
         try shared_functions.appendValue(allocator, f64, segment.definition.slope, compressed_values);
         try shared_functions.appendValue(allocator, f64, segment.definition.intercept, compressed_values);
-        try shared_functions.appendValue(allocator, usize, segment.end_idx, compressed_values);
+        try shared_functions.appendValue(allocator, u64, segment.end_idx, compressed_values);
     }
 }
 
@@ -163,27 +163,24 @@ pub fn decompress(
     decompressed_values: *ArrayList(f64),
 ) Error!void {
     // Validates that the compressed data contains some bytes to process.
-    if (compressed_values.len < 12) return Error.CorruptedCompressedData;
+    if (compressed_values.len < 16) return Error.CorruptedCompressedData;
 
     var offset: usize = 0; // Tracks the current position in the compressed stream.
 
     // Reads the preprocessing shift amount from the compressed stream.
-    const shift_amount = try shared_functions.readValue(f64, compressed_values[offset..]);
-    offset += @sizeOf(f64);
-
+    const shift_amount = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
     // Reads the number of segments that were used in the partitioning.
-    const num_segments: usize = try shared_functions.readValue(u32, compressed_values[offset..]);
-    offset += @sizeOf(u32);
+    const num_segments: u64 = try shared_functions.readOffsetValue(u64, compressed_values, &offset);
 
     // Read packed function types (2 per byte, low nibble = even index, high nibble = odd).
-    const type_bytes_len: usize = (num_segments + 1) / 2;
+    const type_bytes_len: u64 = (num_segments + 1) / 2;
 
     // Validate that the compressed stream contains exactly the expected number of bytes.
     // Each segment stores: 2 * f64 (slope, intercept) + usize (end_idx).
-    const bytes_per_segment = @sizeOf(f64) * 2 + @sizeOf(usize);
+    const bytes_per_segment = @sizeOf(f64) * 2 + @sizeOf(u64);
     const expected_total_bytes =
         @sizeOf(f64) + // shift_amount.
-        @sizeOf(u32) + // num_segments.
+        @sizeOf(u64) + // num_segments.
         type_bytes_len + // packed function types.
         num_segments * bytes_per_segment;
 
@@ -207,12 +204,9 @@ pub fn decompress(
         const function_type: FunctionType = @enumFromInt(@as(u8, code));
 
         // Reads the main function parameters (slope and intercept) and end index.
-        const slope = try shared_functions.readValue(f64, compressed_values[offset..]);
-        offset += @sizeOf(f64);
-        const intercept = try shared_functions.readValue(f64, compressed_values[offset..]);
-        offset += @sizeOf(f64);
-        const end_idx: usize = try shared_functions.readValue(usize, compressed_values[offset..]);
-        offset += @sizeOf(usize);
+        const slope = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
+        const intercept = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
+        const end_idx: u64 = try shared_functions.readOffsetValue(u64, compressed_values, &offset);
 
         // Creates a segment with the inferred start index.
         const functional_approximation = FunctionalApproximation{
@@ -244,6 +238,202 @@ pub fn decompress(
     }
 
     unshiftValues(decompressed_values, shift_amount);
+}
+
+/// Extracts `indices` and `coefficients` from NonLinearApproximation's `compressed_values`.
+/// The `compressed_values` encodes: a shift amount (f64), the number of segments (u64), packed
+/// function-type codes (two per byte), for each segment: (slope: f64, intercept: f64, end_index: u64).
+/// A `indices` ArrayList stores the number of segments, all function type codes, and the end
+/// indices. A `coefficients` ArrayList stores the shift amount and the per-segment (slope, intercept)
+/// values. Any loss of information on the indices, for example, incorrect function codes,
+/// wrong segment count, corrupted end indices, can lead to unexpected failures during decompression.
+/// Only structural checks are performed. The caller must ensure semantic validity. If the compressed
+/// stream does not follow the expected representation, `Error.CorruptedCompressedData` is returned.
+/// The `allocator` handles the memory allocations of the output arrays. Allocation errors are propagated.
+pub fn extract(
+    allocator: Allocator,
+    compressed_values: []const u8,
+    indices: *ArrayList(u64),
+    coefficients: *ArrayList(f64),
+) Error!void {
+    // Must contain at least shift_amount (f64) and number_of_segments (u64).
+    if (compressed_values.len < @sizeOf(f64) + @sizeOf(u64))
+        return Error.CorruptedCompressedData;
+
+    var offset: u64 = 0;
+
+    // Read shift amount.
+    const shift_amount =
+        try shared_functions.readOffsetValue(f64, compressed_values, &offset);
+
+    // Read number of segments.
+    const number_of_segments: u64 =
+        try shared_functions.readOffsetValue(u64, compressed_values, &offset);
+
+    // Insert into output.
+    try coefficients.append(allocator, shift_amount);
+    try indices.append(allocator, number_of_segments);
+
+    // Number of bytes containing packed 4-bit type codes.
+    const type_bytes_len: u64 = (number_of_segments + 1) / 2;
+
+    // Each segment has slope, intercept, end_index.
+    const bytes_per_segment =
+        @sizeOf(f64) * 2 + @sizeOf(u64);
+
+    // Entire payload must match exactly the expected size.
+    const expected_total_bytes =
+        @sizeOf(f64) + @sizeOf(u64) + type_bytes_len + number_of_segments * bytes_per_segment;
+
+    if (compressed_values.len != expected_total_bytes)
+        return Error.CorruptedCompressedData;
+
+    // Ensure availability of packed type data.
+    if (offset + type_bytes_len > compressed_values.len)
+        return Error.CorruptedCompressedData;
+
+    const packed_function_types =
+        compressed_values[offset .. offset + type_bytes_len];
+    offset += type_bytes_len;
+
+    // Unpack function types.
+    for (0..number_of_segments) |segment_index| {
+        const packed_information = packed_function_types[segment_index / 2];
+
+        const code: u4 = if (segment_index % 2 != 0)
+            @truncate(packed_information & 0x0F)
+        else
+            @truncate((packed_information >> 4) & 0x0F);
+
+        try indices.append(allocator, @intCast(code));
+    }
+
+    // Read the per-segment (slope, intercept, end_index).
+    for (0..number_of_segments) |_| {
+        // Prevent buffer overrun.
+        if (offset + bytes_per_segment > compressed_values.len)
+            return Error.CorruptedCompressedData;
+
+        const slope =
+            try shared_functions.readOffsetValue(f64, compressed_values, &offset);
+        const intercept =
+            try shared_functions.readOffsetValue(f64, compressed_values, &offset);
+        const end_index =
+            try shared_functions.readOffsetValue(u64, compressed_values, &offset);
+
+        try coefficients.append(allocator, slope);
+        try coefficients.append(allocator, intercept);
+        try indices.append(allocator, end_index);
+    }
+
+    // If offset does not end exactly here, data was malformed.
+    if (offset != compressed_values.len)
+        return Error.CorruptedCompressedData;
+}
+
+/// Rebuilds NonLinearApproximation's `compressed_values` from the given `indices` and
+/// `coefficients`. The encoding consists of shift_amount (coefficients[0]), number_of_segments
+/// (indices[0]), packed function types (indices[1 .. number_of_segments]), for each segment:
+/// slope, intercept, end_index. Any loss or misalignment of indices information, for example,
+/// incorrect function type, wrong segment count, missing end_index, can lead to failures during
+/// decompression. The function checks for structural consistency and returns
+/// `Error.CorruptedCompressedData` for malformed input. The `allocator` handles the memory
+/// allocations of the output arrays. Allocation errors are propagated.
+pub fn rebuild(
+    allocator: mem.Allocator,
+    indices: []const u64,
+    coefficients: []const f64,
+    compressed_values: *ArrayList(u8),
+) Error!void {
+    // Must contain at least shift_amount and number_of_segments.
+    if (indices.len < 1 or coefficients.len < 1)
+        return Error.CorruptedCompressedData;
+
+    // coefficients and indices must have same length:
+    //   coefficients = [shift_amount, slope0, intercept0, slope1, intercept1, ...]
+    //   indices   = [number_of_segments, type0, type1, ..., end0, end1, ...]
+    if (coefficients.len != indices.len)
+        return Error.CorruptedCompressedData;
+
+    // shift_amount.
+    try shared_functions.appendValue(allocator, f64, coefficients[0], compressed_values);
+
+    // number_of_segments.
+    const number_of_segments: u64 = indices[0];
+    try shared_functions.appendValue(allocator, u64, number_of_segments, compressed_values);
+
+    // There must be at least "number_of_segments" functios type.
+    if (1 + number_of_segments > indices.len)
+        return Error.CorruptedCompressedData;
+
+    // Prepare the functions type packing.
+    const packed_len = (number_of_segments + 1) / 2;
+    var packed_function_types = try allocator.alloc(u8, packed_len);
+    defer allocator.free(packed_function_types);
+    // Allocate memory for packed functions type and initialize it to zero.
+    // This enables the bitwise OR operations during packing.
+    @memset(packed_function_types, 0);
+
+    var coefficient_index: u64 = 1; // After shift_amount.
+    var indices_index: u64 = 1; // After number_of_segments.
+
+    // Pack the functions type.
+    for (0..number_of_segments) |index| {
+        const code_u64 = indices[indices_index];
+        // Validate that the code fits in 4 bits.
+        if (code_u64 > 0x0F)
+            return Error.CorruptedCompressedData;
+
+        const code: u8 = @intCast(code_u64);
+        const byte_index = index / 2;
+        const is_high = (index % 2) == 0;
+
+        if (byte_index >= packed_len)
+            return Error.CorruptedCompressedData;
+
+        if (is_high) {
+            packed_function_types[byte_index] |= (code << 4);
+        } else {
+            packed_function_types[byte_index] |= (code & 0x0F);
+        }
+
+        indices_index += 1;
+    }
+
+    try compressed_values.appendSlice(allocator, packed_function_types);
+
+    // For each segment, we now need:
+    //   coefficients: slope: f64, intercept: f64.
+    //   indices:   end_index: u64.
+    for (0..number_of_segments) |_| {
+        // Must have slope and intercept available.
+        if (coefficient_index + 1 >= coefficients.len)
+            return Error.CorruptedCompressedData;
+
+        const slope: f64 = coefficients[coefficient_index];
+        const intercept: f64 = coefficients[coefficient_index + 1];
+
+        try shared_functions.appendValue(allocator, f64, slope, compressed_values);
+        try shared_functions.appendValue(allocator, f64, intercept, compressed_values);
+
+        coefficient_index += 2;
+
+        // Must have an end_index available.
+        if (indices_index >= indices.len)
+            return Error.CorruptedCompressedData;
+
+        const end_index: u64 = indices[indices_index];
+        try shared_functions.appendValue(allocator, u64, end_index, compressed_values);
+        indices_index += 1;
+    }
+
+    // No extra indices allowed.
+    if (indices_index != indices.len)
+        return Error.CorruptedCompressedData;
+
+    // No extra coefficients allowed.
+    if (coefficient_index != coefficients.len)
+        return Error.CorruptedCompressedData;
 }
 
 /// Represents a segment of a time series that is approximated by a mathematical function.
@@ -746,5 +936,75 @@ test "check non linear approximator configuration parsing" {
         uncompressed_values,
         &compressed_values,
         method_configuration,
+    );
+}
+
+test "rebuildNonLinearApproximation rejects mismatched lengths" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).empty;
+    defer compressed.deinit(allocator);
+
+    // number_of_segments = 1.
+    const indices = [_]u64{
+        1, // number_of_segments.
+        2, // type code.
+        // Missing end_index.
+    };
+
+    const coefficients = [_]f64{
+        0.5, // shift.
+        1.0, // slope.
+        // Missing intercept.
+    };
+
+    try testing.expectError(
+        Error.CorruptedCompressedData,
+        rebuild(allocator, indices[0..], coefficients[0..], &compressed),
+    );
+}
+
+test "rebuildNonLinearApproximation rejects invalid function type code" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).empty;
+    defer compressed.deinit(allocator);
+
+    const indices = [_]u64{
+        1, // number_of_segments.
+        999, // invalid > 0x0F thus must fail.
+        5, // end_index.
+    };
+
+    const coefficients = [_]f64{
+        0.0, // shift.
+        1.0, // slope.
+        2.0, // intercept.
+    };
+
+    try testing.expectError(
+        Error.CorruptedCompressedData,
+        rebuild(allocator, indices[0..], coefficients[0..], &compressed),
+    );
+}
+
+test "rebuildNonLinearApproximation rejects incomplete coefficient pair" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).empty;
+    defer compressed.deinit(allocator);
+
+    const indices = [_]u64{
+        1, // number_of_segments.
+        2, // valid type.
+        10, // end_index.
+    };
+
+    // Missing intercept.
+    const coefficients = [_]f64{
+        0.0, // shift.
+        1.0, // slope.
+    };
+
+    try testing.expectError(
+        Error.CorruptedCompressedData,
+        rebuild(allocator, indices[0..], coefficients[0..], &compressed),
     );
 }

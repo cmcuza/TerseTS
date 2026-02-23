@@ -55,17 +55,17 @@ pub const LinearFunction = struct {
     intercept: f64,
 };
 
-/// `Point` is a point represented by `time` and `value`. `time` is of datatype `time_type`.
-fn Point(comptime time_type: type) type {
-    return struct { time: time_type, value: f64 };
+/// `Point` is a point represented by `index` and `value`. `index` is of datatype `index_type`.
+fn Point(comptime index_type: type) type {
+    return struct { index: index_type, value: f64 };
 }
 
 /// `SegmentMetadata` stores the information about an approximated segment during the execution
-/// of Sim-Piece and Mix-Piece. It stores the starting time of the segment in `start_time`, the
+/// of Sim-Piece and Mix-Piece. It stores the starting index of the segment in `start_index`, the
 /// `interception` point used to create the linear function approximation, and the slopes of
 /// the upper and lower bounds that constraint the linear approximation in that segment.
 pub const SegmentMetadata = struct {
-    start_time: usize,
+    start_index: usize,
     intercept: f64,
     upper_bound_slope: f64,
     lower_bound_slope: f64,

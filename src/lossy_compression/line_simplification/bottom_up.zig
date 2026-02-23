@@ -43,6 +43,8 @@ const DiscretePoint = shared_structs.DiscretePoint;
 const LinearFunction = shared_structs.LinearFunction;
 
 const tester = @import("../../tester.zig");
+const extractors = @import("../../utilities/extractors.zig");
+const rebuilders = @import("../../utilities/rebuilders.zig");
 
 const testing = std.testing;
 
@@ -185,41 +187,45 @@ pub fn compress(
 
 /// Decompress `compressed_values` produced by "Bottom-Up". The function writes the result to
 /// `decompressed_values`. If an error occurs it is returned.
-pub fn decompress(allocator: Allocator, compressed_values: []const u8, decompressed_values: *ArrayList(f64)) Error!void {
+pub fn decompress(
+    allocator: Allocator,
+    compressed_values: []const u8,
+    decompressed_values: *ArrayList(f64),
+) Error!void {
     // The compressed representation is composed of three values: (start_value, end_value, end_time)
     // all of type 64-bit float, except end_time which is usize.
     if (compressed_values.len % 24 != 0) return Error.UnsupportedInput;
 
     const compressed_lines_and_index = mem.bytesAsSlice(f64, compressed_values);
 
-    var first_timestamp: usize = 0;
+    var first_index: usize = 0;
     var index: usize = 0;
 
     while (index < compressed_lines_and_index.len) : (index += 3) {
-        const start_point = .{ .time = first_timestamp, .value = compressed_lines_and_index[index] };
+        const start_point = .{ .index = first_index, .value = compressed_lines_and_index[index] };
         const end_point = .{
-            .time = @as(usize, @bitCast(compressed_lines_and_index[index + 2])),
+            .index = @as(usize, @bitCast(compressed_lines_and_index[index + 2])),
             .value = compressed_lines_and_index[index + 1],
         };
 
         // Check if the segment has only two points. If so, we can directly append their values.
-        if (start_point.time + 1 < end_point.time) {
-            const duration: f64 = @floatFromInt(end_point.time - start_point.time);
+        if (start_point.index + 1 < end_point.index) {
+            const duration: f64 = @floatFromInt(end_point.index - start_point.index);
 
             const slope = (end_point.value - start_point.value) / duration;
             const intercept = start_point.value - slope *
-                @as(f64, @floatFromInt(start_point.time));
+                @as(f64, @floatFromInt(start_point.index));
 
             try decompressed_values.append(allocator, start_point.value);
-            var current_timestamp: usize = start_point.time + 1;
+            var current_index: usize = start_point.index + 1;
 
             // Interpolate the values between the start and end points of the current segment.
-            while (current_timestamp < end_point.time) : (current_timestamp += 1) {
-                const y: f64 = slope * @as(f64, @floatFromInt(current_timestamp)) + intercept;
+            while (current_index < end_point.index) : (current_index += 1) {
+                const y: f64 = slope * @as(f64, @floatFromInt(current_index)) + intercept;
                 try decompressed_values.append(allocator, y);
             }
             try decompressed_values.append(allocator, end_point.value);
-            first_timestamp = current_timestamp + 1;
+            first_index = current_index + 1;
         } else {
             // If the start and end points are one point apart,
             // append the start point and end points directly.
@@ -227,13 +233,55 @@ pub fn decompress(allocator: Allocator, compressed_values: []const u8, decompres
 
             // Append the end point only if it is different from the start point.
             // This is to avoid duplicates in the decompressed values.
-            if (start_point.time != end_point.time) {
+            if (start_point.index != end_point.index) {
                 try decompressed_values.append(allocator, end_point.value);
             }
 
-            first_timestamp += 2;
+            first_index += 2;
         }
     }
+}
+
+/// Extracts `indices` and `coefficients` from BottomUp's `compressed_values`. BottomUp uses the
+/// same three-value repeating representation as SlideFilter, so this function forwards to
+/// `extractSlide`. All corruption checks and structural validation occur in that routine. Any loss
+/// of information on indices can lead to failures when decoding. The `allocator` handles the memory
+/// of the output arrays. Allocation errors are propagated.
+pub fn extract(
+    allocator: Allocator,
+    compressed_values: []const u8,
+    indices: *ArrayList(u64),
+    coefficients: *ArrayList(f64),
+) Error!void {
+    // Delegate to DoubleCoefficientIndexTriples extractor.
+    // BottomUp uses the same representation as SlideFilter.
+    try extractors.extractDoubleCoefficientIndexTriples(
+        allocator,
+        compressed_values,
+        indices,
+        coefficients,
+    );
+}
+
+/// Rebuilds BottomUp's `compressed_values` from the provided `indices` and `coefficients`.
+/// Because the format matches SlideFilter exactly, this wrapper forwards to `rebuildSlide`.
+/// All format and corruption checks are performed internally. Incorrect or inconsistent
+/// indices may produce corrupted output that cannot be decompressed. The `allocator`
+/// handles the memory allocations of the output arrays. Allocation errors are propagated.
+pub fn rebuild(
+    allocator: Allocator,
+    indices: []const u64,
+    coefficients: []const f64,
+    compressed_values: *ArrayList(u8),
+) Error!void {
+    // Delegate to DoubleCoefficientIndexTriples extractor.
+    // BottomUp uses the same representation as SlideFilter.
+    try rebuilders.rebuildDoubleCoefficientIndexTriples(
+        allocator,
+        indices,
+        coefficients,
+        compressed_values,
+    );
 }
 
 /// `SegmentMergeCost` represents a segment and its associated `cost` with the next segment,

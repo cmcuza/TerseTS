@@ -48,12 +48,14 @@ const configuration = @import("../../configuration.zig");
 
 const shared_structs = @import("../../utilities/shared_structs.zig");
 const shared_functions = @import("../../utilities/shared_functions.zig");
+const ConvexHull = @import("../../utilities/convex_hull.zig").ConvexHull;
+const extractors = @import("../../utilities/extractors.zig");
+const rebuilders = @import("../../utilities/rebuilders.zig");
+
 const DiscretePoint = shared_structs.DiscretePoint;
 const ContinousPoint = shared_structs.ContinousPoint;
 const Segment = shared_structs.Segment;
 const LinearFunction = shared_structs.LinearFunction;
-
-const ConvexHull = @import("../../utilities/convex_hull.zig").ConvexHull;
 
 /// Compress `uncompressed_values` using "Swing Filter" and its `method_configuration`.
 /// The function writes the result to `compressed_values`. The `allocator` is used to
@@ -91,8 +93,8 @@ pub fn compressSwingFilter(
 
     // Initialize the current segment with first two points.
     var current_segment: Segment = .{
-        .start_point = .{ .time = 0, .value = uncompressed_values[0] },
-        .end_point = .{ .time = 1, .value = uncompressed_values[1] },
+        .start_point = .{ .index = 0, .value = uncompressed_values[0] },
+        .end_point = .{ .index = 1, .value = uncompressed_values[1] },
     };
 
     // Compute the numerator Eq. (6).
@@ -106,23 +108,23 @@ pub fn compressSwingFilter(
     try shared_functions.appendValue(allocator, f64, current_segment.start_point.value, compressed_values);
 
     // The first two points are already part of `current_segment`, the next point is at index two.
-    var current_timestamp: usize = 2;
-    while (current_timestamp < uncompressed_values.len) : (current_timestamp += 1) {
-        // Evaluate the upper and lower bound linear functions at the current timestamp.
-        const upper_limit = evaluateLinearFunctionAtTime(upper_bound, usize, current_timestamp);
-        const lower_limit = evaluateLinearFunctionAtTime(lower_bound, usize, current_timestamp);
+    var current_index: usize = 2;
+    while (current_index < uncompressed_values.len) : (current_index += 1) {
+        // Evaluate the upper and lower bound linear functions at the current index.
+        const upper_limit = evaluateLinearFunctionAtTime(upper_bound, usize, current_index);
+        const lower_limit = evaluateLinearFunctionAtTime(lower_bound, usize, current_index);
         var end_value: f64 = 0;
 
         // Check if the current point is outside the limits defined by the upper and lower bounds.
-        // If `upper_limit`, `lower_limit` or the `uncompressed_values[current_timestamp]` are NaN
+        // If `upper_limit`, `lower_limit` or the `uncompressed_values[current_index]` are NaN
         // or infinite, the point is outside the limits. Thus, we can use the recording mechanism.
         // This initial condition enables swing filter to work even with NaN and infinite values.
-        if (!math.isFinite(upper_limit + lower_limit + uncompressed_values[current_timestamp]) or
-            (upper_limit < (uncompressed_values[current_timestamp] - adjusted_error_bound)) or
-            (lower_limit > (uncompressed_values[current_timestamp] + adjusted_error_bound)))
+        if (!math.isFinite(upper_limit + lower_limit + uncompressed_values[current_index]) or
+            (upper_limit < (uncompressed_values[current_index] - adjusted_error_bound)) or
+            (lower_limit > (uncompressed_values[current_index] + adjusted_error_bound)))
         {
             // Recording mechanism (the current point is outside the limits).
-            const segment_size = current_timestamp - current_segment.start_point.time - 1;
+            const segment_size = current_index - current_segment.start_point.index - 1;
             if (segment_size > 1) {
                 // Denominator of Eq. (6).
                 const sum_square: f64 = @floatFromInt(
@@ -144,7 +146,7 @@ pub fn compressSwingFilter(
                     ),
                 };
 
-                end_value = evaluateLinearFunctionAtTime(linear_approximation, usize, current_timestamp - 1);
+                end_value = evaluateLinearFunctionAtTime(linear_approximation, usize, current_index - 1);
 
                 try shared_functions.appendValue(allocator, f64, end_value, compressed_values);
             } else {
@@ -160,31 +162,31 @@ pub fn compressSwingFilter(
                 );
             }
 
-            try shared_functions.appendValue(allocator, usize, current_timestamp, compressed_values);
+            try shared_functions.appendValue(allocator, usize, current_index, compressed_values);
 
             // Update the current segment.
-            current_segment.start_point.time = current_timestamp - 1;
+            current_segment.start_point.index = current_index - 1;
             current_segment.start_point.value = end_value;
 
             // Check if there is only one point left. If so, update only the `end_point`.
-            // Otherwise, update the `end_point`, the upper and lower bounds and the `current_timestamp`.
-            if (current_timestamp < uncompressed_values.len) {
-                current_segment.end_point.time = current_timestamp;
-                current_segment.end_point.value = uncompressed_values[current_timestamp];
+            // Otherwise, update the `end_point`, the upper and lower bounds and the `current_index`.
+            if (current_index < uncompressed_values.len) {
+                current_segment.end_point.index = current_index;
+                current_segment.end_point.value = uncompressed_values[current_index];
 
                 updateSwingLinearFunction(current_segment, &upper_bound, adjusted_error_bound);
                 updateSwingLinearFunction(current_segment, &lower_bound, -adjusted_error_bound);
 
                 slope_derivate = computeSlopeDerivate(current_segment);
             } else {
-                // Only one point left. The `end_point` is at the `current_timestamp`.
-                current_segment.end_point.time = current_timestamp;
-                current_segment.end_point.value = uncompressed_values[current_timestamp];
+                // Only one point left. The `end_point` is at the `current_index`.
+                current_segment.end_point.index = current_index;
+                current_segment.end_point.value = uncompressed_values[current_index];
             }
         } else {
             //Filtering mechanism (the current point is still inside the limits).
-            current_segment.end_point.time = current_timestamp;
-            current_segment.end_point.value = uncompressed_values[current_timestamp];
+            current_segment.end_point.index = current_index;
+            current_segment.end_point.value = uncompressed_values[current_index];
 
             // Update the potentially new upper and lower bounds with the new current point.
             updateSwingLinearFunction(current_segment, &new_upper_bound, adjusted_error_bound);
@@ -193,12 +195,12 @@ pub fn compressSwingFilter(
             const new_upper_limit: f64 = evaluateLinearFunctionAtTime(
                 new_upper_bound,
                 usize,
-                current_timestamp,
+                current_index,
             );
             const new_lower_limit: f64 = evaluateLinearFunctionAtTime(
                 new_lower_bound,
                 usize,
-                current_timestamp,
+                current_index,
             );
 
             // Update the upper and lower bounds if needed.
@@ -219,7 +221,7 @@ pub fn compressSwingFilter(
     // If the last segment is not empty, it means that the recording mechanism was not triggered.
     // Thus, the current semgent has the last line segment which needs to be recorded.
     // Given the way the for loop is structured, the last segment will always have at least one point.
-    const segment_size = current_timestamp - current_segment.start_point.time - 1;
+    const segment_size = current_index - current_segment.start_point.index - 1;
 
     if (segment_size > 1) {
         // Denominator of Eq. (6).
@@ -245,14 +247,14 @@ pub fn compressSwingFilter(
         const end_value: f64 = evaluateLinearFunctionAtTime(
             linear_approximation,
             usize,
-            current_timestamp - 1,
+            current_index - 1,
         );
         try shared_functions.appendValue(allocator, f64, end_value, compressed_values);
     } else {
         try shared_functions.appendValue(allocator, f64, current_segment.end_point.value, compressed_values);
     }
 
-    try shared_functions.appendValue(allocator, usize, current_timestamp, compressed_values);
+    try shared_functions.appendValue(allocator, usize, current_index, compressed_values);
 }
 
 /// Compress `uncompressed_values` using "Slide Filter" and its `method_configuration`.
@@ -288,7 +290,7 @@ pub fn compressSlideFilter(
 
     // Initialize the interception point between the upper and lower bounds. The point will be
     // defined as part of the method's logic, thus now it is undefined.
-    var intercept_point: ContinousPoint = .{ .time = undefined, .value = undefined };
+    var intercept_point: ContinousPoint = .{ .index = undefined, .value = undefined };
 
     // Initialize the linear function used across the method. Their values will be defined as part
     // of the method's logic, thus now are undefined.
@@ -299,8 +301,8 @@ pub fn compressSlideFilter(
 
     // Initialize the current segment with first two points.
     var current_segment: Segment = .{
-        .start_point = .{ .time = 0, .value = uncompressed_values[0] },
-        .end_point = .{ .time = 1, .value = uncompressed_values[1] },
+        .start_point = .{ .index = 0, .value = uncompressed_values[0] },
+        .end_point = .{ .index = 1, .value = uncompressed_values[1] },
     };
 
     try convex_hull.add(current_segment.start_point);
@@ -318,27 +320,27 @@ pub fn compressSlideFilter(
     );
 
     // The first two points are already part of `current_segment`, the next point is at index two.
-    var current_timestamp: usize = 2;
-    while (current_timestamp < uncompressed_values.len) : (current_timestamp += 1) {
-        // Evaluate the upper and lower bound linear functions at the current timestamp.
+    var current_index: usize = 2;
+    while (current_index < uncompressed_values.len) : (current_index += 1) {
+        // Evaluate the upper and lower bound linear functions at the current index.
         const upper_limit = evaluateLinearFunctionAtTime(
             upper_bound,
             usize,
-            current_timestamp,
+            current_index,
         );
         const lower_limit = evaluateLinearFunctionAtTime(
             lower_bound,
             usize,
-            current_timestamp,
+            current_index,
         );
 
         // Check if the current point is outside the limits defined by the upper and lower bounds.
-        // If `upper_limit`, `lower_limit` or the `uncompressed_values[current_timestamp]` are NaN
+        // If `upper_limit`, `lower_limit` or the `uncompressed_values[current_index]` are NaN
         // or infinite, the point is outside the limits. Thus, we can use the recording mechanism.
         // This initial condition enables slide filter to work even with NaN and infinite values.
-        if (!math.isFinite(upper_limit + lower_limit + uncompressed_values[current_timestamp]) or
-            (upper_limit < (uncompressed_values[current_timestamp] - adjusted_error_bound)) or
-            (lower_limit > (uncompressed_values[current_timestamp] + adjusted_error_bound)))
+        if (!math.isFinite(upper_limit + lower_limit + uncompressed_values[current_index]) or
+            (upper_limit < (uncompressed_values[current_index] - adjusted_error_bound)) or
+            (lower_limit > (uncompressed_values[current_index] + adjusted_error_bound)))
         {
             // Recording mechanism. The current points is outside the limits. The linear approximation
             // crosses the interception point of the upper and lower bounds.
@@ -353,13 +355,13 @@ pub fn compressSlideFilter(
                 ),
             };
 
-            const segment_size = current_segment.end_point.time - current_segment.start_point.time;
+            const segment_size = current_segment.end_point.index - current_segment.start_point.index;
 
             if (segment_size > 1) {
                 const init_value = evaluateLinearFunctionAtTime(
                     current_linear_approximation,
                     usize,
-                    current_segment.start_point.time,
+                    current_segment.start_point.index,
                 );
 
                 try shared_functions.appendValue(allocator, f64, init_value, compressed_values);
@@ -367,7 +369,7 @@ pub fn compressSlideFilter(
                 const end_value = evaluateLinearFunctionAtTime(
                     current_linear_approximation,
                     usize,
-                    current_segment.end_point.time,
+                    current_segment.end_point.index,
                 );
 
                 try shared_functions.appendValue(allocator, f64, end_value, compressed_values);
@@ -388,19 +390,18 @@ pub fn compressSlideFilter(
                     compressed_values,
                 );
             }
-            try shared_functions.appendValue(allocator, usize, current_timestamp, compressed_values);
+            try shared_functions.appendValue(allocator, usize, current_index, compressed_values);
 
             // Update the current segment.
-            current_segment.start_point.time = current_timestamp;
-            current_segment.start_point.value = uncompressed_values[current_timestamp];
-
+            current_segment.start_point.index = current_index;
+            current_segment.start_point.value = uncompressed_values[current_index];
             // Edge case as only one point is left.
-            if (current_timestamp + 1 < uncompressed_values.len) {
+            if (current_index + 1 < uncompressed_values.len) {
 
                 // Update the current segment.
                 current_segment.end_point = .{
-                    .time = current_timestamp + 1,
-                    .value = uncompressed_values[current_timestamp + 1],
+                    .index = current_index + 1,
+                    .value = uncompressed_values[current_index + 1],
                 };
 
                 updateSlideLinearFunction(current_segment, &upper_bound, adjusted_error_bound);
@@ -410,16 +411,16 @@ pub fn compressSlideFilter(
                 try convex_hull.add(current_segment.start_point);
                 try convex_hull.add(current_segment.end_point);
 
-                current_timestamp += 1;
+                current_index += 1;
             } else {
-                // Only one point left. The `end_point` is at the `current_timestamp`.
-                current_segment.end_point.time = current_timestamp;
-                current_segment.end_point.value = uncompressed_values[current_timestamp];
+                // Only one point left. The `end_point` is at the `current_index`.
+                current_segment.end_point.index = current_index;
+                current_segment.end_point.value = uncompressed_values[current_index];
             }
         } else {
             // Filtering mechanism. The current point is still inside the limits.
-            current_segment.end_point.time = current_timestamp;
-            current_segment.end_point.value = uncompressed_values[current_timestamp];
+            current_segment.end_point.index = current_index;
+            current_segment.end_point.value = uncompressed_values[current_index];
 
             try convex_hull.add(current_segment.end_point);
 
@@ -453,7 +454,7 @@ pub fn compressSlideFilter(
         }
     }
 
-    const segment_size = current_timestamp - current_segment.start_point.time - 1;
+    const segment_size = current_index - current_segment.start_point.index - 1;
 
     if (segment_size > 1) {
         computeInterceptionPoint(lower_bound, upper_bound, &intercept_point);
@@ -469,7 +470,7 @@ pub fn compressSlideFilter(
         const init_value = evaluateLinearFunctionAtTime(
             linear_approximation,
             usize,
-            current_segment.start_point.time,
+            current_segment.start_point.index,
         );
 
         try shared_functions.appendValue(allocator, f64, init_value, compressed_values);
@@ -477,7 +478,7 @@ pub fn compressSlideFilter(
         const end_value = evaluateLinearFunctionAtTime(
             linear_approximation,
             usize,
-            current_timestamp - 1,
+            current_index - 1,
         );
         try shared_functions.appendValue(allocator, f64, end_value, compressed_values);
     } else {
@@ -485,7 +486,7 @@ pub fn compressSlideFilter(
         try shared_functions.appendValue(allocator, f64, current_segment.end_point.value, compressed_values);
     }
 
-    try shared_functions.appendValue(allocator, usize, current_timestamp, compressed_values);
+    try shared_functions.appendValue(allocator, usize, current_index, compressed_values);
 }
 
 /// Compress `uncompressed_values` using "Swing Filter"'s filtering mechanism and its
@@ -526,8 +527,8 @@ pub fn compressSwingFilterDisconnected(
 
     // Initialize the current segment with the first two points.
     var current_segment: Segment = .{
-        .start_point = .{ .time = 0, .value = uncompressed_values[0] },
-        .end_point = .{ .time = 1, .value = uncompressed_values[1] },
+        .start_point = .{ .index = 0, .value = uncompressed_values[0] },
+        .end_point = .{ .index = 1, .value = uncompressed_values[1] },
     };
 
     // Compute the numerator Eq. (6).
@@ -537,19 +538,19 @@ pub fn compressSwingFilterDisconnected(
     updateSwingLinearFunction(current_segment, &lower_bound, -adjusted_error_bound);
 
     // The first two points are already part of `current_segment`, the next point is at index two.
-    var current_timestamp: usize = 2;
-    while (current_timestamp < uncompressed_values.len) : (current_timestamp += 1) {
-        // Calculate the upper and lower bound linear functions at the current timestamp.
-        const upper_limit = evaluateLinearFunctionAtTime(upper_bound, usize, current_timestamp);
-        const lower_limit = evaluateLinearFunctionAtTime(lower_bound, usize, current_timestamp);
+    var current_index: usize = 2;
+    while (current_index < uncompressed_values.len) : (current_index += 1) {
+        // Calculate the upper and lower bound linear functions at the current index.
+        const upper_limit = evaluateLinearFunctionAtTime(upper_bound, usize, current_index);
+        const lower_limit = evaluateLinearFunctionAtTime(lower_bound, usize, current_index);
 
         // Check if the current point is outside the limits defined by the upper and lower bounds.
-        // If `upper_limit`, `lower_limit` or the `uncompressed_values[current_timestamp]` are NaN
+        // If `upper_limit`, `lower_limit` or the `uncompressed_values[current_index]` are NaN
         // or infinite, the point is outside the limits. Thus, we can use the recording mechanism.
         // This initial condition enables swing filter to work even with NaN and infinite values.
-        if (!math.isFinite(upper_limit + lower_limit + uncompressed_values[current_timestamp]) or
-            (upper_limit < (uncompressed_values[current_timestamp] - adjusted_error_bound)) or
-            (lower_limit > (uncompressed_values[current_timestamp] + adjusted_error_bound)))
+        if (!math.isFinite(upper_limit + lower_limit + uncompressed_values[current_index]) or
+            (upper_limit < (uncompressed_values[current_index] - adjusted_error_bound)) or
+            (lower_limit > (uncompressed_values[current_index] + adjusted_error_bound)))
         {
             // Recording mechanism (the current point is outside the limits).
             try shared_functions.appendValue(
@@ -558,7 +559,7 @@ pub fn compressSwingFilterDisconnected(
                 current_segment.start_point.value,
                 compressed_values,
             );
-            const segment_size = current_timestamp - current_segment.start_point.time - 1;
+            const segment_size = current_index - current_segment.start_point.index - 1;
             if (segment_size > 1) {
                 // Denominator of Eq. (6).
                 const sum_square: f64 = @floatFromInt(
@@ -579,7 +580,7 @@ pub fn compressSwingFilterDisconnected(
                         current_segment.start_point,
                     ),
                 };
-                const end_value = evaluateLinearFunctionAtTime(linear_approximation, usize, current_timestamp - 1);
+                const end_value = evaluateLinearFunctionAtTime(linear_approximation, usize, current_index - 1);
 
                 try shared_functions.appendValue(allocator, f64, end_value, compressed_values);
             } else {
@@ -594,32 +595,31 @@ pub fn compressSwingFilterDisconnected(
                 );
             }
 
-            try shared_functions.appendValue(allocator, usize, current_timestamp, compressed_values);
+            try shared_functions.appendValue(allocator, usize, current_index, compressed_values);
 
             // Update the current segment.
-            current_segment.start_point.time = current_timestamp;
-            current_segment.start_point.value = uncompressed_values[current_timestamp];
-
+            current_segment.start_point.index = current_index;
+            current_segment.start_point.value = uncompressed_values[current_index];
             // Check if there is only one point left. If so, update only the `end_point`.
-            // Otherwise, update the `end_point`, the upper and lower bounds and the `current_timestamp`.
-            if (current_timestamp + 1 < uncompressed_values.len) {
-                current_segment.end_point.time = current_timestamp + 1;
-                current_segment.end_point.value = uncompressed_values[current_timestamp + 1];
+            // Otherwise, update the `end_point`, the upper and lower bounds and the `current_index`.
+            if (current_index + 1 < uncompressed_values.len) {
+                current_segment.end_point.index = current_index + 1;
+                current_segment.end_point.value = uncompressed_values[current_index + 1];
 
                 updateSwingLinearFunction(current_segment, &upper_bound, adjusted_error_bound);
                 updateSwingLinearFunction(current_segment, &lower_bound, -adjusted_error_bound);
 
-                current_timestamp += 1;
+                current_index += 1;
                 slope_derivate = computeSlopeDerivate(current_segment);
             } else {
-                // Only one point left. The `end_point` is at the `current_timestamp`.
-                current_segment.end_point.time = current_timestamp;
-                current_segment.end_point.value = uncompressed_values[current_timestamp];
+                // Only one point left. The `end_point` is at the `current_index`.
+                current_segment.end_point.index = current_index;
+                current_segment.end_point.value = uncompressed_values[current_index];
             }
         } else {
             //Filtering mechanism (the current point is still inside the limits).
-            current_segment.end_point.time = current_timestamp;
-            current_segment.end_point.value = uncompressed_values[current_timestamp];
+            current_segment.end_point.index = current_index;
+            current_segment.end_point.value = uncompressed_values[current_index];
 
             // Update the potentially new upper and lower bounds with the new current point.
             // If the new lines create tighter bounds, update the upper and lower bounds.
@@ -629,12 +629,12 @@ pub fn compressSwingFilterDisconnected(
             const new_upper_limit: f64 = evaluateLinearFunctionAtTime(
                 new_upper_bound,
                 usize,
-                current_timestamp,
+                current_index,
             );
             const new_lower_limit: f64 = evaluateLinearFunctionAtTime(
                 new_lower_bound,
                 usize,
-                current_timestamp,
+                current_index,
             );
 
             // Update the upper and lower bounds if needed.
@@ -655,7 +655,7 @@ pub fn compressSwingFilterDisconnected(
     // If the last segment is not empty, it means that the recording mechanism was not triggered.
     // Thus, the current semgent has the last line segment which needs to be recorded.
     // Given the way the for loop is structured, the last segment will always have at least one point.
-    const segment_size = current_timestamp - current_segment.start_point.time - 1;
+    const segment_size = current_index - current_segment.start_point.index - 1;
 
     try shared_functions.appendValue(allocator, f64, current_segment.start_point.value, compressed_values);
     // Check if the last segment has more than one point. If so, the recording mechanism is triggered.
@@ -683,15 +683,15 @@ pub fn compressSwingFilterDisconnected(
         const end_value: f64 = evaluateLinearFunctionAtTime(
             linear_approximation,
             usize,
-            current_timestamp - 1,
+            current_index - 1,
         );
         try shared_functions.appendValue(allocator, f64, end_value, compressed_values);
     } else {
-        // Only point left. The `end_point` is at the `current_timestamp`.
+        // Only point left. The `end_point` is at the `current_index`.
         try shared_functions.appendValue(allocator, f64, current_segment.end_point.value, compressed_values);
     }
-    // The `current_timestamp` indicate the final timestamp.
-    try shared_functions.appendValue(allocator, usize, current_timestamp, compressed_values);
+    // The `current_index` indicate the final index.
+    try shared_functions.appendValue(allocator, usize, current_index, compressed_values);
 }
 
 /// Decompress `compressed_values` produced by "Swing Filter". The algorithm writes the result to
@@ -713,7 +713,7 @@ pub fn decompressSwingFilter(
     var index: usize = 0;
 
     // Extract the start point from the compressed representation.
-    var start_point: DiscretePoint = .{ .time = 0, .value = compressed_lines_and_index[0] };
+    var start_point: DiscretePoint = .{ .index = 0, .value = compressed_lines_and_index[0] };
     try decompressed_values.append(allocator, start_point.value);
 
     // Iterate over the compressed representation to reconstruct the time series
@@ -722,23 +722,23 @@ pub fn decompressSwingFilter(
         const current_segment: Segment = .{
             .start_point = start_point,
             .end_point = .{
-                .time = @as(usize, @bitCast(compressed_lines_and_index[index + 2])) - 1,
+                .index = @as(usize, @bitCast(compressed_lines_and_index[index + 2])) - 1,
                 .value = compressed_lines_and_index[index + 1],
             },
         };
 
         // Check if the start and end points of the current segment are different. If they are the same,
         // it means that the segment is a single point, and we can directly append the value.
-        if (current_segment.start_point.time != current_segment.end_point.time) {
+        if (current_segment.start_point.index != current_segment.end_point.index) {
             // Create the linear approximation for the current segment.
             updateSwingLinearFunction(current_segment, &linear_approximation, 0.0);
-            var current_timestamp: usize = current_segment.start_point.time + 1;
+            var current_index: usize = current_segment.start_point.index + 1;
             // Interpolate the values between the start and end points of the current segment.
-            while (current_timestamp < current_segment.end_point.time) : (current_timestamp += 1) {
+            while (current_index < current_segment.end_point.index) : (current_index += 1) {
                 const y: f64 = evaluateLinearFunctionAtTime(
                     linear_approximation,
                     usize,
-                    current_timestamp,
+                    current_index,
                 );
                 try decompressed_values.append(allocator, y);
             }
@@ -770,48 +770,132 @@ pub fn decompressSlideFilter(
 
     var linear_approximation: LinearFunction = .{ .slope = undefined, .intercept = undefined };
 
-    var first_timestamp: usize = 0;
+    var first_index: usize = 0;
     var index: usize = 0;
 
     while (index < compressed_lines_and_index.len) : (index += 3) {
         const current_segment: Segment = .{
-            .start_point = .{ .time = first_timestamp, .value = compressed_lines_and_index[index] },
+            .start_point = .{ .index = first_index, .value = compressed_lines_and_index[index] },
             .end_point = .{
-                .time = @as(usize, @bitCast(compressed_lines_and_index[index + 2])) - 1,
+                .index = @as(usize, @bitCast(compressed_lines_and_index[index + 2])) - 1,
                 .value = compressed_lines_and_index[index + 1],
             },
         };
 
         // Check if the start and end points of the current segment are different. If they are the same,
         // it means that the segment is a single point, and we can directly append the value.
-        if (current_segment.start_point.time != current_segment.end_point.time) {
+        if (current_segment.start_point.index != current_segment.end_point.index) {
             updateSwingLinearFunction(current_segment, &linear_approximation, 0.0);
             try decompressed_values.append(allocator, current_segment.start_point.value);
-            var current_timestamp: usize = current_segment.start_point.time + 1;
+            var current_index: usize = current_segment.start_point.index + 1;
 
             // Interpolate the values between the start and end points of the current segment.
-            while (current_timestamp < current_segment.end_point.time) : (current_timestamp += 1) {
+            while (current_index < current_segment.end_point.index) : (current_index += 1) {
                 const y: f64 = evaluateLinearFunctionAtTime(
                     linear_approximation,
                     usize,
-                    current_timestamp,
+                    current_index,
                 );
                 try decompressed_values.append(allocator, y);
             }
             try decompressed_values.append(allocator, current_segment.end_point.value);
-            first_timestamp = current_timestamp + 1;
+            first_index = current_index + 1;
         } else {
             // If the start and end points are the same, append the start point value directly.
             try decompressed_values.append(allocator, current_segment.start_point.value);
-            first_timestamp += 1;
+            first_index += 1;
         }
     }
+}
+
+/// Extracts `indices` and coefficients from SwingFilter's `compressed_values`. A `indices`
+/// ArrayList is used to store the extracted end indices, and a `coefficients` ArrayList is used
+/// to store the coefficient values. Swing encodes a sequence of triples:
+/// (f64 coefficient, f64 coefficient, u64 end_index). Any inconsistency or loss of information
+/// in the `indices` may result in errors when decompressing the reconstructed representation.
+/// If validation of the `compressed_values` fails, `Error.CorruptedCompressedData` is returned.
+/// The `allocator` handles the memory allocations of the output arrays. Any memory allocation
+/// error is propagated to the caller.
+pub fn extractSwing(
+    allocator: Allocator,
+    compressed_values: []const u8,
+    indices: *ArrayList(u64),
+    coefficients: *ArrayList(f64),
+) Error!void {
+    try extractors.extractCoefficientIndexTuplesWithStartCoefficient(
+        allocator,
+        compressed_values,
+        indices,
+        coefficients,
+    );
+}
+
+/// Extracts `indices` and coefficients from SlideFilter's `compressed_values`. A `indices`
+/// ArrayList is used to store the extracted end indices, and a `coefficients` ArrayList is used
+/// to store the coefficient values. Slide encodes a sequence of triples:
+/// (f64 coefficient, f64 coefficient, u64 end_index). Any inconsistency or loss of information
+/// in the `indices` may result in errors when decompressing the reconstructed representation.
+/// If validation of the `compressed_values` fails, `Error.CorruptedCompressedData` is returned.
+/// The `allocator` handles the memory allocations of the output arrays. Any memory allocation
+/// error is propagated to the caller.
+pub fn extractSlide(
+    allocator: Allocator,
+    compressed_values: []const u8,
+    indices: *ArrayList(u64),
+    coefficients: *ArrayList(f64),
+) Error!void {
+    try extractors.extractDoubleCoefficientIndexTriples(
+        allocator,
+        compressed_values,
+        indices,
+        coefficients,
+    );
+}
+
+/// Rebuilds the `compressed_values` for SwingFilter from `indices` and `coefficients`. A `indices`
+/// ArrayList is used to provide the end indices, and a `coefficients` ArrayList is used to provide
+/// the coefficient values. Swing encodes a sequence of tuples:
+/// (f64 coefficient, u64 end_index) after extracting the first coefficient.
+/// The `allocator` handles the memory allocations of the output array. Any memory allocation
+/// error is propagated to the caller.
+pub fn rebuildSwing(
+    allocator: Allocator,
+    indices: []const u64,
+    coefficients: []const f64,
+    compressed_values: *ArrayList(u8),
+) Error!void {
+    try rebuilders.rebuildCoefficientIndexTuplesWithStartCoefficient(
+        allocator,
+        indices,
+        coefficients,
+        compressed_values,
+    );
+}
+
+/// Rebuilds the `compressed_values` for SlideFilter from `indices` and `coefficients`. A `indices`
+/// ArrayList is used to provide the end indices, and a `coefficients` ArrayList is used to provide
+/// the coefficient values. Slide encodes a sequence of triples:
+/// (f64 coefficient, f64 coefficient, u64 end_index).
+/// The `allocator` handles the memory allocations of the output array. Any memory allocation
+/// error is propagated to the caller.
+pub fn rebuildSlide(
+    allocator: Allocator,
+    indices: []const u64,
+    coefficients: []const f64,
+    compressed_values: *ArrayList(u8),
+) Error!void {
+    try rebuilders.rebuildDoubleCoefficientIndexTriples(
+        allocator,
+        indices,
+        coefficients,
+        compressed_values,
+    );
 }
 
 /// Computes the numerator of the slope derivate as in Eq. (6).
 fn computeSlopeDerivate(segment: Segment) f64 {
     return (segment.end_point.value - segment.start_point.value) *
-        usizeToF64(segment.end_point.time - segment.start_point.time);
+        usizeToF64(segment.end_point.index - segment.start_point.index);
 }
 
 /// Updates the linear function coeficients in `linear_function` that passes throught the two
@@ -822,12 +906,12 @@ fn updateSwingLinearFunction(
     linear_function: *LinearFunction,
     error_bound: f32,
 ) void {
-    if (segment.end_point.time != segment.start_point.time) {
-        const duration: f64 = @floatFromInt(segment.end_point.time - segment.start_point.time);
+    if (segment.end_point.index != segment.start_point.index) {
+        const duration: f64 = @floatFromInt(segment.end_point.index - segment.start_point.index);
         linear_function.slope = (segment.end_point.value + error_bound -
             segment.start_point.value) / duration;
         linear_function.intercept = segment.start_point.value - linear_function.slope *
-            usizeToF64(segment.start_point.time);
+            usizeToF64(segment.start_point.index);
     } else {
         linear_function.slope = 0.0;
         linear_function.intercept = segment.start_point.value;
@@ -851,28 +935,28 @@ fn evaluateLinearFunctionAtTime(
 /// `point` with the given `slope` coefficient.
 fn computeInterceptCoefficient(slope: f64, comptime point_type: type, point: point_type) f64 {
     if (point_type == DiscretePoint) {
-        return point.value - slope * usizeToF64(point.time);
+        return point.value - slope * usizeToF64(point.index);
     } else {
-        return point.value - slope * point.time;
+        return point.value - slope * point.index;
     }
 }
 
 /// Updates the linear function coeficients in `linear_function` that passes throught the two
 /// points of the `segment` slided up/down at the start point and down/up at the end point based
 /// on the `error_bound`. Specifically, the `linear_function` will pass through the points
-/// (`segment.start_point.time`, `segment.start_point.value - error_bound`) and
-/// (`segment.end_point.time`, `segment.end_point.value + error_bound`).
+/// (`segment.start_point.index`, `segment.start_point.value - error_bound`) and
+/// (`segment.end_point.index`, `segment.end_point.value + error_bound`).
 fn updateSlideLinearFunction(
     segment: Segment,
     linear_function: *LinearFunction,
     error_bound: f32,
 ) void {
-    if (segment.end_point.time != segment.start_point.time) {
-        const duration: f64 = @floatFromInt(segment.end_point.time - segment.start_point.time);
+    if (segment.end_point.index != segment.start_point.index) {
+        const duration: f64 = @floatFromInt(segment.end_point.index - segment.start_point.index);
         linear_function.slope = (segment.end_point.value + 2 * error_bound -
             segment.start_point.value) / duration;
         linear_function.intercept = segment.start_point.value - error_bound -
-            linear_function.slope * usizeToF64(segment.start_point.time);
+            linear_function.slope * usizeToF64(segment.start_point.index);
     } else {
         linear_function.slope = 0.0;
         linear_function.intercept = segment.start_point.value;
@@ -887,13 +971,13 @@ fn computeInterceptionPoint(
     point: *ContinousPoint,
 ) void {
     if (linear_function_one.slope != linear_function_two.slope) {
-        point.time = @floatCast((linear_function_two.intercept - linear_function_one.intercept) /
+        point.index = @floatCast((linear_function_two.intercept - linear_function_one.intercept) /
             (linear_function_one.slope - linear_function_two.slope));
-        point.value = @floatCast(linear_function_one.slope * point.time + linear_function_one.intercept);
+        point.value = @floatCast(linear_function_one.slope * point.index + linear_function_one.intercept);
     } else {
         // There is no interception, the linear functions are parallel. Any point is part of the
         // interception. Return the interception with the y-axis as the interception.
-        point.time = 0;
+        point.index = 0;
         point.value = @floatCast(linear_function_one.intercept);
     }
 }
@@ -1074,4 +1158,36 @@ test "check swing-disc configuration parsing" {
         &compressed_values,
         method_configuration,
     );
+}
+
+test "rebuildSwing rejects mismatched input lengths" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).empty;
+    defer compressed.deinit(allocator);
+
+    const indices = [_]u64{ 1, 2 };
+    const coefficients = [_]f64{ 1.0, 2.0 };
+
+    try testing.expectError(Error.CorruptedCompressedData, rebuildSwing(
+        allocator,
+        indices[0..],
+        coefficients[0..],
+        &compressed,
+    ));
+}
+
+test "rebuildSlide rejects mismatched input lengths" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).empty;
+    defer compressed.deinit(allocator);
+
+    const indices = [_]u64{ 1, 2, 3 };
+    const coefficients = [_]f64{ 1.0, 2.0 };
+
+    try testing.expectError(Error.CorruptedCompressedData, rebuildSlide(
+        allocator,
+        indices[0..],
+        coefficients[0..],
+        &compressed,
+    ));
 }

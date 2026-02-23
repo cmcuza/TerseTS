@@ -51,6 +51,9 @@ const Error = tersets.Error;
 
 const tester = @import("../../tester.zig");
 
+const extractors = @import("../../utilities/extractors.zig");
+const rebuilders = @import("../../utilities/rebuilders.zig");
+
 // Enum to determine the type of approximation of the buckets in the histogram.
 const Approximation = enum(i8) { constant, linear };
 
@@ -73,7 +76,7 @@ pub fn compressPWCH(
     const maximum_buckets: u32 = parsed_configuration.histogram_bins_number;
 
     if (maximum_buckets <= 1)
-        return Error.UnsupportedErrorBound;
+        return Error.InvalidConfiguration;
 
     var histogram = try Histogram.init(
         allocator,
@@ -121,7 +124,7 @@ pub fn compressPWLH(
     const maximum_buckets: u32 = parsed_configuration.histogram_bins_number;
 
     if (maximum_buckets <= 1.0) {
-        return Error.UnsupportedErrorBound;
+        return Error.InvalidConfiguration;
     }
 
     var histogram = try Histogram.init(allocator, maximum_buckets, .linear);
@@ -198,44 +201,130 @@ pub fn decompressPWLH(
 
     var linear_approximation: LinearFunction = .{ .slope = undefined, .intercept = undefined };
 
-    var first_timestamp: usize = 0;
+    var first_index: usize = 0;
     var index: usize = 0;
     while (index < compressed_lines_and_index.len) : (index += 3) {
         const current_segment: Segment = .{
-            .start_point = .{ .time = first_timestamp, .value = compressed_lines_and_index[index] },
+            .start_point = .{ .index = first_index, .value = compressed_lines_and_index[index] },
             .end_point = .{
-                .time = @as(usize, @bitCast(compressed_lines_and_index[index + 2])) - 1,
+                .index = @as(usize, @bitCast(compressed_lines_and_index[index + 2])) - 1,
                 .value = compressed_lines_and_index[index + 1],
             },
         };
 
-        if (current_segment.start_point.time < current_segment.end_point.time) {
-            if (current_segment.end_point.time != current_segment.start_point.time) {
-                const duration: f64 = @floatFromInt(current_segment.end_point.time -
-                    current_segment.start_point.time);
+        if (current_segment.start_point.index < current_segment.end_point.index) {
+            if (current_segment.end_point.index != current_segment.start_point.index) {
+                const duration: f64 = @floatFromInt(current_segment.end_point.index -
+                    current_segment.start_point.index);
                 linear_approximation.slope = (current_segment.end_point.value -
                     current_segment.start_point.value) / duration;
                 linear_approximation.intercept = current_segment.start_point.value - linear_approximation.slope *
-                    @as(f64, @floatFromInt(current_segment.start_point.time));
+                    @as(f64, @floatFromInt(current_segment.start_point.index));
             } else {
                 linear_approximation.slope = 0.0;
                 linear_approximation.intercept = current_segment.start_point.value;
             }
             try decompressed_values.append(allocator, current_segment.start_point.value);
-            var current_timestamp: usize = current_segment.start_point.time + 1;
-            while (current_timestamp < current_segment.end_point.time) : (current_timestamp += 1) {
+            var current_index: usize = current_segment.start_point.index + 1;
+            while (current_index < current_segment.end_point.index) : (current_index += 1) {
                 const y: f64 = @floatCast(linear_approximation.slope *
-                    @as(f64, @floatFromInt(current_timestamp)) +
+                    @as(f64, @floatFromInt(current_index)) +
                     linear_approximation.intercept);
                 try decompressed_values.append(allocator, y);
             }
             try decompressed_values.append(allocator, current_segment.end_point.value);
-            first_timestamp = current_timestamp + 1;
+            first_index = current_index + 1;
         } else {
             try decompressed_values.append(allocator, current_segment.start_point.value);
-            first_timestamp += 1;
+            first_index += 1;
         }
     }
+}
+
+/// Extracts `indices` and `coefficients` from the Piecewise Constant Histogram's
+/// `compressed_values`. The representation of PWCH is identical to that used by
+/// Poor Man's Compression, so this function forwards its work to `extractPMC`. All structural
+/// validation and corruption checks are handled internally by that routine. Any loss of
+/// information on the indices can lead to unexpected failures during decompression.
+/// The `allocator` handles the memory allocations of the output arrays. Allocation errors are propagated.
+pub fn extractPWCH(
+    allocator: Allocator,
+    compressed_values: []const u8,
+    indices: *ArrayList(u64),
+    coefficients: *ArrayList(f64),
+) Error!void {
+    // Delegate to CoefficientIndexPairs extractor.
+    // PWCH uses the same representation as PMC.
+    try extractors.extractCoefficientIndexPairs(
+        allocator,
+        compressed_values,
+        indices,
+        coefficients,
+    );
+}
+
+/// Extracts `indices` and `coefficients` from the Piecewise Linear Histogram's
+/// `compressed_values`. PWLH uses the same triplet representation as SlideFilter, so this function
+/// delegates to `extractSlide`. All validation and corruption detection handlesd by that routine.
+/// Any loss of index information may lead to unexpected failures during decompression.
+/// The `allocator` handles the memory allocations of the output arrays. Allocation errors are propagated.
+pub fn extractPWLH(
+    allocator: Allocator,
+    compressed_values: []const u8,
+    indices: *ArrayList(u64),
+    coefficients: *ArrayList(f64),
+) Error!void {
+    // Delegate to CoefficientIndexTuplesWithStartCoefficient extractor.
+    // PWLH uses the same representation as SlideFilter.
+    try extractors.extractDoubleCoefficientIndexTriples(
+        allocator,
+        compressed_values,
+        indices,
+        coefficients,
+    );
+}
+
+/// Rebuilds a Piecewise Constant Histogram representation from the provided `indices` and
+/// `coefficients`. PWCH uses the same binary format as PMC, so this function forwards the work
+/// to `rebuildPMC`. All structural and corruption checks are performed by the underlying function.
+/// Any loss or misalignment of index information can cause failures when decompressing
+/// the rebuilt representation. The `allocator` handles the memory allocations of the output arrays.
+/// Allocation errors are propagated.
+pub fn rebuildPWCH(
+    allocator: Allocator,
+    indices: []const u64,
+    coefficients: []const f64,
+    compressed_values: *ArrayList(u8),
+) Error!void {
+    // Delegate to CoefficientIndexPairs extractor.
+    // PWCH uses the same representation as PMC.
+    try rebuilders.rebuildCoefficientIndexPairs(
+        allocator,
+        indices,
+        coefficients,
+        compressed_values,
+    );
+}
+
+/// Rebuilds a Piecewise Linear Histogram representation from the provided `indices` and `coefficients`.
+/// PWLH uses the SlideFilter representation, so this function forwards the work to `rebuildSlide`.
+/// All correctness checks are performed internally by the delegated function. Any inconsistency in index
+/// counts or ordering may produce corrupted data that fails during decompression. The `allocator` handles
+/// the memory of the output arrays. Allocation errors are propagated.
+pub fn rebuildPWLH(
+    allocator: Allocator,
+    indices: []const u64,
+    coefficients: []const f64,
+    compressed_values: *ArrayList(u8),
+) Error!void {
+    // Delegate to CoefficientIndexTuplesWithStartCoefficient extractor.
+    // PWLH uses the same representation as SlideFilter.
+    try rebuilders.rebuildDoubleCoefficientIndexTriples(
+        allocator,
+        indices,
+        coefficients,
+        compressed_values,
+    );
 }
 
 /// `Bucket` stores information about a range of consecutives values in the time series. The
@@ -372,7 +461,7 @@ const Histogram = struct {
         // Create a new bucket for the incoming value with start and end at 'index'.
         var bucket: Bucket = try Bucket.init(self.allocator, index, index, value, value);
 
-        try bucket.convex_hull.add(.{ .time = index, .value = value });
+        try bucket.convex_hull.add(.{ .index = index, .value = value });
 
         try self.buckets.append(self.allocator, bucket);
 
@@ -803,14 +892,14 @@ test "Compute simple linear approximation merge error with known results" {
     // No need to deallocate memory because histogram will do it.
     var convex_hull_one = try ConvexHull.init(allocator);
 
-    try convex_hull_one.add(.{ .time = 0.0, .value = 0.0 });
-    try convex_hull_one.add(.{ .time = 1.0, .value = 1.0 });
+    try convex_hull_one.add(.{ .index = 0.0, .value = 0.0 });
+    try convex_hull_one.add(.{ .index = 1.0, .value = 1.0 });
 
     // No need to deallocate memory because histogram will do it.
     var convex_hull_two = try ConvexHull.init(allocator);
 
-    try convex_hull_two.add(.{ .time = 2.0, .value = 2.0 });
-    try convex_hull_two.add(.{ .time = 3.0, .value = 3.0 });
+    try convex_hull_two.add(.{ .index = 2.0, .value = 2.0 });
+    try convex_hull_two.add(.{ .index = 3.0, .value = 3.0 });
 
     // Insert into buckets.
     var histogram = try Histogram.init(allocator, 2, .linear);
@@ -842,14 +931,14 @@ test "Compute divergent linear approximation merge error with known results" {
     // No need to deallocate memory because `histogram` will do it.
     var convex_hull_one = try ConvexHull.init(allocator);
 
-    try convex_hull_one.add(.{ .time = 0.0, .value = 0.0 });
-    try convex_hull_one.add(.{ .time = 1.0, .value = 1.0 });
+    try convex_hull_one.add(.{ .index = 0.0, .value = 0.0 });
+    try convex_hull_one.add(.{ .index = 1.0, .value = 1.0 });
 
     // No need to deallocate memory because histogram will do it.
     var convex_hull_two = try ConvexHull.init(allocator);
 
-    try convex_hull_two.add(.{ .time = 2.0, .value = 3.0 });
-    try convex_hull_two.add(.{ .time = 3.0, .value = 4.0 });
+    try convex_hull_two.add(.{ .index = 2.0, .value = 3.0 });
+    try convex_hull_two.add(.{ .index = 3.0, .value = 4.0 });
 
     // Step 2: Insert into buckets.
     var histogram = try Histogram.init(allocator, 2, .linear);

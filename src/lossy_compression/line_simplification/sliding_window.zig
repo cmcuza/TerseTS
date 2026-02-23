@@ -39,6 +39,8 @@ const DiscretePoint = shared_structs.DiscretePoint;
 const LinearFunction = shared_structs.LinearFunction;
 
 const tester = @import("../../tester.zig");
+const extractors = @import("../../utilities/extractors.zig");
+const rebuilders = @import("../../utilities/rebuilders.zig");
 
 const testing = std.testing;
 
@@ -106,50 +108,92 @@ pub fn decompress(allocator: Allocator, compressed_values: []const u8, decompres
 
     const compressed_lines_and_index = mem.bytesAsSlice(f64, compressed_values);
 
-    var first_timestamp: usize = 0;
+    var first_index: usize = 0;
     var index: usize = 0;
 
     while (index < compressed_lines_and_index.len) : (index += 3) {
-        const start_point = .{ .time = first_timestamp, .value = compressed_lines_and_index[index] };
+        const start_point = .{ .index = first_index, .value = compressed_lines_and_index[index] };
         const end_point = .{
-            .time = @as(usize, @bitCast(compressed_lines_and_index[index + 2])),
+            .index = @as(usize, @bitCast(compressed_lines_and_index[index + 2])),
             .value = compressed_lines_and_index[index + 1],
         };
 
         // Check if the segment has more than two points.
-        if (start_point.time + 1 < end_point.time) {
-            const duration: f64 = @floatFromInt(end_point.time - start_point.time);
+        if (start_point.index + 1 < end_point.index) {
+            const duration: f64 = @floatFromInt(end_point.index - start_point.index);
 
             const slope = (end_point.value - start_point.value) / duration;
             const intercept = start_point.value;
 
             try decompressed_values.append(allocator, start_point.value);
-            var current_timestamp: usize = start_point.time + 1;
+            var current_index: usize = start_point.index + 1;
 
             // Interpolate the values between the start and end points of the current segment.
-            while (current_timestamp < end_point.time) : (current_timestamp += 1) {
-                const scaled_time = @as(f64, @floatFromInt(current_timestamp - start_point.time));
+            while (current_index < end_point.index) : (current_index += 1) {
+                const scaled_time = @as(f64, @floatFromInt(current_index - start_point.index));
                 const y: f64 = slope * scaled_time + intercept;
                 try decompressed_values.append(allocator, y);
             }
             try decompressed_values.append(allocator, end_point.value);
-            first_timestamp = current_timestamp + 1;
+            first_index = current_index + 1;
         } else {
             // If the start and end points are the distance 1,
             // append the start point and end points directly.
             try decompressed_values.append(allocator, start_point.value);
             // Check wheter the point is the same. If so, then we are at the end of the time series.
             // Thus, do not insert the end point. Otherwise, insert the end point.
-            if (start_point.time != end_point.time) {
+            if (start_point.index != end_point.index) {
                 try decompressed_values.append(allocator, end_point.value);
-                first_timestamp += 2;
+                first_index += 2;
             } else {
                 // If the start and end points are the same, we are at the end of the time series.
                 // Thus, do not insert the end point.
-                first_timestamp += 1;
+                first_index += 1;
             }
         }
     }
+}
+
+/// Extracts `indices` and `coefficients` from SlidingWindow's `compressed_values`. SlidingWindow
+/// follows the same triplet representation as SlideFilter, so the function forwards to `extractSlide`.
+/// All validation, including corruption detection, handlesd by that routine. Any loss of index
+/// information can lead to unexpected failures during decompression. The `allocator` handles the memory
+/// of the output arrays. Allocation errors are propagated.
+pub fn extract(
+    allocator: Allocator,
+    compressed_values: []const u8,
+    indices: *ArrayList(u64),
+    coefficients: *ArrayList(f64),
+) Error!void {
+    // Delegate to DoubleCoefficientIndexTriples extractor.
+    // SlidingWindow uses the same representation as SlideFilter.
+    try extractors.extractDoubleCoefficientIndexTriples(
+        allocator,
+        compressed_values,
+        indices,
+        coefficients,
+    );
+}
+
+/// Rebuilds SlidingWindow's `compressed_values` using the provided `indices` and `coefficients`.
+/// The representation matches SlideFilter's representation, so this function delegates to
+/// `rebuildSlide`. Structural and corruption checks are handled internally by the delegated function.
+/// Incorrect or inconsistent index information may cause decompression failures. The `allocator`
+/// handles the memory allocations of the output arrays. Allocation errors are propagated.
+pub fn rebuild(
+    allocator: Allocator,
+    indices: []const u64,
+    coefficients: []const f64,
+    compressed_values: *ArrayList(u8),
+) Error!void {
+    // Delegate to DoubleCoefficientIndexTriples extractor.
+    // SlidingWindow uses the same representation as SlideFilter.
+    try rebuilders.rebuildDoubleCoefficientIndexTriples(
+        allocator,
+        indices,
+        coefficients,
+        compressed_values,
+    );
 }
 
 /// Computes the Root-Mean-Squared-Errors (RMSE) for a segment of the `uncompressed_values`.

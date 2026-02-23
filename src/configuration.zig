@@ -106,6 +106,99 @@ pub fn parse(
     return parsed_value;
 }
 
+pub fn defaultConfigurationBuilder(
+    allocator: Allocator,
+    method: tersets.Method,
+) ![]u8 {
+    return switch (method) {
+        // Methods using absolute error: float objective.
+        .PoorMansCompressionMidrange,
+        .PoorMansCompressionMean,
+        .SwingFilter,
+        .SwingFilterDisconnected,
+        .SlideFilter,
+        .SimPiece,
+        .MixPiece,
+        .ABCLinearApproximation,
+        .NonLinearApproximation,
+        .SerfQT,
+        .BitPackedQuantization,
+        => blk: {
+            const error_bound: f32 = 0.1; // Simple default value.
+            break :blk try getDefaultAbsoluteErrorConfiguration(
+                allocator,
+                error_bound,
+            );
+        },
+
+        // Methods using histogram bins: integer objective.
+        .PiecewiseConstantHistogram,
+        .PiecewiseLinearHistogram,
+        => blk: {
+            const bins: u32 = 2; // Minimum allowed value.
+            break :blk try getDefaultHistogramConfiguration(
+                allocator,
+                bins,
+            );
+        },
+
+        // Methods using aggregated RMSE bound.
+        .BottomUp,
+        .SlidingWindow,
+        => blk: {
+            const rmse: f32 = 0.1; // Simple default value.
+            break :blk try getDefaultAggregatedConfiguration(
+                allocator,
+                rmse,
+            );
+        },
+
+        // Methods using AUC error bound.
+        .VisvalingamWhyatt => blk: {
+            const auc: f32 = 0.1; // Simple default value.
+            break :blk try getDefaultAUCConfiguration(
+                allocator,
+                auc,
+            );
+        },
+
+        // Methods with empty configuration.
+        .RunLengthEncoding => try allocator.dupe(u8, "{}"),
+    };
+}
+
+fn getDefaultAbsoluteErrorConfiguration(allocator: Allocator, error_bound: f32) ![]u8 {
+    return try std.fmt.allocPrint(
+        allocator,
+        "{{\"abs_error_bound\": {d}}}",
+        .{error_bound},
+    );
+}
+
+fn getDefaultHistogramConfiguration(allocator: Allocator, number_bins: u32) ![]u8 {
+    return try std.fmt.allocPrint(
+        allocator,
+        "{{\"histogram_bins_number\": {d}}}",
+        .{number_bins},
+    );
+}
+
+fn getDefaultAggregatedConfiguration(allocator: Allocator, aggregated_error_bound: f32) ![]u8 {
+    return try std.fmt.allocPrint(
+        allocator,
+        "{{\"aggregate_error_type\": \"rmse\", \"aggregate_error_bound\": {d}}}",
+        .{aggregated_error_bound},
+    );
+}
+
+fn getDefaultAUCConfiguration(allocator: Allocator, auc_error_bound: f32) ![]u8 {
+    return try std.fmt.allocPrint(
+        allocator,
+        "{{\"area_under_curve_error\": {d}}}",
+        .{auc_error_bound},
+    );
+}
+
 test "parse valid AbsoluteErrorBound" {
     const allocator = std.testing.allocator;
     const config = try parse(

@@ -61,7 +61,7 @@ pub fn compress(
     const error_bound: f32 = parsed_configuration.abs_error_bound;
 
     if (error_bound == 0.0) {
-        return Error.UnsupportedErrorBound;
+        return Error.InvalidConfiguration;
     }
     // Sim-Piece Phase 1: Compute `SegmentMetadata` for all segments that can be approximated
     // by the given `error_bound`.
@@ -103,7 +103,7 @@ pub fn compress(
     // Sim-Piece Phase 4: Create the final compressed representation and store in compressed values.
     try createCompressedRepresentation(allocator, merged_segments_metadata_map, compressed_values);
 
-    // The last timestamp must be stored, otherwise the end time during decompression is unknown.
+    // The last indices must be stored, otherwise the end time during decompression is unknown.
     try shared_functions.appendValue(allocator, usize, uncompressed_values.len, compressed_values);
 }
 
@@ -129,13 +129,13 @@ pub fn decompress(
 
         for (0..slopes_count) |_| {
             const slope = compressed_lines_and_index[compressed_index];
-            const timestamps_count = @as(usize, @bitCast(compressed_lines_and_index[compressed_index + 1]));
+            const indices_count = @as(usize, @bitCast(compressed_lines_and_index[compressed_index + 1]));
             compressed_index += 2;
-            var timestamp: usize = 0;
-            for (0..timestamps_count) |_| {
-                timestamp += @as(usize, @bitCast(compressed_lines_and_index[compressed_index]));
+            var index: usize = 0;
+            for (0..indices_count) |_| {
+                index += @as(usize, @bitCast(compressed_lines_and_index[compressed_index]));
                 try segments_metadata.append(allocator, .{
-                    .start_time = timestamp,
+                    .start_index = index,
                     .intercept = intercept,
                     .lower_bound_slope = slope,
                     .upper_bound_slope = slope,
@@ -145,37 +145,174 @@ pub fn decompress(
         }
     }
 
-    const last_timestamp: usize = @as(usize, @bitCast(compressed_lines_and_index[compressed_index]));
+    const last_index: usize = @as(usize, @bitCast(compressed_lines_and_index[compressed_index]));
 
     mem.sort(
         shared_structs.SegmentMetadata,
         segments_metadata.items,
         {},
-        compareMetadataByStartTime,
+        compareMetadataByStartIndex,
     );
 
-    var current_timestamp: usize = 0;
+    var current_index: usize = 0;
     for (0..segments_metadata.items.len - 1) |index| {
         const current_metadata = segments_metadata.items[index];
-        const next_metadata_start_time = segments_metadata.items[index + 1].start_time;
+        const next_metadata_start_index = segments_metadata.items[index + 1].start_index;
         try decompressSegment(
             allocator,
             current_metadata,
-            current_timestamp,
-            next_metadata_start_time,
+            current_index,
+            next_metadata_start_index,
             decompressed_values,
         );
-        current_timestamp = next_metadata_start_time;
+        current_index = next_metadata_start_index;
     }
 
     const current_metadata = segments_metadata.getLast();
     try decompressSegment(
         allocator,
         current_metadata,
-        current_timestamp,
-        last_timestamp,
+        current_index,
+        last_index,
         decompressed_values,
     );
+}
+
+/// Extracts `indices` and `coefficients` from SimPiece's `compressed_values`.
+/// The representation contains nested blocks of intercepts, slopes, index counts,
+/// and delta values of the form:
+/// [intercept, slopes_count, (slope, index_count, deltas...)..., last_index].
+/// A `indices` ArrayList is used to store extracted counts and deltas, while a `coefficients`
+/// ArrayList stores intercepts and slopes. The structure is variable in length and must follow the
+/// encoding defined in SimPiece code. Any loss of information on the indices, including
+/// corrupted counts or altered delta values, can lead to unexpected failures when attempting to
+/// decompress the resulting representation. The function performs only basic structural checks;
+/// semantic correctness must be ensured by the caller. The final element of the payload must be a
+/// trailing `last_index`. If the buffer ends prematurely, or the structural expectations are
+/// not satisfied, `Error.CorruptedCompressedData` is returned. The `allocator` handles the memory
+/// of the output arrays. Allocation errors are propagated.
+pub fn extract(
+    allocator: Allocator,
+    compressed_values: []const u8,
+    indices: *ArrayList(u64),
+    coefficients: *ArrayList(f64),
+) Error!void {
+
+    // Validate input lengths: must contain at least one intercept and one last_index.
+    if (compressed_values.len < 16)
+        return Error.CorruptedCompressedData;
+
+    const compressed_values_slice = mem.bytesAsSlice(f64, compressed_values);
+
+    var i: u64 = 0;
+    while (i < compressed_values_slice.len - 1) {
+        // intercept.
+        try coefficients.append(allocator, compressed_values_slice[i]);
+        i += 1;
+
+        // slopes_count.
+        try shared_functions.ensureIndexWithinLength(i, compressed_values_slice.len);
+        const slopes_count: u64 = @bitCast(compressed_values_slice[i]);
+        try indices.append(allocator, slopes_count);
+        i += 1;
+
+        // Process each slope block.
+        var slope_i: u64 = 0;
+        while (slope_i < slopes_count) : (slope_i += 1) {
+            // slope.
+            try shared_functions.ensureIndexWithinLength(i, compressed_values_slice.len);
+            try coefficients.append(allocator, compressed_values_slice[i]);
+            i += 1;
+
+            // indices_count.
+            try shared_functions.ensureIndexWithinLength(i, compressed_values_slice.len);
+            const indices_count: u64 = @bitCast(compressed_values_slice[i]);
+            try indices.append(allocator, indices_count);
+            i += 1;
+
+            // deltas.
+            var index_i: u64 = 0;
+            while (index_i < indices_count) : (index_i += 1) {
+                try shared_functions.ensureIndexWithinLength(i, compressed_values_slice.len);
+                const delta: u64 = @bitCast(compressed_values_slice[i]);
+                try indices.append(allocator, delta);
+                i += 1;
+            }
+        }
+    }
+
+    // Final indices must exist.
+    if (i != compressed_values_slice.len - 1)
+        return Error.CorruptedCompressedData;
+
+    const last_index: u64 = @bitCast(compressed_values_slice[i]);
+    try indices.append(allocator, last_index);
+}
+
+/// Rebuilds SimPiece's `compressed_values` from the provided `indices` and `coefficients`.
+/// The structure is nested and variable in length, thus no simple extructural checking conditions.
+/// The function reconstructs the encoded stream by iterating through both arrays in the expected
+/// order. Any loss of information on the indices, such as incorrect counts or misaligned delta
+/// values, can lead to unexpected failures during decompression. Only structural validation is
+/// performed. It is the caller's responsibility to ensure the logical consistency of all fields.
+/// A single trailing `last_index` must remain after processing all nested blocks. Extra or
+/// missing elements in either array result in `Error.CorruptedCompressedData`. The `allocator`
+/// handles the memory allocations of the output arrays. Allocation errors are propagated.
+pub fn rebuild(
+    allocator: Allocator,
+    indices: []const u64,
+    coefficients: []const f64,
+    compressed_values: *ArrayList(u8),
+) Error!void {
+    // Validate input lengths: at least the final last_index.
+    if (indices.len == 0) return Error.CorruptedCompressedData;
+
+    var coefficient_index: u64 = 0; // index into coefficients.
+    var indices_index: u64 = 0; // index into indices.
+
+    // For each intercept.
+    while (coefficient_index < coefficients.len) {
+        // Extract intercept.
+        try shared_functions.appendValue(allocator, f64, coefficients[coefficient_index], compressed_values);
+        coefficient_index += 1;
+
+        if (indices_index >= indices.len) return Error.CorruptedCompressedData;
+        const slopes_count = indices[indices_index];
+        try shared_functions.appendValue(allocator, u64, slopes_count, compressed_values);
+        indices_index += 1;
+
+        // For each slope on this intercept.
+        var slope_i: u64 = 0;
+        while (slope_i < slopes_count) : (slope_i += 1) {
+            if (coefficient_index >= coefficients.len) return Error.CorruptedCompressedData;
+            // Extract slope.
+            try shared_functions.appendValue(allocator, f64, coefficients[coefficient_index], compressed_values);
+            coefficient_index += 1;
+
+            if (indices_index >= indices.len) return Error.CorruptedCompressedData;
+            const indices_count = indices[indices_index];
+            try shared_functions.appendValue(allocator, u64, indices_count, compressed_values);
+            indices_index += 1;
+
+            // Extract deltas.
+            var time_i: u64 = 0;
+            while (time_i < indices_count) : (time_i += 1) {
+                if (indices_index >= indices.len) return Error.CorruptedCompressedData;
+                const delta = indices[indices_index];
+                try shared_functions.appendValue(allocator, u64, delta, compressed_values);
+                indices_index += 1;
+            }
+        }
+    }
+
+    // Must have exactly one trailing last_index remaining.
+    if (indices_index >= indices.len) return Error.CorruptedCompressedData;
+    const last_index = indices[indices_index];
+    try shared_functions.appendValue(allocator, u64, last_index, compressed_values);
+    indices_index += 1;
+
+    // No extra data should remain.
+    if (indices_index != indices.len) return Error.CorruptedCompressedData;
 }
 
 /// Sim-Piece Phase 1: Compute `SegmentMetadata` for each segment that can be approximated
@@ -198,7 +335,7 @@ fn computeSegmentsMetadata(
         return Error.UnsupportedInput;
 
     // Initialize the `start_point` with the first uncompressed value.
-    var start_point: DiscretePoint = .{ .time = 0, .value = uncompressed_values[0] };
+    var start_point: DiscretePoint = .{ .index = 0, .value = uncompressed_values[0] };
 
     // The quantization can only be done using the original error bound. Afterwards, we add
     // `tersets.ErrorBoundMargin` to avoid exceeding the error bound during decompression.
@@ -206,21 +343,21 @@ fn computeSegmentsMetadata(
         shared_structs.ErrorBoundMargin;
 
     // The first point is already part of `current_segment`, the next point is at index one.
-    for (1..uncompressed_values.len) |current_timestamp| {
+    for (1..uncompressed_values.len) |current_index| {
 
         // Check if the current point is NaN, infinite or a reduced precision floating point.
         // If so, return an error.
-        if (!math.isFinite(uncompressed_values[current_timestamp]) or
-            uncompressed_values[current_timestamp] > tester.max_test_value)
+        if (!math.isFinite(uncompressed_values[current_index]) or
+            uncompressed_values[current_index] > tester.max_test_value)
             return Error.UnsupportedInput;
 
         const end_point: DiscretePoint = .{
-            .time = current_timestamp,
-            .value = uncompressed_values[current_timestamp],
+            .index = current_index,
+            .value = uncompressed_values[current_index],
         };
 
         // `segment_size` of type f64 to avoid casting from usize when computing other variables.
-        const segment_size: f64 = @floatFromInt(current_timestamp - start_point.time);
+        const segment_size: f64 = @floatFromInt(current_index - start_point.index);
         const upper_limit: f64 = upper_bound_slope * segment_size + quantized_intercept;
         const lower_limit: f64 = lower_bound_slope * segment_size + quantized_intercept;
 
@@ -230,7 +367,7 @@ fn computeSegmentsMetadata(
             // The new point is outside the upper and lower limit. Record a new segment metadata in
             // `segments_metadata_map` associated to `intercept`.
             try segments_metadata.append(allocator, .{
-                .start_time = start_point.time,
+                .start_index = start_point.index,
                 .intercept = quantized_intercept,
                 .upper_bound_slope = upper_bound_slope,
                 .lower_bound_slope = lower_bound_slope,
@@ -255,7 +392,7 @@ fn computeSegmentsMetadata(
         }
     }
 
-    const segment_size = uncompressed_values.len - start_point.time;
+    const segment_size = uncompressed_values.len - start_point.index;
     if (segment_size > 0) {
         // Append the final segment.
         if (segment_size == 1) {
@@ -263,7 +400,7 @@ fn computeSegmentsMetadata(
             lower_bound_slope = 0;
         }
         try segments_metadata.append(allocator, .{
-            .start_time = start_point.time,
+            .start_index = start_point.index,
             .intercept = quantized_intercept,
             .upper_bound_slope = upper_bound_slope,
             .lower_bound_slope = lower_bound_slope,
@@ -279,8 +416,8 @@ fn mergeSegmentsMetadata(
     segments_metadata: ArrayList(shared_structs.SegmentMetadata),
     merged_segments_metadata: *ArrayList(shared_structs.SegmentMetadata),
 ) !void {
-    var timestamps_array = ArrayList(usize).empty;
-    defer timestamps_array.deinit(allocator);
+    var indices_array = ArrayList(usize).empty;
+    defer indices_array.deinit(allocator);
 
     var segments_metadata_map = shared_structs.HashMapf64(ArrayList(shared_structs.SegmentMetadata)).init(allocator);
     defer {
@@ -318,12 +455,12 @@ fn mergeSegmentsMetadata(
         );
 
         var merge_metadata: shared_structs.SegmentMetadata = .{
-            .start_time = 0.0,
+            .start_index = 0.0,
             .intercept = metadata_array.items[0].intercept,
             .lower_bound_slope = metadata_array.items[0].lower_bound_slope,
             .upper_bound_slope = metadata_array.items[0].upper_bound_slope,
         };
-        try timestamps_array.append(allocator, metadata_array.items[0].start_time);
+        try indices_array.append(allocator, metadata_array.items[0].start_index);
 
         for (1..metadata_array.items.len) |index| {
             const current_metadata = metadata_array.items[index];
@@ -332,7 +469,7 @@ fn mergeSegmentsMetadata(
                 (current_metadata.upper_bound_slope >= merge_metadata.lower_bound_slope))
             {
                 // The current segment metadata can be merged. Update the bounds's slopes.
-                try timestamps_array.append(allocator, current_metadata.start_time);
+                try indices_array.append(allocator, current_metadata.start_index);
                 merge_metadata.lower_bound_slope = @max(
                     merge_metadata.lower_bound_slope,
                     current_metadata.lower_bound_slope,
@@ -344,49 +481,49 @@ fn mergeSegmentsMetadata(
             } else {
                 // The current segment metadata cannot be merged. Append the merged metadata and
                 // create a new one.
-                for (timestamps_array.items) |timestamp| {
+                for (indices_array.items) |current_segment_index| {
                     try merged_segments_metadata.append(allocator, .{
-                        .start_time = timestamp,
+                        .start_index = current_segment_index,
                         .intercept = merge_metadata.intercept,
                         .lower_bound_slope = merge_metadata.lower_bound_slope,
                         .upper_bound_slope = merge_metadata.upper_bound_slope,
                     });
                 }
-                timestamps_array.clearRetainingCapacity();
+                indices_array.clearRetainingCapacity();
                 merge_metadata = .{
-                    .start_time = 0.0,
+                    .start_index = 0.0,
                     .intercept = current_metadata.intercept,
                     .lower_bound_slope = current_metadata.lower_bound_slope,
                     .upper_bound_slope = current_metadata.upper_bound_slope,
                 };
-                try timestamps_array.append(allocator, current_metadata.start_time);
+                try indices_array.append(allocator, current_metadata.start_index);
             }
         }
 
         // Append the final merged segment metadata.
-        for (timestamps_array.items) |timestamp| {
+        for (indices_array.items) |index| {
             try merged_segments_metadata.append(allocator, .{
-                .start_time = timestamp,
+                .start_index = index,
                 .intercept = merge_metadata.intercept,
                 .lower_bound_slope = merge_metadata.lower_bound_slope,
                 .upper_bound_slope = merge_metadata.upper_bound_slope,
             });
         }
-        timestamps_array.clearRetainingCapacity();
+        indices_array.clearRetainingCapacity();
     }
 
-    // This step is needed since the timestamp order is lost due to the HashMap.
+    // This step is needed since the indices order is lost due to the HashMap.
     mem.sort(
         shared_structs.SegmentMetadata,
         merged_segments_metadata.items,
         {},
-        compareMetadataByStartTime,
+        compareMetadataByStartIndex,
     );
 }
 
 /// Sim-Piece Phase 3. Populate the `SegmentMetadata` HashMap from intercept points in
 /// `merged_segments_metadata` to a HashMap from the approximation slope to an array list of
-/// timestamps and store it in `merged_segments_metadata_map`. The `allocator` is used to allocate
+/// indices and store it in `merged_segments_metadata_map`. The `allocator` is used to allocate
 /// memory of intermediates.
 fn populateSegmentsMetadataHashMap(
     allocator: Allocator,
@@ -399,31 +536,31 @@ fn populateSegmentsMetadataHashMap(
             segment_metadata.upper_bound_slope) / 2;
 
         // Get or put the inner HashMap entry for the given `intercept` wich will contain the
-        // slopes and timestamps associated to it.
+        // slopes and indices associated to it.
         const hash_to_hash_result = try merged_segments_metadata_map.getOrPut(intercept);
         if (!hash_to_hash_result.found_existing) {
             hash_to_hash_result.value_ptr.* = shared_structs.HashMapf64(
                 ArrayList(usize),
             ).init(allocator);
         }
-        // Get or put the ArrayList of timestamps mapped to the given `slope` which is at the same
+        // Get or put the ArrayList of indices mapped to the given `slope` which is at the same
         // time associated to the given `intercept`.
         const hash_to_array_result = try hash_to_hash_result.value_ptr.*.getOrPut(slope);
         if (!hash_to_array_result.found_existing) {
             hash_to_array_result.value_ptr.* = ArrayList(usize).empty;
         }
-        try hash_to_array_result.value_ptr.*.append(allocator, segment_metadata.start_time);
+        try hash_to_array_result.value_ptr.*.append(allocator, segment_metadata.start_index);
     }
 }
 
 /// Sim-Piece Phase 4. Create compressed representation from the `merged_segments_metadata_map`
 /// that can be decoded during decompression and store it in `compressed_values`. The compressed
-/// representation is a byte array containing the intercepts, slopes and timestamps per segment.
+/// representation is a byte array containing the intercepts, slopes and indices per segment.
 /// Specifically, the compressed representation has the following structure:
 /// [b_1, N_1, a_11, M_11, t_1, t_2, ..., a_12, M_12, t_1, ...., b_2, N_2, a_21, M_21, t1, t2, ...,
 ///  b_n, N_n, a_n1, M_n1, t_1, ...], where b_i are the intercepts, N_i are the number of slopes
 /// associated to intercept b_i, a_ij are the slopes associated to intercept b_i, M_ij are
-/// the number of timestamps associated to the slope a_ij, and t_k are the timestamps.
+/// the number of indices associated to the slope a_ij, and t_k are the indices.
 pub fn createCompressedRepresentation(
     allocator: Allocator,
     merged_segments_metadata_map: shared_structs.HashMapf64(shared_structs.HashMapf64(ArrayList(usize))),
@@ -445,24 +582,24 @@ pub fn createCompressedRepresentation(
             const current_slope = hash_to_array_entry.key_ptr.*;
             try shared_functions.appendValue(allocator, f64, current_slope, compressed_values);
 
-            // Append the number of timestamps M_ij associated to `current_slope` a_ij.
+            // Append the number of indices M_ij associated to `current_slope` a_ij.
             try shared_functions.appendValue(
                 allocator,
                 usize,
                 hash_to_array_entry.value_ptr.*.items.len,
                 compressed_values,
             );
-            var previous_timestamp: usize = 0;
+            var previous_index: usize = 0;
 
-            // Iterate over the ArrayList to append the timestamps t_k.
-            for (hash_to_array_entry.value_ptr.*.items) |timestamp| {
+            // Iterate over the ArrayList to append the indices t_k.
+            for (hash_to_array_entry.value_ptr.*.items) |index| {
                 try shared_functions.appendValue(
                     allocator,
                     usize,
-                    timestamp - previous_timestamp,
+                    index - previous_index,
                     compressed_values,
                 );
-                previous_timestamp = timestamp;
+                previous_index = index;
             }
         }
     }
@@ -503,27 +640,27 @@ pub fn compareMetadataBySlope(
     return metadata_one.lower_bound_slope < metadata_two.lower_bound_slope;
 }
 
-/// Compares `metadata_one` and `metadata_two` by their start time.
-pub fn compareMetadataByStartTime(
+/// Compares `metadata_one` and `metadata_two` by their start index.
+pub fn compareMetadataByStartIndex(
     _: void,
     metadata_one: shared_structs.SegmentMetadata,
     metadata_two: shared_structs.SegmentMetadata,
 ) bool {
-    return metadata_one.start_time < metadata_two.start_time;
+    return metadata_one.start_index < metadata_two.start_index;
 }
 
 /// Computes and stores in `decompressed_values` the decompress representation of the points from
-/// the `start_time` to the `end_time` based on the information stored in `segment_metadata`.
+/// the `start_index` to the `end_index` based on the information stored in `segment_metadata`.
 pub fn decompressSegment(
     allocator: Allocator,
     segment_metadata: shared_structs.SegmentMetadata,
-    start_time: usize,
-    end_time: usize,
+    start_index: usize,
+    end_index: usize,
     decompressed_values: *ArrayList(f64),
 ) !void {
-    for (start_time..end_time) |i| {
+    for (start_index..end_index) |i| {
         const decompressed_value = segment_metadata.upper_bound_slope * @as(f64, @floatFromInt(
-            i - segment_metadata.start_time,
+            i - segment_metadata.start_index,
         )) + segment_metadata.intercept;
         try decompressed_values.append(allocator, decompressed_value);
     }
@@ -589,7 +726,7 @@ test "hashmap can map f64 to segment metadata array list" {
             metadata_map_result.value_ptr.* = ArrayList(shared_structs.SegmentMetadata).empty;
         }
         try metadata_map_result.value_ptr.*.append(allocator, shared_structs.SegmentMetadata{
-            .start_time = count_map_result.value_ptr.*,
+            .start_index = count_map_result.value_ptr.*,
             .intercept = rand_number,
             .lower_bound_slope = rand_number,
             .upper_bound_slope = rand_number,
@@ -602,7 +739,7 @@ test "hashmap can map f64 to segment metadata array list" {
         try testing.expectEqual(expected_array_size, entry.value_ptr.*.items.len);
 
         for (entry.value_ptr.*.items, 1..) |item, i| {
-            try testing.expectEqual(i, item.start_time);
+            try testing.expectEqual(i, item.start_index);
             try testing.expectEqual(entry.key_ptr.*, item.lower_bound_slope);
         }
     }
@@ -759,5 +896,46 @@ test "check simpiece configuration parsing" {
         uncompressed_values,
         &compressed_values,
         method_configuration,
+    );
+}
+
+test "rebuildSimPiece rejects mismatched representation (too few indices)" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).empty;
+    defer compressed.deinit(allocator);
+
+    // Minimal malformed input:
+    // One intercept in coefficients but indices missing nested metadata.
+    const coefficients = [_]f64{1.0}; // intercept only.
+    const indices = [_]u64{0}; // slopes_count but missing final_index.
+
+    try testing.expectError(
+        Error.CorruptedCompressedData,
+        rebuild(
+            allocator,
+            indices[0..],
+            coefficients[0..],
+            &compressed,
+        ),
+    );
+}
+
+test "rebuildSimPiece rejects mismatched representation (missing slope/intercept pairs)" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).empty;
+    defer compressed.deinit(allocator);
+
+    // Only intercept is provided.
+    const coefficients = [_]f64{1.0}; // missing slope.
+    const indices = [_]u64{ 1, 0, 5 }; // slopes_count = 1, but no slope data.
+
+    try testing.expectError(
+        Error.CorruptedCompressedData,
+        rebuild(
+            allocator,
+            indices[0..],
+            coefficients[0..],
+            &compressed,
+        ),
     );
 }
