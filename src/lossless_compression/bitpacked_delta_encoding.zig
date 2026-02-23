@@ -90,7 +90,7 @@ pub fn compress(
         }
     }
 
-    // Choose final scale. If all values can be directly cast to integers without lossing precision,
+    // Choose final scale. If all values can be directly cast to integers without losing precision,
     // then the `final_scale` is 1.0.
     var final_scale = min_scale;
     if (!all_effective_ints) {
@@ -171,7 +171,7 @@ pub fn decompress(
         compressed_values,
         &cursor,
     );
-    const mode_bit: u1 = @intCast(count_packed >> 31); // 1 = all-as-integers.
+    const mode_bit: u1 = @intCast(count_packed >> 31); // all-as-integers.
     const count: u32 = count_packed & 0x7FFFFFFF;
     const scale: f64 = try shared_functions.readOffsetValue(f64, compressed_values, &cursor);
 
@@ -199,7 +199,7 @@ pub fn decompress(
 /// Compress a time series where all `uncompressed_values` are effectively integers (no precision
 /// loss on scaling). The function applies a delta encoding and bit-packing to scaled i64 values.
 /// The `scale` is used to bring the values back to their original precision level.
-/// The `allocator` is used for intermediate values. If n error occurs it is returned.
+/// The `allocator` is used for intermediate values. If an error occurs it is returned.
 fn compressAllAsIntegers(
     allocator: mem.Allocator,
     uncompressed_values: []const f64,
@@ -257,7 +257,7 @@ fn compressAllAsIntegers(
     try bit_writer.flushBits();
 }
 
-/// Compress a time series where the `uncompress_values` have mixed-precision using delta encoding
+/// Compress a time series where the `uncompressed_values` have mixed-precision using delta encoding
 /// and fallback bit-cast. This function compress each value by first scaling it by `scale` and
 /// checking if it can be exactly recovered (losslessly). If so, it is stored as an integer and
 /// delta-encoded in `compressed_values`. Otherwise, the original floating-point value is bit-cast
@@ -383,7 +383,7 @@ fn decompressAllAsIntegers(
     count: usize,
     scale: f64,
 ) Error!void {
-    // Initialize the cursor at 12 to skip the header contain a u32 and a f64.
+    // Initialize the cursor at 12 to skip the header containing a u32 and a f64.
     var cursor: usize = 12;
 
     // Step 1: Read the first scaled value and the min_delta used in delta encoding.
@@ -446,7 +446,7 @@ pub fn decompressMixedEncoding(
     count: u32,
     scale: f64,
 ) Error!void {
-    // Initialize the cursor at 12 to skip the header contain a u32 and a f64.
+    // Initialize the cursor at 12 to skip the header containing a u32 and a f64.
     var cursor: usize = 12;
 
     // Step 1: Read number of scaled values (rest are fallback).
@@ -552,7 +552,7 @@ pub fn decompressMixedEncoding(
 /// 00 is 8 bits, 01 is 16 bits, 10 is 32 bits, and 11 is 64 bits. This encoding reduces the total
 /// number of bits when most values are small. The `WriterType` is the type of the underlying writer
 /// used by `bit_writer`. `bit_writer` is a pointer to the initialized `BitWriter` that receives the
-/// encoded bits. The function returns a error if any occurrs.
+/// encoded bits. The function returns an error if any occurs.
 fn bitpackU64(
     comptime WriterType: type,
     value: u64,
@@ -640,7 +640,7 @@ fn detectScaleFromPrecision(allocator: mem.Allocator, value: f64) !f64 {
     return std.math.pow(f64, 10.0, @floatFromInt(max_precision));
 }
 
-test "bitpacked delta enconding can compress and decompress bounded values" {
+test "bitpacked delta encoding can compress and decompress bounded values" {
     const allocator = testing.allocator;
 
     var uncompressed_values = ArrayList(f64).empty;
@@ -675,11 +675,34 @@ test "bitpacked delta enconding can compress and decompress bounded values" {
         1e13,
         null,
     );
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    const method_configuration = "{}";
+    try compress(
+        allocator,
+        uncompressed_values.items,
+        &compressed_values,
+        method_configuration,
+    );
+
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
+    try decompress(
+        allocator,
+        compressed_values.items,
+        &decompressed_values,
+    );
+    for (uncompressed_values.items, 0..) |actual_value, i| {
+        const decompressed_value = decompressed_values.items[i];
+        try testing.expectEqual(decompressed_value, actual_value);
+    }
 }
 
-test "bitpacked delta encoding can compress and decompress monotocally increasing values" {
-    // This test validates that if the input values are all monotocally increasing values
-    // the delta enconding can achieve high compression.
+test "bitpacked delta encoding can compress and decompress monotonically increasing values" {
+    // This test validates that if the input values are all monotonically increasing values
+    // the delta encoding can achieve high compression.
     const allocator = testing.allocator;
 
     var uncompressed_values = ArrayList(f64).empty;
