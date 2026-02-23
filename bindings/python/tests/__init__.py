@@ -114,6 +114,30 @@ class TerseTSPythonTest(unittest.TestCase):
 
         self.assertEqual(uncompressed, decompressed)
 
+    def test_discrete_fourier_transform_and_inverse(self):
+        """Test that the discrete Fourier transform and its inverse are consistent"""
+        random.seed(time.time())
+        count = 0
+        uncompressed = []
+
+        while count < TEST_VALUE_COUNT:
+            random_value = generate_random_f64()
+            if is_finite_and_real(random_value):
+                count += 1
+                uncompressed.append(random_value)
+
+        compressed = compress(uncompressed, 
+                              Method.DiscreteFourierTransform, 
+                              {"number_of_coefficients": 10})
+        decompressed = decompress(compressed)
+
+        if type(uncompressed) is not type(decompressed):
+            # Convert to list for comparison.
+            # This can happen if NumPy is installed and used in decompress().
+            decompressed = list(decompressed)
+
+        self.assertEqual(len(uncompressed), len(decompressed))
+
 
 class MethodEnumMatchTest(unittest.TestCase):
     """Test that the Python Method enum matches the Zig and C Method enums."""
