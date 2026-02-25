@@ -25,6 +25,8 @@ enum Method {
   RunLengthEncoding             = 14,
   NonLinearApproximation        = 15,
   SerfQT                        = 16,
+  MacaqueS                      = 17,
+  MacaqueV                      = 18,
 };
 
 // Read-only view of input data (the library will not modify it).

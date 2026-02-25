@@ -45,6 +45,9 @@ const bitpacked_quantization = @import(
 const serqt = @import(
     "lossy_compression/value_representation/serf_qt.zig",
 );
+const macaque = @import(
+    "lossy_compression/value_representation/macaque.zig",
+);
 
 // Import line simplification methods.
 const vw = @import("lossy_compression/line_simplification/visvalingam_whyatt.zig");
@@ -89,6 +92,8 @@ pub const Method = enum {
     RunLengthEncoding,
     NonLinearApproximation,
     SerfQT,
+    MacaqueS,
+    MacaqueV,
 };
 
 /// Compress `uncompressed_values` using `method` and its `configuration` and returns the results
@@ -252,6 +257,22 @@ pub fn compress(
                 configuration,
             );
         },
+        .MacaqueS => {
+            try macaque.compressMacaqueS(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                configuration,
+            );
+        },
+        .MacaqueV => {
+            try macaque.compressMacaqueV(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                configuration,
+            );
+        },
     }
     try compressed_values.append(allocator, @intFromEnum(method));
     return compressed_values;
@@ -327,6 +348,12 @@ pub fn decompress(
         },
         .SerfQT => {
             try serqt.decompress(allocator, compressed_values_slice, &decompressed_values);
+        },
+        .MacaqueS => {
+            try macaque.decompressMacaqueS(allocator, compressed_values_slice, &decompressed_values);
+        },
+        .MacaqueV => {
+            try macaque.decompressMacaqueV(allocator, compressed_values_slice, &decompressed_values);
         },
     }
 
@@ -473,6 +500,9 @@ pub fn extract(
         .SerfQT => {
             return Error.UnsupportedMethod;
         },
+        .MacaqueS, .MacaqueV => {
+            return Error.UnsupportedMethod;
+        },
     }
 }
 
@@ -611,6 +641,9 @@ pub fn rebuild(
         .SerfQT => {
             return Error.UnsupportedMethod;
         },
+        .MacaqueS, .MacaqueV => {
+            return Error.UnsupportedMethod;
+        },
     }
     try compressed_values.append(allocator, @intFromEnum(method));
     return compressed_values;
@@ -649,7 +682,9 @@ test "extract and rebuild works for any compression method supported" {
 
         if (method == Method.BitPackedQuantization or
             method == Method.SerfQT or
-            method == Method.RunLengthEncoding)
+            method == Method.RunLengthEncoding or
+            method == Method.MacaqueS or
+            method == Method.MacaqueV)
         {
             // These compression methods are not supported for extraction
             // of the coefficients and indices. This is because even small
