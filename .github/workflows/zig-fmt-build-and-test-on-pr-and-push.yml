@@ -43,6 +43,7 @@ jobs:
         version: 0.15.2
     - name: Zig Fmt Check
       run: zig fmt --check .
+      if: runner.os == 'Windows' # Windows disagrees with Ubuntu and macOS.
     - name: Zig Build Debug
       run: zig build -Doptimize=Debug
     - name: Zig Build ReleaseFast
