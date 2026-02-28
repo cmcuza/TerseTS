@@ -320,7 +320,7 @@ def decompress(
         compressed_values_struct.len = view.size
     else:
         # No NumPy: make a temporary c_ubyte[] copy to pass into the native layer.
-        buffer = (c_ubyte * len(values)).from_buffer_copy(values)
+        buffer = (c_ubyte * len(compressed_values)).from_buffer_copy(compressed_values)
         compressed_values_struct.data = cast(buffer, POINTER(c_ubyte))
         compressed_values_struct.len = len(compressed_values)
 
@@ -346,7 +346,7 @@ def decompress(
 
         # `uncompressed_values.data[:len]` copies the values into a new Python list,
         # so the result is owned by Python and independent from the Zig array.
-        return decompressed_values.data[: uncompressed_values.len]
+        return decompressed_values_struct.data[: decompressed_values_struct.len]
     finally:
         # This block ensures we free the Zig-allocated memory.
         __library.freeUncompressedValues(byref(decompressed_values_struct))
@@ -417,9 +417,9 @@ def extract(
             compressed_values_struct.len = view.size
         else:
             # ctypes fallback.
-            buffer = (c_ubyte * len(values)).from_buffer_copy(values)
+            buffer = (c_ubyte * len(compressed_values)).from_buffer_copy(compressed_values)
             compressed_values_struct.data = cast(buffer, POINTER(c_ubyte))
-            compressed_values_struct.len = len(values)
+            compressed_values_struct.len = len(compressed_values)
 
     else:
         raise TypeError(
@@ -449,8 +449,8 @@ def extract(
 
         # No NumPy: copy into Python lists.
         return (
-            list(indices_struct.data[: indices.len]),
-            list(coefficients_struct.data[: coefficients.len]),
+            list(indices_struct.data[: indices_struct.len]),
+            list(coefficients_struct.data[: coefficients_struct.len]),
         )
     finally:
         if indices_struct.data:
@@ -581,7 +581,7 @@ def rebuild(
             )
             return array.copy()
 
-        return string_at(compressed_values.data, compressed_values.len)
+        return string_at(compressed_values_struct.data, compressed_values_struct.len)
 
     finally:
         if compressed_values_struct.data:
