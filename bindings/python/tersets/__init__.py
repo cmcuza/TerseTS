@@ -95,12 +95,12 @@ class __CompressedValues(Structure):
     _fields_ = [("data", POINTER(c_ubyte)), ("len", c_size_t)]
 
 
-class __CoefficientsValues(Structure):
-    _fields_ = [("data", POINTER(c_double)), ("len", c_size_t)]
-
-
-class __IndicesValues(Structure):
+class __Indices(Structure):
     _fields_ = [("data", POINTER(c_size_t)), ("len", c_size_t)]
+
+
+class __Coefficients(Structure):
+    _fields_ = [("data", POINTER(c_double)), ("len", c_size_t)]
 
 
 # Declare function signatures to avoid silent arguments mismatch.
@@ -111,26 +111,27 @@ __library.compress.argtypes = [
     c_char_p,
 ]
 __library.compress.restype = c_int
+
 __library.decompress.argtypes = [__CompressedValues, POINTER(__UncompressedValues)]
 __library.decompress.restype = c_int
 
 __library.extract.argtypes = [
     __CompressedValues, 
-    POINTER(__IndicesValues), 
-    POINTER(__CoefficientsValues),
+    POINTER(__Indices), 
+    POINTER(__Coefficients),
 ]
 __library.extract.restype  = c_int
 
 __library.rebuild.argtypes = [
-    __IndicesValues, 
-    __CoefficientsValues, 
+    __Indices, 
+    __Coefficients, 
     POINTER(__CompressedValues), 
     c_ubyte,
 ]
 __library.rebuild.restype  = c_int
 
 
-# Mirror TerseTS Method Enum.
+# Mirror the compression methods provided by TerseTS.
 @unique
 class Method(Enum):
     PoorMansCompressionMidrange = 0
@@ -154,19 +155,20 @@ class Method(Enum):
 
 # Public API. 
 def compress(
-    values: Union["numpy.ndarray", List[float], Tuple[float, ...]],
+    uncompressed_values: Union["numpy.ndarray", List[float], Tuple[float, ...]],
     method: Method,
     configuration: Union[Dict[str, Any], str],
 ) -> Union[bytes, "numpy.ndarray"]:
     """Compress a sequence of float64 values with a selected TerseTS method.
 
-    This function uses a zero-copy fast path when `values` is a NumPy `ndarray`
-    of dtype `float64` and C-contiguous. Otherwise, it falls back to a ctypes
-    copy for Python lists/tuples of floats.
+    This function uses a zero-copy fast path when
+    `uncompressed_values` is a NumPy `ndarray` of dtype `float64` and
+    C-contiguous. Otherwise, it falls back to a ctypes copy for Python
+    lists/tuples of floats.
 
     Args:
-      values: Either a `numpy.ndarray` of dtype `float64` (C-contiguous) or a
-        `list`/`tuple` of floats.
+      uncompressed_values: Either a `numpy.ndarray` of dtype `float64`
+        (C-contiguous) or a `list`/`tuple` of floats.
       method: A `Method` enum value selecting the compressor.
       configuration: Either a `dict` (will be JSON-encoded) or a JSON `str`.
 
@@ -176,7 +178,7 @@ def compress(
       a trailing byte storing the method which is used during decompression.
 
     Raises:
-      TypeError: If `method` is not a `Method` or `values`/`configuration` have
+      TypeError: If `uncompressed_values`, `method`, or `configuration` have
         unsupported types.
       RuntimeError: If the native `compress` call returns a non-zero error code.
 
@@ -193,29 +195,29 @@ def compress(
             f"{method!r} is not a valid TerseTS Method. Available: {available}"
         )
 
-    # Prepare an __UncompressedValues view and keep a Python reference alive during the call.
+    # Prepare an __UncompressedValues array and keep a Python reference alive during the call.
     # The reference to the source array (NumPy array or ctypes array) must stay alive so the
     # garbage collector does not free the underlying memory while the native code reads from it.
-    uncompressed_values = __UncompressedValues()
+    uncompressed_values_struct = __UncompressedValues()
 
-    if _INSTALLED_NUMPY and isinstance(values, numpy.ndarray):
+    if _INSTALLED_NUMPY and isinstance(uncompressed_values, numpy.ndarray):
         # Ensure dtype and memory layout are correct for zero-copy access.
         # If `values` is already float64 and C-contiguous, no copy is made.
         # Otherwise, numpy.ascontiguousarray() converts it (potentially copying)
         # so we can safely pass its data pointer directly to the native layer.
-        if values.dtype != numpy.float64 or not values.flags["C_CONTIGUOUS"]:
-            values = numpy.ascontiguousarray(values, dtype=numpy.float64)
-        uncompressed_values.data = values.ctypes.data_as(POINTER(c_double))
-        uncompressed_values.len = values.size
-    elif isinstance(values, (list, tuple)):
+        if uncompressed_values.dtype != numpy.float64 or not uncompressed_values.flags["C_CONTIGUOUS"]:
+            uncompressed_values = numpy.ascontiguousarray(values, dtype=numpy.float64)
+        uncompressed_values_struct.data = uncompressed_values.ctypes.data_as(POINTER(c_double))
+        uncompressed_values_struct.len = uncompressed_values.size
+    elif isinstance(uncompressed_values, (list, tuple)):
         # Build a contiguous C array of f64 values from the Python sequence.
         # Python lists/tuples store references to float objects, not the raw
         # float64 values themselves, so the data is not contiguous in memory.
         # We copy each element into a new C double[] array to ensure the
         # native layer can read a continuous block of numeric values.
-        buffer = (c_double * len(values))(*values)
-        uncompressed_values.data = buffer
-        uncompressed_values.len = len(values)
+        buffer = (c_double * len(uncompressed_values))(*uncompressed_values)
+        uncompressed_values_struct.data = buffer
+        uncompressed_values_struct.len = len(uncompressed_values)
     else:
         # Invalid input type.
         raise TypeError(
@@ -223,7 +225,7 @@ def compress(
         )
 
     # Prepare compressed values array.
-    compressed_values = __CompressedValues()
+    compressed_values_struct = __CompressedValues()
 
     # Accept configuration as dict (JSON-encode) or as JSON string.
     if isinstance(configuration, dict):
@@ -236,8 +238,8 @@ def compress(
     try:
         # Call native library.
         tersets_error = __library.compress(
-            uncompressed_values,
-            byref(compressed_values),
+            uncompressed_values_struct,
+            byref(compressed_values_struct),
             c_uint8(method.value),
             c_char_p(json_configuration)
         )
@@ -245,23 +247,23 @@ def compress(
             raise RuntimeError(f"compress failed: {tersets_error}")
         
         if _INSTALLED_NUMPY:
-            # The native layer allocates `compressed_values.data`. 
+            # The native layer allocates `compressed_values_struct.data`. 
             # Copy into NumPy-owned memory before freeing the Zig arrays.
             return numpy.ctypeslib.as_array(
-                cast(compressed_values.data, POINTER(c_ubyte)),
-                shape=(compressed_values.len,),
+                cast(compressed_values_struct.data, POINTER(c_ubyte)),
+                shape=(compressed_values_struct.len,),
             ).copy()
 
         # No NumPy. Copy the compressed bytes into Python-owned memory (safe to return).
-        return string_at(compressed_values.data, compressed_values.len)
+        return string_at(compressed_values_struct.data, compressed_values_struct.len)
     finally:
         # This block ensures we free the Zig-allocated memory.
-        if compressed_values.data:
-            __library.freeCompressedValues(byref(compressed_values))
+        if compressed_values_struct.data:
+            __library.freeCompressedValues(byref(compressed_values_struct))
 
 
 def decompress(
-    values: Union[bytes, bytearray, memoryview, "numpy.ndarray"],
+    compressed_values: Union[bytes, bytearray, memoryview, "numpy.ndarray"],
 ) -> Union[List[float], "numpy.ndarray"]:
     """Decompress a TerseTS-compressed array into a list of floats.
 
@@ -273,8 +275,8 @@ def decompress(
     than a Python list. Without NumPy, it returns a Python `list[float]`.
 
     Args:
-      values: Compressed array as `bytes`, `bytearray`, `memoryview`, or 
-        a `numpy.ndarray` of dtype `uint8` (C-contiguous). 
+      compressed_values: Compressed array as `bytes`, `bytearray`, `memoryview`,
+      or a `numpy.ndarray` of dtype `uint8` (C-contiguous).
 
     Returns:
       If NumPy is installed: Decompressed data as `numpy.ndarray[float64]`.
@@ -286,47 +288,49 @@ def decompress(
 
     Examples:
       >>> configuration = {"abs_error_bound": 0.1}
-      >>> blob = compress([1.0, 2.08, 2.96], Method.SwingFilter, configuration)
-      >>> decompress(blob)
+      >>> compressed = compress([1.0, 2.08, 2.96], Method.SwingFilter, configuration)
+      >>> decompress(compressed)
       array([1.0, 2.0, 3.0]) # if NumPy installed
       [1.0, 2.0, 3.0]        # without NumPy
     """
     # Validate input type.
-    if _INSTALLED_NUMPY and isinstance(values, numpy.ndarray):
+    if _INSTALLED_NUMPY and isinstance(compressed_values, numpy.ndarray):
         # Explicit NumPy support. Validate dtype and layout.
-        if values.dtype != numpy.uint8:
-            raise TypeError("decompress(values): NumPy array must have dtype=np.uint8")
-        if values.ndim != 1:
-            raise TypeError("decompress(values): NumPy array must be 1-dimensional")
-        if not values.flags["C_CONTIGUOUS"]:
-            raise TypeError("decompress(values): NumPy array must be C-contiguous")
-    elif not isinstance(values, (bytes, bytearray, memoryview)):
+        error_message = "decompress(compressed_values): NumPy array must"
+        if compressed_values.dtype != numpy.uint8:
+            raise TypeError(error_message + " have dtype=np.uint8")
+        if compressed_values.ndim != 1:
+            raise TypeError(error_message + " be 1-dimensional")
+        if not compressed_values.flags["C_CONTIGUOUS"]:
+            raise TypeError(error_message + " be C-contiguous")
+    elif not isinstance(compressed_values, (bytes, bytearray, memoryview)):
         raise TypeError(
-            "decompress(values): values must be bytes, bytearray, memoryview or a NumPy uint8 array"
+            "decompress(uncompressed_values): uncompressed_values must be bytes, bytearray, memoryview or a NumPy uint8 array"
         )
 
     # Prepare a __CompressedValues view and keep a Python reference alive during the call.
     # The reference to the underlying array (NumPy view or ctypes array) must stay alive
     # so that the garbage collector does not release it while the native code reads from it.
-    compressed_values = __CompressedValues()
+    compressed_values_struct = __CompressedValues()
 
     if _INSTALLED_NUMPY:
         # Zero-copy view of the compressed input which avoids building a c_ubyte[] array.
-        view = numpy.frombuffer(values, dtype=numpy.uint8)
-        compressed_values.data = view.ctypes.data_as(POINTER(c_ubyte))
-        compressed_values.len = view.size
+        view = numpy.frombuffer(compressed_values, dtype=numpy.uint8)
+        compressed_values_struct.data = view.ctypes.data_as(POINTER(c_ubyte))
+        compressed_values_struct.len = view.size
     else:
         # No NumPy: make a temporary c_ubyte[] copy to pass into the native layer.
-        values_buffer = (c_ubyte * len(values)).from_buffer_copy(values)
-        compressed_values.data = cast(values_buffer, POINTER(c_ubyte))
-        compressed_values.len = len(values)
+        buffer = (c_ubyte * len(values)).from_buffer_copy(values)
+        compressed_values_struct.data = cast(buffer, POINTER(c_ubyte))
+        compressed_values_struct.len = len(compressed_values)
 
     # Prepare destination struct for decompressed values.
-    uncompressed_values = __UncompressedValues()
+    decompressed_values_struct = __UncompressedValues()
+
     try:
         # Call native library.
         tersets_error = __library.decompress(
-            compressed_values, byref(uncompressed_values)
+            compressed_values_struct, byref(decompressed_values_struct)
         )
         if tersets_error != 0:
             raise RuntimeError(f"decompress failed: {tersets_error}")
@@ -337,19 +341,19 @@ def decompress(
             # - `as_array(ptr, shape=...)` makes a *view* onto Zig-owned memory.
             # - Copy before freeing the Zig array in `finally`.
             return numpy.ctypeslib.as_array(
-                uncompressed_values.data, shape=(uncompressed_values.len,)
+                decompressed_values_struct.data, shape=(decompressed_values_struct.len,)
             ).copy()
 
         # `uncompressed_values.data[:len]` copies the values into a new Python list,
         # so the result is owned by Python and independent from the Zig array.
-        return uncompressed_values.data[: uncompressed_values.len]
+        return decompressed_values.data[: uncompressed_values.len]
     finally:
         # This block ensures we free the Zig-allocated memory.
-        __library.freeUncompressedValues(byref(uncompressed_values))
+        __library.freeUncompressedValues(byref(decompressed_values_struct))
 
 
 def extract(
-    values: Union[bytes, bytearray, memoryview, "numpy.ndarray"],
+    compressed_values: Union[bytes, bytearray, memoryview, "numpy.ndarray"],
 ) -> Union[
     Tuple[List[int], List[float]],
     Tuple["numpy.ndarray", "numpy.ndarray"],
@@ -365,8 +369,8 @@ def extract(
     NumPy to enable efficient memory handling and avoid unnecessary copies.
 
     Args:
-      values: Compressed array as `bytes`, `bytearray`, `memoryview`, or (if NumPy
-        is installed) a `numpy.ndarray` of dtype `uint8`.
+      compressed_values: Compressed array as `bytes`, `bytearray`, `memoryview`, or
+        (if NumPy is installed) a `numpy.ndarray` of dtype `uint8`.
 
     Returns:
       If NumPy is installed:
@@ -391,68 +395,68 @@ def extract(
       (array([3], dtype=uintp), array([1., 3.]))   # if NumPy installed
       ([3], [1.0, 3.0])                            # without NumPy
     """
-    compressed_values = __CompressedValues()
+    compressed_values_struct = __CompressedValues()
 
-    if _INSTALLED_NUMPY and isinstance(values, numpy.ndarray):
+    if _INSTALLED_NUMPY and isinstance(compressed_values, numpy.ndarray):
         # Explicit NumPy support. Validate dtype and layout.
-        if values.dtype != numpy.uint8:
+        if compressed_values.dtype != numpy.uint8:
             raise TypeError("NumPy array must have dtype=np.uint8")
-        if values.ndim != 1:
+        if compressed_values.ndim != 1:
             raise TypeError("NumPy array must be 1-dimensional")
-        if not values.flags["C_CONTIGUOUS"]:
+        if not compressed_values.flags["C_CONTIGUOUS"]:
             raise TypeError("NumPy array must be C-contiguous")
 
-        compressed_values.data = values.ctypes.data_as(POINTER(c_ubyte))
-        compressed_values.len = values.size
+        compressed_values_struct.data = compressed_values.ctypes.data_as(POINTER(c_ubyte))
+        compressed_values_struct.len = compressed_values.size
 
-    elif isinstance(values, (bytes, bytearray, memoryview)):
+    elif isinstance(compressed_values, (bytes, bytearray, memoryview)):
         if _INSTALLED_NUMPY:
             # Zero-copy via NumPy view.
             view = numpy.frombuffer(values, dtype=numpy.uint8)
-            compressed_values.data = view.ctypes.data_as(POINTER(c_ubyte))
-            compressed_values.len = view.size
+            compressed_values_struct.data = view.ctypes.data_as(POINTER(c_ubyte))
+            compressed_values_struct.len = view.size
         else:
             # ctypes fallback.
-            values_buffer = (c_ubyte * len(values)).from_buffer_copy(values)
-            compressed_values.data = cast(values_buffer, POINTER(c_ubyte))
-            compressed_values.len = len(values)
+            buffer = (c_ubyte * len(values)).from_buffer_copy(values)
+            compressed_values_struct.data = cast(buffer, POINTER(c_ubyte))
+            compressed_values_struct.len = len(values)
 
     else:
         raise TypeError(
-            "Values must be bytes, bytearray, memoryview, or a NumPy uint8 array"
+            "Compressed values must be bytes, bytearray, memoryview, or a NumPy uint8 array"
         )
 
-    indices_values = __IndicesValues()
-    coefficients_values = __CoefficientsValues()
+    indices_struct = __Indices()
+    coefficients_struct = __Coefficients()
 
     try:
-        err = __library.extract(
-            compressed_values, 
-            byref(indices_values), 
-            byref(coefficients_values),
+        tersets_error = __library.extract(
+            compressed_values_struct, 
+            byref(indices_struct), 
+            byref(coefficients_struct),
         )
-        if err != 0:
-            raise RuntimeError(f"extract failed: {err}")
+        if tersets_error != 0:
+            raise RuntimeError(f"extract failed: {tersets_error}")
 
         if _INSTALLED_NUMPY:
             # Create views onto native memory, then copy into NumPy-owned arrays
             # before we free the native allocations in `finally`.
-            indices = numpy.ctypeslib.as_array(indices_values.data, 
-                                                  shape=(indices_values.len,)).copy()
-            coefficients = numpy.ctypeslib.as_array(coefficients_values.data, 
-                                                    shape=(coefficients_values.len,)).copy()
+            indices = numpy.ctypeslib.as_array(indices_struct.data, 
+                                               shape=(indices_struct.len,)).copy()
+            coefficients = numpy.ctypeslib.as_array(coefficients_struct.data, 
+                                                    shape=(coefficients_struct.len,)).copy()
             return indices, coefficients
 
         # No NumPy: copy into Python lists.
         return (
-            list(indices_values.data[: indices_values.len]),
-            list(coefficients_values.data[: coefficients_values.len]),
+            list(indices_struct.data[: indices.len]),
+            list(coefficients_struct.data[: coefficients.len]),
         )
     finally:
-        if indices_values.data:
-            __library.freeIndicesValues(byref(indices_values))
-        if coefficients_values.data:
-            __library.freeCoefficientValues(byref(coefficients_values))
+        if indices_struct.data:
+            __library.freeIndices(byref(indices_struct))
+        if coefficients_struct.data:
+            __library.freeCoefficients(byref(coefficients_struct))
         
 
 def rebuild(
@@ -519,10 +523,8 @@ def rebuild(
             f"{method!r} is not a valid TerseTS Method. Available: {available}"
         )
 
-    compressed_values = __CompressedValues()
-
     # Prepare indices (size_t*).
-    indices_values = __IndicesValues()
+    indices_struct = __Indices()
     if _INSTALLED_NUMPY and isinstance(indices, numpy.ndarray):
         if indices.dtype != numpy.uintp:
             raise TypeError("rebuild(): 'indices' NumPy array must have dtype=np.uintp")
@@ -531,17 +533,17 @@ def rebuild(
         if not indices.flags["C_CONTIGUOUS"]:
             raise TypeError("rebuild(): 'indices' NumPy array must be C-contiguous")
 
-        indices_values.data = indices.ctypes.data_as(POINTER(c_size_t))
-        indices_values.len = indices.size
+        indices_struct.data = indices.ctypes.data_as(POINTER(c_size_t))
+        indices_struct.len = indices.size
     elif isinstance(indices, (list, tuple)):
         indices_buffer = (c_size_t * len(indices))(*indices)
-        indices_values.data = indices_buffer
-        indices_values.len = len(indices)
+        indices_struct.data = indices_buffer
+        indices_struct.len = len(indices)
     else:
         raise TypeError("rebuild(): 'indices' must be ndarray[uintp] or list/tuple[int]")
 
     # Prepare coefficients (double*).
-    coefficients_values = __CoefficientsValues()
+    coefficients_struct = __Coefficients()
     if _INSTALLED_NUMPY and isinstance(coefficients, numpy.ndarray):
         if coefficients.dtype != numpy.float64:
             raise TypeError("rebuild(): 'coefficients' NumPy array must have dtype=np.float64")
@@ -550,35 +552,37 @@ def rebuild(
         if not coefficients.flags["C_CONTIGUOUS"]:
             raise TypeError("rebuild(): 'coefficients' NumPy array must be C-contiguous")
 
-        coefficients_values.data = coefficients.ctypes.data_as(POINTER(c_double))
-        coefficients_values.len = coefficients.size
+        coefficients_struct.data = coefficients.ctypes.data_as(POINTER(c_double))
+        coefficients_struct.len = coefficients.size
     elif isinstance(coefficients, (list, tuple)):
-        coefficients_buffer = (c_double * len(coefficients))(*coefficients)
-        coefficients_values.data = coefficients_buffer
-        coefficients_values.len = len(coefficients)
+        buffer = (c_double * len(coefficients))(*coefficients)
+        coefficients_struct.data = buffer
+        coefficients_struct.len = len(coefficients)
     else:
         raise TypeError("rebuild(): 'coefficients' must be ndarray[float64] or list/tuple[float]")
 
+    compressed_values_struct = __CompressedValues()
+
     try:
-        err = __library.rebuild(
-            indices_values,
-            coefficients_values,
-            byref(compressed_values),
+        tersets_error = __library.rebuild(
+            indices_struct,
+            coefficients_struct,
+            byref(compressed_values_struct),
             method.value,
         )
-        if err != 0:
-            raise RuntimeError(f"rebuild failed: {err}")
+        if tersets_error != 0:
+            raise RuntimeError(f"rebuild failed: {tersets_error}")
 
         if _INSTALLED_NUMPY:
             # Copy native output into NumPy-owned memory before freeing Zig array.
-            out_view = numpy.ctypeslib.as_array(
-                cast(compressed_values.data, POINTER(c_ubyte)),
-                shape=(compressed_values.len,),
+            array = numpy.ctypeslib.as_array(
+                cast(compressed_values_struct.data, POINTER(c_ubyte)),
+                shape=(compressed_values_struct.len,),
             )
-            return out_view.copy()
+            return array.copy()
 
         return string_at(compressed_values.data, compressed_values.len)
 
     finally:
-        if compressed_values.data:
-            __library.freeCompressedValues(byref(compressed_values))
+        if compressed_values_struct.data:
+            __library.freeCompressedValues(byref(compressed_values_struct))
