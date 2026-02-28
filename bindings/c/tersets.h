@@ -42,7 +42,7 @@ struct CompressedValues {
 
 // A pointer to indices and the number of values.
 struct Indices {
-  int64_t *data;
+  uint64_t *data;
   size_t   len;
 };
 
@@ -82,7 +82,7 @@ int32_t rebuild(struct Indices indices,
 void freeCompressedValues(struct CompressedValues *compressed_values);
 void freeUncompressedValues(struct UncompressedValues *uncompressed_values);
 void freeIndices(struct Indices *indices);
-void freeCoefficient(struct Coefficients *coefficients);
+void freeCoefficients(struct Coefficients *coefficients);
 
 #ifdef __cplusplus
 }

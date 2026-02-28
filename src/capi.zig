@@ -60,13 +60,11 @@ export fn compress(
     method_index: u8,
     configuration: [*:0]const u8,
 ) i32 {
-    const uncompressed_values_slice = uncompressed_values.data[0..uncompressed_values.len];
-
-    const configuration_slice: []const u8 = mem.span(configuration);
-
     // Returning 1 is equivalent to returning Error.UnknownMethod.
     if (method_index > tersets.getMaxMethodIndex()) return 1;
 
+    const uncompressed_values_slice = uncompressed_values.data[0..uncompressed_values.len];
+    const configuration_slice: []const u8 = mem.span(configuration);
     const method: Method = @enumFromInt(method_index);
 
     var compressed_values_array_list = tersets.compress(
@@ -79,6 +77,7 @@ export fn compress(
     // Convert the ArrayList into an owned slice with exact length. This call allocates a new buffer
     // of size `len` and transfers ownership of the data from the ArrayList to the caller. Without
     // this step, freeing later with `len` instead of `capacity` would corrupt the allocator.
+    defer compressed_values_array_list.deinit(allocator); // Prevent memory leaks if toOwnedSlice() fail.
     const compressed_values_slice = compressed_values_array_list.toOwnedSlice(allocator) catch |err| return errorToIndex(err);
 
     compressed_values.data = compressed_values_slice.ptr;
@@ -115,6 +114,7 @@ export fn decompress(
     // Convert the ArrayList into an owned slice with exact length. This call allocates a new buffer
     // of size `len` and transfers ownership of the data from the ArrayList to the caller. Without
     // this step, freeing later with `len` instead of `capacity` would corrupt the allocator.
+    defer decompressed_values_array_list.deinit(allocator); // Prevent memory leaks if toOwnedSlice() fail.
     const decompressed_values_slice = decompressed_values_array_list.toOwnedSlice(allocator) catch |err| return errorToIndex(err);
 
     decompressed_values.data = decompressed_values_slice.ptr;
@@ -188,6 +188,9 @@ export fn rebuild(
     compressed_values: *CompressedValues,
     method_index: u8,
 ) i32 {
+    // Returning 1 is equivalent to returning Error.UnknownMethod.
+    if (method_index > tersets.getMaxMethodIndex()) return 1;
+
     const indices_slices = indices_values.data[0..indices_values.len];
     const coefficients_slices = coefficients.data[0..coefficients.len];
     const method: Method = @enumFromInt(method_index);

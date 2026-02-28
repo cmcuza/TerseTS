@@ -206,7 +206,7 @@ def compress(
         # Otherwise, numpy.ascontiguousarray() converts it (potentially copying)
         # so we can safely pass its data pointer directly to the native layer.
         if uncompressed_values.dtype != numpy.float64 or not uncompressed_values.flags["C_CONTIGUOUS"]:
-            uncompressed_values = numpy.ascontiguousarray(values, dtype=numpy.float64)
+            uncompressed_values = numpy.ascontiguousarray(uncompressed_values, dtype=numpy.float64)
         uncompressed_values_struct.data = uncompressed_values.ctypes.data_as(POINTER(c_double))
         uncompressed_values_struct.len = uncompressed_values.size
     elif isinstance(uncompressed_values, (list, tuple)):
@@ -305,7 +305,7 @@ def decompress(
             raise TypeError(error_message + " be C-contiguous")
     elif not isinstance(compressed_values, (bytes, bytearray, memoryview)):
         raise TypeError(
-            "decompress(uncompressed_values): uncompressed_values must be bytes, bytearray, memoryview or a NumPy uint8 array"
+            "decompress(compressed_values): compressed_values must be bytes, bytearray, memoryview or a NumPy uint8 array"
         )
 
     # Prepare a __CompressedValues view and keep a Python reference alive during the call.
