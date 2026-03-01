@@ -59,6 +59,23 @@ def copy_pocketfft_if_repository():
 
     raise FileNotFoundError("Failed to locate PocketFFT source code.")
 
+def copy_build_zig_if_repository():
+    """Copies build.zig to the current directory if in the repository."""
+    cwd = Path.cwd()
+
+    target_build_file = cwd / "build.zig"
+    if target_build_file.exists():
+        return
+
+    repository_root = cwd.parent.parent
+    git_folder = repository_root / ".git"
+    if git_folder.exists():
+        input_build_file = repository_root / "build.zig"
+        shutil.copy2(input_build_file, target_build_file)
+        return
+
+    raise FileNotFoundError("Failed to locate build.zig.")
+
 
 def delete_src_if_repository():
     """Deletes the Zig source code in the current directory if in the repository."""
@@ -90,27 +107,44 @@ def delete_pocketfft_if_repository():
         if lib_folder.exists() and not any(lib_folder.iterdir()):
             lib_folder.rmdir()
 
+def delete_build_zig_if_repository():
+    """Deletes build.zig in the current directory if in the repository."""
+    cwd = Path.cwd()
+
+    build_file = cwd / "build.zig"
+    if not build_file.exists():
+        return
+
+    repository_root = cwd.parent.parent
+    git_folder = repository_root / ".git"
+    if git_folder.exists():
+        build_file.unlink()
+
 
 class ZigSDist(sdist):
     def run(self):
         copy_src_if_repository()
         copy_pocketfft_if_repository()
+        copy_build_zig_if_repository()
         try:
             super().run()
         finally:
             delete_src_if_repository()
             delete_pocketfft_if_repository()
+            delete_build_zig_if_repository()
 
 
 class ZigBDistWheel(bdist_wheel):
     def run(self):
         copy_src_if_repository()
         copy_pocketfft_if_repository()
+        copy_build_zig_if_repository()
         try:
             super().run()
         finally:
             delete_src_if_repository()
             delete_pocketfft_if_repository()
+            delete_build_zig_if_repository()
 
     def get_tag(self):
         python, abi, plat = super().get_tag()
@@ -126,46 +160,32 @@ class ZigBuildExt(build_ext):
         # Zig requires that the directories exists.
         if not os.path.exists(self.build_lib):
             os.makedirs(self.build_lib)
-        
+
         # Output path for the generated library.
         output_path = self.get_ext_fullpath(ext.name)
-        
-        # Zig's build-lib command.
-        zig_cmd = [sys.executable, "-m", "ziglang", "build-lib"]
-        
-        # First source file, then cflags, then additional C source file for PocketFFT.
-        zig_inputs = [
-            ext.sources[0],
-            "-cflags",
-            "-std=c99",
-            "--",
-            "lib/pocketfft/pocketfft.c",
+
+        optimize = "Debug" if self.debug else "ReleaseFast"
+        zig_cmd = [
+            sys.executable,
+            "-m",
+            "ziglang",
+            "build",
+            "-Dlinking=dynamic",
+            f"-Doptimize={optimize}",
         ]
-        # Zig's build-lib flags.
-        zig_flags = [
-            f"-femit-bin={output_path}",
-            "-Ilib/pocketfft",
-            "-mcpu",
-            "native",
-            "-dynamic",
-            "-lc",
-            "-O",
-            "ReleaseFast",
-        ]
+        self.spawn(zig_cmd)
 
-        self.spawn(zig_cmd + zig_inputs + zig_flags)
+        if sys.platform == "win32":
+            built_library = Path("zig-out") / "bin" / "tersets.dll"
+        elif sys.platform == "darwin":
+            built_library = Path("zig-out") / "lib" / "libtersets.dylib"
+        else:
+            built_library = Path("zig-out") / "lib" / "libtersets.so"
 
-        # Zig generates files that are not needed and can be removed.
-        if sys.platform == "darwin" or sys.platform == "linux":
-            path_to_file = self.get_ext_fullpath(ext.name) + ".o"
-            if os.path.exists(path_to_file):
-                os.remove(path_to_file)
+        if not built_library.exists():
+            raise FileNotFoundError(f"Expected Zig output was not found: {built_library}")
 
-        elif sys.platform == "win32":
-            for name in ["capi.lib", "tersets.pdb", "tersets.pyd.obj"]:
-                path_to_file = os.path.join(self.build_lib, name)
-                if os.path.exists(path_to_file):
-                    os.remove(path_to_file)
+        shutil.copy2(built_library, output_path)
 
     def get_ext_filename(self, ext_name):
         # Removes the CPython part of ext_name as the library is not linked to

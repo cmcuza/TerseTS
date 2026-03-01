@@ -16,6 +16,7 @@ const std = @import("std");
 const LinkMode = std.builtin.LinkMode;
 
 pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
 
     // Define build options.
     const linking = b.option(
@@ -36,7 +37,7 @@ pub fn build(b: *std.Build) void {
     // Create root module.
     const root_module = b.createModule(.{
         .root_source_file = b.path("src/capi.zig"),
-        .target = b.standardTargetOptions(.{}),
+        .target = target,
         .optimize = b.standardOptimizeOption(.{}),
         .pic = pic,
     });
