@@ -43,14 +43,12 @@ class TerseTSPythonTest(unittest.TestCase):
     def test_compress_and_decompress_zero_error(self):
         """Test compressing and decompressing with zero error"""
         random.seed(time.time())
-        count = 0
-        uncompressed = []
+        uncompressed_values = []
 
-        while count < TEST_VALUE_COUNT:
+        while len(uncompressed_values) < TEST_VALUE_COUNT:
             random_value = generate_random_f64()
             if is_finite_and_real(random_value):
-                count += 1
-                uncompressed.append(random_value)
+                uncompressed_values.append(random_value)
 
         # Randomly select a compression method for testing.
         # Only methods that support all f64 values are selected.
@@ -66,27 +64,25 @@ class TerseTSPythonTest(unittest.TestCase):
         )
 
         configuration = {"abs_error_bound": 0.0}
-        compressed = compress(uncompressed, method, configuration)
-        decompressed = decompress(compressed)
+        compressed_values = compress(uncompressed_values, method, configuration)
+        decompressed_values = decompress(compressed_values)
 
-        if type(uncompressed) is not type(decompressed):
+        if type(uncompressed_values) is not type(decompressed_values):
             # Convert to list for comparison.
             # This can happen if NumPy is installed and used in decompress().
-            decompressed = list(decompressed)
+            decompressed_values = list(decompressed_values)
 
-        self.assertEqual(uncompressed, decompressed)
+        self.assertEqual(uncompressed_values, decompressed_values)
     
     def test_extract_and_rebuild_zero_error(self):
         """Test compressing and decompressing with zero error"""
         random.seed(time.time())
-        count = 0
-        uncompressed = []
+        uncompressed_values = []
 
-        while count < TEST_VALUE_COUNT:
+        while len(uncompressed_values) < TEST_VALUE_COUNT:
             random_value = generate_random_f64()
             if is_finite_and_real(random_value):
-                count += 1
-                uncompressed.append(random_value)
+                uncompressed_values.append(random_value)
 
         # Randomly select a compression method for testing.
         # Only methods that support all f64 values are selected.
@@ -102,17 +98,17 @@ class TerseTSPythonTest(unittest.TestCase):
         )
 
         configuration = {"abs_error_bound": 0.0}
-        compressed = compress(uncompressed, method, configuration)
-        index, coefficients = extract(compressed)
-        rebuilt = rebuild(index, coefficients, method)
-        decompressed = decompress(rebuilt)
+        compressed_values = compress(uncompressed_values, method, configuration)
+        indices, coefficients = extract(compressed_values)
+        rebuild_values = rebuild(indices, coefficients, method)
+        decompressed_values = decompress(rebuild_values)
 
-        if type(uncompressed) is not type(decompressed):
+        if type(uncompressed_values) is not type(decompressed_values):
             # Convert to list for comparison. 
             # This can happen if NumPy is installed and used in decompress().
-            decompressed = list(decompressed)
+            decompressed_values = list(decompressed_values)
 
-        self.assertEqual(uncompressed, decompressed)
+        self.assertEqual(uncompressed_values, decompressed_values)
 
     def test_discrete_fourier_transform_and_inverse(self):
         """Test that the discrete Fourier transform and its inverse are consistent"""

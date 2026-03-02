@@ -101,30 +101,30 @@ pub fn decompress(compressed_values: &[u8]) -> Result<Vec<f64>> {
         len: compressed_values.len(),
     };
 
-    let mut uncompressed_values_struct = UncompressedValues {
+    let mut decompressed_values_struct = UncompressedValues {
         data: ptr::null(),
         len: 0,
     };
 
     let tersets_error =
-        unsafe { capi::decompress(compressed_values_struct, &mut uncompressed_values_struct) };
+        unsafe { capi::decompress(compressed_values_struct, &mut decompressed_values_struct) };
 
     if tersets_error != 0 {
-        unsafe { capi::freeUncompressedValues(&mut uncompressed_values_struct) };
+        unsafe { capi::freeUncompressedValues(&mut decompressed_values_struct) };
         return Err(TerseTSError::TerseTS(tersets_error));
     }
 
-    let uncompressed_values = unsafe {
+    let decompressed_values = unsafe {
         slice::from_raw_parts(
-            uncompressed_values_struct.data,
-            uncompressed_values_struct.len,
+            decompressed_values_struct.data,
+            decompressed_values_struct.len,
         )
         .to_vec()
     };
 
-    unsafe { capi::freeUncompressedValues(&mut uncompressed_values_struct) };
+    unsafe { capi::freeUncompressedValues(&mut decompressed_values_struct) };
 
-    Ok(uncompressed_values)
+    Ok(decompressed_values)
 }
 
 #[cfg(test)]
@@ -133,14 +133,16 @@ mod tests {
 
     #[test]
     fn test_compress_decompress_loads_tersets_without_error_bound() {
+        let uncompressed_values = vec![10.0, 20.0, 30.0, 40.0, 50.0];
+
         let compressed_values = compress(
-            &[10.0, 20.0, 30.0, 40.0, 50.0],
+            &uncompressed_values,
             Method::SwingFilter,
             r#"{ "abs_error_bound": 0.0 }"#,
         )
         .unwrap();
 
-        let uncompressed_values = decompress(&compressed_values).unwrap();
-        assert_eq!(uncompressed_values, vec![10.0, 20.0, 30.0, 40.0, 50.0]);
+        let decompressed_values = decompress(&compressed_values).unwrap();
+        assert_eq!(decompressed_values, uncompressed_values);
     }
 }
