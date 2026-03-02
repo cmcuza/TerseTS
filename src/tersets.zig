@@ -46,11 +46,13 @@ const serfqt = @import(
     "lossy_compression/value_representation/serf_qt.zig",
 );
 
+const buff = @import("lossy_compression/value_representation/bounded_fast_floats.zig");
+
 // Import line simplification methods.
 const vw = @import("lossy_compression/line_simplification/visvalingam_whyatt.zig");
 const sliding_window = @import("lossy_compression/line_simplification/sliding_window.zig");
 const bottom_up = @import("lossy_compression/line_simplification/bottom_up.zig");
-const rle_enconding = @import("lossless_compression/run_length_encoding.zig");
+const rle_encoding = @import("lossless_compression/run_length_encoding.zig");
 
 const extractors = @import("utilities/extractors.zig");
 const tester = @import("tester.zig");
@@ -89,6 +91,7 @@ pub const Method = enum {
     RunLengthEncoding,
     NonLinearApproximation,
     SerfQT,
+    BitPackedBUFF,
 };
 
 /// Compress `uncompressed_values` using `method` and its `configuration` and returns the results
@@ -221,7 +224,7 @@ pub fn compress(
             );
         },
         .RunLengthEncoding => {
-            try rle_enconding.compress(
+            try rle_encoding.compress(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
@@ -246,6 +249,14 @@ pub fn compress(
         },
         .SerfQT => {
             try serfqt.compress(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                configuration,
+            );
+        },
+        .BitPackedBUFF => {
+            try buff.compressBitPackedBUFF(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
@@ -317,7 +328,7 @@ pub fn decompress(
             try bottom_up.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .RunLengthEncoding => {
-            try rle_enconding.decompress(allocator, compressed_values_slice, &decompressed_values);
+            try rle_encoding.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .BitPackedQuantization => {
             try bitpacked_quantization.decompress(allocator, compressed_values_slice, &decompressed_values);
@@ -327,6 +338,13 @@ pub fn decompress(
         },
         .SerfQT => {
             try serfqt.decompress(allocator, compressed_values_slice, &decompressed_values);
+        },
+        .BitPackedBUFF => {
+            try buff.decompressBitPackedBUFF(
+                allocator,
+                compressed_values_slice,
+                &decompressed_values,
+            );
         },
     }
 
@@ -464,13 +482,11 @@ pub fn extract(
         // corrupted streams or misinterpretation of the data during decompression.
         // In case of RLE, modifying the coefficients can disrupt the run-length
         // encoding scheme, also leading to incorrect decompression results.
-        .BitPackedQuantization => {
-            return Error.UnsupportedMethod;
-        },
-        .RunLengthEncoding => {
-            return Error.UnsupportedMethod;
-        },
-        .SerfQT => {
+        .BitPackedQuantization,
+        .RunLengthEncoding,
+        .BitPackedBUFF,
+        .SerfQT,
+        => {
             return Error.UnsupportedMethod;
         },
     }
@@ -602,13 +618,11 @@ pub fn rebuild(
         // corrupted streams or misinterpretation of the data during decompression.
         // In case of RLE, modifying the coefficients can disrupt the run-length
         // encoding scheme, also leading to incorrect decompression results.
-        .BitPackedQuantization => {
-            return Error.UnsupportedMethod;
-        },
-        .RunLengthEncoding => {
-            return Error.UnsupportedMethod;
-        },
-        .SerfQT => {
+        .BitPackedQuantization,
+        .BitPackedBUFF,
+        .SerfQT,
+        .RunLengthEncoding,
+        => {
             return Error.UnsupportedMethod;
         },
     }
@@ -649,7 +663,8 @@ test "extract and rebuild works for any compression method supported" {
 
         if (method == Method.BitPackedQuantization or
             method == Method.SerfQT or
-            method == Method.RunLengthEncoding)
+            method == Method.RunLengthEncoding or
+            method == Method.BitPackedBUFF)
         {
             // These compression methods are not supported for extraction
             // of the coefficients and indices. This is because even small
