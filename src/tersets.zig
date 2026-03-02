@@ -42,14 +42,17 @@ const piecewise_histogram = @import(
 const bitpacked_quantization = @import(
     "lossy_compression/value_representation/bitpacked_quantization.zig",
 );
-const serqt = @import("lossy_compression/value_representation/serf_qt.zig");
+const serfqt = @import(
+    "lossy_compression/value_representation/serf_qt.zig",
+);
+
 const buff = @import("lossy_compression/value_representation/bounded_fast_floats.zig");
 
 // Import line simplification methods.
 const vw = @import("lossy_compression/line_simplification/visvalingam_whyatt.zig");
 const sliding_window = @import("lossy_compression/line_simplification/sliding_window.zig");
 const bottom_up = @import("lossy_compression/line_simplification/bottom_up.zig");
-const rle_enconding = @import("lossless_compression/run_length_encoding.zig");
+const rle_encoding = @import("lossless_compression/run_length_encoding.zig");
 
 const extractors = @import("utilities/extractors.zig");
 const tester = @import("tester.zig");
@@ -221,7 +224,7 @@ pub fn compress(
             );
         },
         .RunLengthEncoding => {
-            try rle_enconding.compress(
+            try rle_encoding.compress(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
@@ -245,7 +248,7 @@ pub fn compress(
             );
         },
         .SerfQT => {
-            try serqt.compress(
+            try serfqt.compress(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
@@ -325,7 +328,7 @@ pub fn decompress(
             try bottom_up.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .RunLengthEncoding => {
-            try rle_enconding.decompress(allocator, compressed_values_slice, &decompressed_values);
+            try rle_encoding.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .BitPackedQuantization => {
             try bitpacked_quantization.decompress(allocator, compressed_values_slice, &decompressed_values);
@@ -334,7 +337,7 @@ pub fn decompress(
             try non_linear_approximation.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .SerfQT => {
-            try serqt.decompress(allocator, compressed_values_slice, &decompressed_values);
+            try serfqt.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .BitPackedBUFF => {
             try buff.decompressBitPackedBUFF(
@@ -680,17 +683,17 @@ test "extract and rebuild works for any compression method supported" {
             continue;
         }
 
-        const method_configuration = try configuration_file.defaultConfigurationBuilder(
+        const configuration = try configuration_file.defaultConfigurationBuilder(
             allocator,
             method,
         );
-        defer allocator.free(method_configuration);
+        defer allocator.free(configuration);
 
         var compressed_values = try compress(
             allocator,
             uncompressed_values.items,
             method,
-            method_configuration,
+            configuration,
         );
         defer compressed_values.deinit(allocator);
 
@@ -701,22 +704,22 @@ test "extract and rebuild works for any compression method supported" {
         defer decompressed_values.deinit(allocator);
 
         // Test extract and rebuild.
-        var coefficient_values = ArrayList(f64).empty;
-        defer coefficient_values.deinit(allocator);
-        var index_values = ArrayList(u64).empty;
-        defer index_values.deinit(allocator);
+        var coefficients = ArrayList(f64).empty;
+        defer coefficients.deinit(allocator);
+        var indices = ArrayList(u64).empty;
+        defer indices.deinit(allocator);
 
         try extract(
             allocator,
             compressed_values.items,
-            &index_values,
-            &coefficient_values,
+            &indices,
+            &coefficients,
         );
 
         var rebuild_values = try rebuild(
             allocator,
-            index_values.items,
-            coefficient_values.items,
+            indices.items,
+            coefficients.items,
             method,
         );
         defer rebuild_values.deinit(allocator);
