@@ -26,6 +26,8 @@ enum Method {
   RunLengthEncoding             = 14,
   NonLinearApproximation        = 15,
   SerfQT                        = 16,
+  MacaqueS                      = 17,
+  MacaqueV                      = 18,
 };
 
 // A pointer to uncompressed values and the number of values.
