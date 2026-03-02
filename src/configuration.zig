@@ -26,6 +26,7 @@ const testing = std.testing;
 const json = std.json;
 const Allocator = std.mem.Allocator;
 const tersets = @import("tersets.zig");
+const tester = @import("tester.zig");
 
 /// Configuration for methods that require an absolute error bound.
 /// Example: { "abs_error_bound": 0.1 }
@@ -56,6 +57,13 @@ pub const AggregateError = struct {
 /// Example: { "area_under_curve_error": 0.01 }
 pub const AreaUnderCurveError = struct {
     area_under_curve_error: f32,
+};
+
+/// Configuration for domain transformation methods like DFT and DWT.
+/// The number of coefficients refers to the number of coefficients to retain.
+/// Example: { "number_of_coefficients": 10 }
+pub const DomainTransformation = struct {
+    number_of_coefficients: u32,
 };
 
 /// Empty configuration for methods that do not require any parameters.
@@ -93,7 +101,7 @@ pub fn parse(
                 return error.InvalidConfiguration;
         },
         HistogramBinsNumber => {
-            if (parsed_value.histogram_bins_number < 0)
+            if (parsed_value.histogram_bins_number == 0)
                 return error.InvalidConfiguration;
         },
         AggregateError => {
@@ -101,6 +109,10 @@ pub fn parse(
                 return error.InvalidConfiguration;
         },
         EmptyConfiguration => {},
+        DomainTransformation => {
+            if (parsed_value.number_of_coefficients == 0)
+                return error.InvalidConfiguration;
+        },
         else => return error.InvalidConfiguration,
     }
     return parsed_value;
@@ -110,6 +122,9 @@ pub fn defaultConfigurationBuilder(
     allocator: Allocator,
     method: tersets.Method,
 ) ![]u8 {
+    const random_f32 = tester.generateBoundedRandomValue(f32, 0.0, 10.0, null);
+    const random_u32 = tester.generateBoundRandomInteger(u32, 2, 10, null);
+
     return switch (method) {
         // Methods using absolute error: float objective.
         .PoorMansCompressionMidrange,
@@ -124,10 +139,9 @@ pub fn defaultConfigurationBuilder(
         .SerfQT,
         .BitPackedQuantization,
         => blk: {
-            const error_bound: f32 = 0.1; // Simple default value.
             break :blk try getDefaultAbsoluteErrorConfiguration(
                 allocator,
-                error_bound,
+                random_f32,
             );
         },
 
@@ -135,10 +149,9 @@ pub fn defaultConfigurationBuilder(
         .PiecewiseConstantHistogram,
         .PiecewiseLinearHistogram,
         => blk: {
-            const bins: u32 = 2; // Minimum allowed value.
             break :blk try getDefaultHistogramConfiguration(
                 allocator,
-                bins,
+                random_u32,
             );
         },
 
@@ -146,19 +159,25 @@ pub fn defaultConfigurationBuilder(
         .BottomUp,
         .SlidingWindow,
         => blk: {
-            const rmse: f32 = 0.1; // Simple default value.
             break :blk try getDefaultAggregatedConfiguration(
                 allocator,
-                rmse,
+                random_f32,
             );
         },
 
         // Methods using AUC error bound.
         .VisvalingamWhyatt => blk: {
-            const auc: f32 = 0.1; // Simple default value.
             break :blk try getDefaultAUCConfiguration(
                 allocator,
-                auc,
+                random_f32,
+            );
+        },
+
+        // Methods using domain transformation with number of coefficients.
+        .DiscreteFourierTransform => blk: {
+            break :blk try getDefaultDomainTransformationConfiguration(
+                allocator,
+                random_u32,
             );
         },
 
@@ -196,6 +215,14 @@ fn getDefaultAUCConfiguration(allocator: Allocator, auc_error_bound: f32) ![]u8 
         allocator,
         "{{\"area_under_curve_error\": {d}}}",
         .{auc_error_bound},
+    );
+}
+
+fn getDefaultDomainTransformationConfiguration(allocator: Allocator, number_of_coefficients: u32) ![]u8 {
+    return try std.fmt.allocPrint(
+        allocator,
+        "{{\"number_of_coefficients\": {d}}}",
+        .{number_of_coefficients},
     );
 }
 
