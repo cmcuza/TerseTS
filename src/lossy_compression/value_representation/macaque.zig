@@ -202,8 +202,8 @@ pub fn compressMacaqueV(
 
                 // We need to store the leading zeros, significant bits length,
                 // and the significant bits that differ from the previous value.
-                // Store the leading zeros in only 5 bits.
-                try bit_writer.writeBits(@as(u5, @intCast(leading_zeros)), 5);
+                // A u64 XOR can have 0..63 leading zeros, so this field needs 6 bits.
+                try bit_writer.writeBits(@as(u6, @intCast(leading_zeros)), 6);
 
                 const meaningful_bits: u7 = max_u64_bits - leading_zeros - trailing_zeros;
 
@@ -314,7 +314,7 @@ pub fn decompressMacaqueV(
             } else {
                 // The previous xor value is not close enough to the current value, so we need to read the leading zeros,
                 // significant bits length, and the significant bits that differ from the previous value.
-                const leading_zeros: u7 = bit_reader.readBitsNoEof(u7, 5) catch return Error.ByteStreamError;
+                const leading_zeros: u7 = bit_reader.readBitsNoEof(u7, 6) catch return Error.ByteStreamError;
                 const encoded_significant_bits_length: u6 = bit_reader.readBitsNoEof(u6, 6) catch return Error.ByteStreamError;
                 const significant_bits_length: u7 = if (encoded_significant_bits_length == 0)
                     max_u64_bits
@@ -724,6 +724,47 @@ test "macaquev always reduces size of time series" {
 
     // Considering the range of the input data, the compressed values should always be smaller.
     try testing.expect(uncompressed_values.items.len * 8 > compressed_values.items.len);
+}
+
+test "macaquev preserves values when xor has more than 31 leading zeros" {
+    const allocator = testing.allocator;
+    const uncompressed_values = [5]f64{
+        22.7,
+        22.70000050919397,
+        21.700000077486038,
+        22.633333410819766,
+        22.616337399924696,
+    };
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    const method_configuration =
+        \\ {"abs_error_bound": 1e-07}
+    ;
+
+    try compressMacaqueV(
+        allocator,
+        uncompressed_values[0..],
+        &compressed_values,
+        method_configuration,
+    );
+
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
+    try decompressMacaqueV(
+        allocator,
+        compressed_values.items,
+        &decompressed_values,
+    );
+
+    try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
+    for (0..uncompressed_values.len) |i| {
+        try testing.expectApproxEqAbs(
+            uncompressed_values[i],
+            decompressed_values.items[i],
+            1e-07,
+        );
+    }
 }
 
 test "check macaques configuration parsing" {
