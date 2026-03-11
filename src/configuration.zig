@@ -123,6 +123,8 @@ pub fn defaultConfigurationBuilder(
         .NonLinearApproximation,
         .SerfQT,
         .BitPackedQuantization,
+        .MacaqueS,
+        .MacaqueV,
         => blk: {
             const error_bound: f32 = 0.1; // Simple default value.
             break :blk try getDefaultAbsoluteErrorConfiguration(
