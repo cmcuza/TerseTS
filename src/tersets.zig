@@ -42,7 +42,7 @@ const piecewise_histogram = @import(
 const bitpacked_quantization = @import(
     "lossy_compression/value_representation/bitpacked_quantization.zig",
 );
-const serqt = @import(
+const serfqt = @import(
     "lossy_compression/value_representation/serf_qt.zig",
 );
 const macaque = @import(
@@ -250,7 +250,7 @@ pub fn compress(
             );
         },
         .SerfQT => {
-            try serqt.compress(
+            try serfqt.compress(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
@@ -347,7 +347,7 @@ pub fn decompress(
             try non_linear_approximation.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .SerfQT => {
-            try serqt.decompress(allocator, compressed_values_slice, &decompressed_values);
+            try serfqt.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .MacaqueS => {
             try macaque.decompressMacaqueS(allocator, compressed_values_slice, &decompressed_values);
@@ -703,17 +703,17 @@ test "extract and rebuild works for any compression method supported" {
             continue;
         }
 
-        const method_configuration = try configuration_file.defaultConfigurationBuilder(
+        const configuration = try configuration_file.defaultConfigurationBuilder(
             allocator,
             method,
         );
-        defer allocator.free(method_configuration);
+        defer allocator.free(configuration);
 
         var compressed_values = try compress(
             allocator,
             uncompressed_values.items,
             method,
-            method_configuration,
+            configuration,
         );
         defer compressed_values.deinit(allocator);
 
@@ -724,22 +724,22 @@ test "extract and rebuild works for any compression method supported" {
         defer decompressed_values.deinit(allocator);
 
         // Test extract and rebuild.
-        var coefficient_values = ArrayList(f64).empty;
-        defer coefficient_values.deinit(allocator);
-        var index_values = ArrayList(u64).empty;
-        defer index_values.deinit(allocator);
+        var coefficients = ArrayList(f64).empty;
+        defer coefficients.deinit(allocator);
+        var indices = ArrayList(u64).empty;
+        defer indices.deinit(allocator);
 
         try extract(
             allocator,
             compressed_values.items,
-            &index_values,
-            &coefficient_values,
+            &indices,
+            &coefficients,
         );
 
         var rebuild_values = try rebuild(
             allocator,
-            index_values.items,
-            coefficient_values.items,
+            indices.items,
+            coefficients.items,
             method,
         );
         defer rebuild_values.deinit(allocator);

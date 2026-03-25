@@ -7,6 +7,7 @@ extern "C" {
 #endif
 
 // Mirror the compression methods provided by TerseTS.
+// An uint8_t is used instead of this enum to simplify FFI.
 enum Method {
   PoorMansCompressionMidrange   = 0,
   PoorMansCompressionMean       = 1,
@@ -29,27 +30,27 @@ enum Method {
   MacaqueV                      = 18,
 };
 
-// Read-only view of input data (the library will not modify it).
+// A pointer to uncompressed values and the number of values.
 struct UncompressedValues {
   const double *data;
   size_t        len;
 };
 
-// Output buffer for compressed bytes (the library writes these fields).
+// A pointer to compressed values and the number of bytes.
 struct CompressedValues {
   uint8_t *data;   
   size_t   len;    
 };
 
-// Output buffer for coefficient values (the library writes these fields).
-struct CoefficientsValues {
-  double *data;
+// A pointer to indices and the number of values.
+struct Indices {
+  uint64_t *data;
   size_t   len;
 };
 
-// Output buffer for indices values (the library writes these fields).
-struct IndicesValues {
-  int64_t *data;
+// A pointer to coefficients and the number of values.
+struct Coefficients {
+  double *data;
   size_t   len;
 };
 
@@ -57,7 +58,7 @@ struct IndicesValues {
 // Returns 0 on success, non-zero on error (e.g., 1 = unsupported method).
 int32_t compress(struct UncompressedValues uncompressed_values,
                  struct CompressedValues *compressed_values,
-                 uint8_t method, 
+		 uint8_t method_index,
                  const char *configuration);
 
 // Decompress compressed_values to uncompressed_values according to configuration.
@@ -65,24 +66,25 @@ int32_t compress(struct UncompressedValues uncompressed_values,
 int32_t decompress(struct CompressedValues compressed_values,
                    struct UncompressedValues *uncompressed_values);
 
-// Extract coefficients and indices from compressed_values.
+// Extract indices and coefficients from compressed_values.
 // Returns 0 on success, non-zero on error (e.g., 1 = unsupported method).
 int32_t extract(struct CompressedValues compressed_values,
-                  struct CoefficientsValues *coefficients_values,
-                  struct IndicesValues *indices_values);
+                struct Indices *indices,
+                struct Coefficients *coefficients);
 
-// Rebuild compressed_values from coefficients_values and indices_values.
+// Rebuild compressed_values from indices and coefficients.
 // Returns 0 on success, non-zero on error (e.g., 1 = unsupported method).
-int32_t rebuild(struct CoefficientsValues coefficients_values,
-                struct IndicesValues indices_values,
-                struct CompressedValues *compressed_values);
+int32_t rebuild(struct Indices indices,
+		struct Coefficients coefficients,
+                struct CompressedValues *compressed_values,
+		uint8_t method_index);
 
 
 // Free functions.
 void freeCompressedValues(struct CompressedValues *compressed_values);
 void freeUncompressedValues(struct UncompressedValues *uncompressed_values);
-void freeCoefficientValues(struct CoefficientsValues *coefficients_values);
-void freeIndicesValues(struct IndicesValues *indices_values);
+void freeIndices(struct Indices *indices);
+void freeCoefficients(struct Coefficients *coefficients);
 
 #ifdef __cplusplus
 }

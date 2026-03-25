@@ -34,16 +34,16 @@ pub const UncompressedValues = Array(f64);
 /// A pointer to compressed values and the number of bytes.
 pub const CompressedValues = Array(u8);
 
-/// A pointer to indices values and the number of values.
-pub const IndicesValues = Array(usize);
+/// A pointer to indices and the number of them.
+pub const Indices = Array(usize);
 
-/// A pointer to coefficient values and the number of values.
-pub const CoefficientsValues = Array(f64);
+/// A pointer to coefficients and the number of them.
+pub const Coefficients = Array(f64);
 
-/// Compress `uncompressed_values` to `compressed_values` according to `configuration`.
-/// The General Purpose Allocator `allocator` is passed as a parameter to tersets for
-/// memory management in the compression methods. On success zero is returned, and the
-/// following non-zero values are returned on errors:
+/// Compress `uncompressed_values` to `compressed_values` using `method` according to
+/// `configuration`. The General Purpose Allocator `allocator` is passed as a parameter to TerseTS
+/// for memory management in the compression methods. On success zero is returned, and the following
+/// non-zero values are returned on errors:
 /// - 1) Unknown compression method.
 /// - 2) Unsupported input.
 /// - 3) Invalid configuration.
@@ -55,40 +55,38 @@ pub const CoefficientsValues = Array(f64);
 /// - 9) Unsupported method.
 /// - 10) Out of memory.
 export fn compress(
-    uncompressed_values_array: UncompressedValues,
-    compressed_values_array: *CompressedValues,
+    uncompressed_values: UncompressedValues,
+    compressed_values: *CompressedValues,
     method_index: u8,
     configuration: [*:0]const u8,
 ) i32 {
-    const uncompressed_values = uncompressed_values_array.data[0..uncompressed_values_array.len];
-
-    const configuration_slice: []const u8 = mem.span(configuration);
-
     // Returning 1 is equivalent to returning Error.UnknownMethod.
     if (method_index > tersets.getMaxMethodIndex()) return 1;
 
+    const uncompressed_values_slice = uncompressed_values.data[0..uncompressed_values.len];
+    const configuration_slice: []const u8 = mem.span(configuration);
     const method: Method = @enumFromInt(method_index);
 
-    var compressed_values = tersets.compress(
+    var compressed_values_array_list = tersets.compress(
         allocator,
-        uncompressed_values,
+        uncompressed_values_slice,
         method,
         configuration_slice,
-    ) catch |err| return errorToInt(err);
+    ) catch |err| return errorToIndex(err);
 
     // Convert the ArrayList into an owned slice with exact length. This call allocates a new buffer
-    // sized precisely to `len` and transfers ownership of the data from the ArrayList to the
-    // caller. Without this step, freeing later with `len` instead of `capacity` would corrupt the
-    // allocator.
-    const data_slice = compressed_values.toOwnedSlice(allocator) catch |err| return errorToInt(err);
+    // of size `len` and transfers ownership of the data from the ArrayList to the caller. Without
+    // this step, freeing later with `len` instead of `capacity` would corrupt the allocator.
+    defer compressed_values_array_list.deinit(allocator); // Prevent memory leaks if toOwnedSlice() fail.
+    const compressed_values_slice = compressed_values_array_list.toOwnedSlice(allocator) catch |err| return errorToIndex(err);
 
-    compressed_values_array.data = data_slice.ptr;
-    compressed_values_array.len = data_slice.len;
+    compressed_values.data = compressed_values_slice.ptr;
+    compressed_values.len = compressed_values_slice.len;
 
     return 0;
 }
 
-/// Decompress `compressed_values` to `uncompressed_values`. The method is encoded in the last byte
+/// Decompress `compressed_values` to `decompressed_values`. The method is encoded in the last byte
 /// of `compressed_values`. The General Purpose Allocator `allocator` is passed as a parameter to
 /// tersets for memory management in the decompression methods. On success zero is returned, and the
 /// following non-zero values are returned on errors:
@@ -103,32 +101,32 @@ export fn compress(
 /// - 9) Unsupported method.
 /// - 10) Out of memory.
 export fn decompress(
-    compressed_values_array: CompressedValues,
-    decompressed_values_array: *UncompressedValues,
+    compressed_values: CompressedValues,
+    decompressed_values: *UncompressedValues,
 ) i32 {
-    const compressed_values = compressed_values_array.data[0..compressed_values_array.len];
+    const compressed_values_slice = compressed_values.data[0..compressed_values.len];
 
-    var decompressed_values = tersets.decompress(
+    var decompressed_values_array_list = tersets.decompress(
         allocator,
-        compressed_values,
-    ) catch |err| return errorToInt(err);
+        compressed_values_slice,
+    ) catch |err| return errorToIndex(err);
 
     // Convert the ArrayList into an owned slice with exact length. This call allocates a new buffer
-    // sized precisely to `len` and transfers ownership of the data from the ArrayList to the
-    // caller. Without this step, freeing later with `len` instead of `capacity` would corrupt the
-    // allocator.
-    const data_slice = decompressed_values.toOwnedSlice(allocator) catch |err| return errorToInt(err);
+    // of size `len` and transfers ownership of the data from the ArrayList to the caller. Without
+    // this step, freeing later with `len` instead of `capacity` would corrupt the allocator.
+    defer decompressed_values_array_list.deinit(allocator); // Prevent memory leaks if toOwnedSlice() fail.
+    const decompressed_values_slice = decompressed_values_array_list.toOwnedSlice(allocator) catch |err| return errorToIndex(err);
 
-    decompressed_values_array.data = data_slice.ptr;
-    decompressed_values_array.len = data_slice.len;
+    decompressed_values.data = decompressed_values_slice.ptr;
+    decompressed_values.len = decompressed_values_slice.len;
 
     return 0;
 }
 
-/// Extracts indices and coefficients from a compressed buffer using the method encoded in the last byte.
-/// On success, fills `indices_values_array` and `coefficients_values_array` with extracted values.
-/// Extraction layouts depend on the compression method; see `extractors.zig` for details.
-/// On success zero is returned, and the following non-zero values are returned on errors:
+/// Extracts indices and coefficients from `compressed_values` using the method encoded in the last byte.
+/// On success, fills `indices` and `coefficients` with extracted values. Extraction layouts depend on
+/// the compression method; see `extractors.zig` for details. On success zero is returned, and the following
+/// non-zero values are returned on errors:
 /// - 1) Unknown compression method.
 /// - 2) Unsupported input.
 /// - 3) Invalid configuration.
@@ -140,40 +138,39 @@ export fn decompress(
 /// - 9) Unsupported method.
 /// - 10) Out of memory.
 export fn extract(
-    compressed_values_array: CompressedValues,
-    indices_values_array: *IndicesValues,
-    coefficients_values_array: *CoefficientsValues,
+    compressed_values: CompressedValues,
+    indices: *Indices,
+    coefficients: *Coefficients,
 ) i32 {
-    const compressed_values = compressed_values_array.data[0..compressed_values_array.len];
-    if (compressed_values.len == 0) return 2;
+    const compressed_values_slice = compressed_values.data[0..compressed_values.len];
+    if (compressed_values_slice.len == 0) return 2;
 
-    var indices = ArrayList(u64).empty;
-    var coefficients = ArrayList(f64).empty;
+    var indices_array_list = ArrayList(u64).empty;
+    var coefficients_array_list = ArrayList(f64).empty;
 
     // Return indices and coefficients together. We need to put the size of indices at front in a
     // u32 to split the values.
     tersets.extract(
         allocator,
-        compressed_values,
-        &indices,
-        &coefficients,
-    ) catch |e| return errorToInt(e);
+        compressed_values_slice,
+        &indices_array_list,
+        &coefficients_array_list,
+    ) catch |e| return errorToIndex(e);
 
-    const indices_slice = indices.toOwnedSlice(allocator) catch |err| return errorToInt(err);
-    indices_values_array.data = indices_slice.ptr;
-    indices_values_array.len = indices_slice.len;
+    const indices_slice = indices_array_list.toOwnedSlice(allocator) catch |err| return errorToIndex(err);
+    indices.data = indices_slice.ptr;
+    indices.len = indices_slice.len;
 
-    const coefficients_slice = coefficients.toOwnedSlice(allocator) catch |err| return errorToInt(err);
-
-    coefficients_values_array.data = coefficients_slice.ptr;
-    coefficients_values_array.len = coefficients_slice.len;
+    const coefficients_slice = coefficients_array_list.toOwnedSlice(allocator) catch |err| return errorToIndex(err);
+    coefficients.data = coefficients_slice.ptr;
+    coefficients.len = coefficients_slice.len;
 
     return 0;
 }
 
-/// Rebuilds a compressed buffer from provided indices and coefficients, using the specified method.
-/// On success, fills `compressed_values_array` with the rebuilt compressed stream (including method byte).
-/// Input arrays must match the expected layout for the method; see `extractors.zig` for details.
+/// Create a compressed buffer from provided indices and coefficients, using the specified method.
+/// On success, fills `compressed_values` with the rebuilt compressed values and the method byte.
+/// Input values must match the expected layout for the method; see `extractors.zig` for details.
 /// On success zero is returned, and the following non-zero values are returned on errors:
 /// - 1) Unknown compression method.
 /// - 2) Unsupported input.
@@ -186,80 +183,79 @@ export fn extract(
 /// - 9) Unsupported method.
 /// - 10) Out of memory.
 export fn rebuild(
-    indices_values_array: IndicesValues,
-    coefficients_values_array: CoefficientsValues,
-    compressed_values_array: *CompressedValues,
-    method_idx: u8,
+    indices_values: Indices,
+    coefficients: Coefficients,
+    compressed_values: *CompressedValues,
+    method_index: u8,
 ) i32 {
-    const method: Method = @enumFromInt(method_idx);
+    // Returning 1 is equivalent to returning Error.UnknownMethod.
+    if (method_index > tersets.getMaxMethodIndex()) return 1;
 
-    const indices = indices_values_array.data[0..indices_values_array.len];
-    const coefficients = coefficients_values_array.data[0..coefficients_values_array.len];
+    const indices_slices = indices_values.data[0..indices_values.len];
+    const coefficients_slices = coefficients.data[0..coefficients.len];
+    const method: Method = @enumFromInt(method_index);
 
-    var components_values = tersets.rebuild(
+    var compressed_values_array_list = tersets.rebuild(
         allocator,
-        indices,
-        coefficients,
+        indices_slices,
+        coefficients_slices,
         method,
-    ) catch |e| return errorToInt(e);
+    ) catch |e| return errorToIndex(e);
 
-    const components_slice = components_values.toOwnedSlice(allocator) catch |err| return errorToInt(err);
+    const compressed_values_slice = compressed_values_array_list.toOwnedSlice(allocator) catch |err| return errorToIndex(err);
 
-    compressed_values_array.data = components_slice.ptr;
-    compressed_values_array.len = components_slice.len;
+    compressed_values.data = compressed_values_slice.ptr;
+    compressed_values.len = compressed_values_slice.len;
 
     return 0;
 }
 
 /// Frees a `compressed_values` buffer previously produced by `compress`.
-/// This function is primarily used by the Python and C bindings.
+/// This function is designed to be used by the non-Zig language bindings.
 /// If used independently, ensure that the actual allocated size of
-/// `compressed_values.data` matches the value stored in `compressed_values.len`.
-/// A mismatch between these two values will corrupt the memory allocator state.
+/// `compressed_values.data` must matches the value stored in `compressed_values.len`.
+/// A mismatch between these will corrupt the memory allocator state.
 export fn freeCompressedValues(compressed_values: *CompressedValues) void {
-    freeValuesMemory(CompressedValues, compressed_values);
+    freeArray(CompressedValues, compressed_values);
 }
 
 /// Frees an `uncompressed_values` buffer previously produced by `decompress`.
-/// This function is primarily used by the Python and C bindings. If used independently,
-/// ensure that the actual allocated size of`uncompressed_values.data` matches the value
-/// stored in `uncompressed_values.len`. A mismatch between these two values will corrupt
-/// the memory allocator state.
+/// This function is designed to be used by the non-Zig language bindings.
+/// `uncompressed_values.data` must matches the value stored in `uncompressed_values.len`.
+/// A mismatch between these will corrupt the memory allocator state.
 export fn freeUncompressedValues(uncompressed_values: *UncompressedValues) void {
-    freeValuesMemory(UncompressedValues, uncompressed_values);
+    freeArray(UncompressedValues, uncompressed_values);
 }
 
-/// Frees a `coefficients_values` buffer previously produced by `extract`. This function
-/// is primarily used by the Python and C bindings. If used independently, ensure that
-/// the actual allocated size of `coefficients_values.data` matches the value stored in
-/// `coefficients_values.len`. A mismatch between these two values will corrupt
-/// the memory allocator state.
-export fn freeCoefficientValues(coefficients_values: *CoefficientsValues) void {
-    freeValuesMemory(CoefficientsValues, coefficients_values);
+/// Frees a `indices` buffer previously produced by `extract`.
+/// This function is designed to be used by the non-Zig language bindings.
+/// `indices.data` muts matches the value stored in `indices.len`.
+/// A mismatch between these will corrupt the memory allocator state.
+export fn freeIndices(indices: *Indices) void {
+    freeArray(Indices, indices);
 }
 
-/// Frees a `indices_values` buffer previously produced by `extract`.
-/// This function is primarily used by the Python and C bindings.
-/// If used independently, ensure that the actual allocated size of
-/// `indices_values.data` matches the value stored in `indices_values.len`.
-/// A mismatch between these two values will corrupt the memory allocator state.
-export fn freeIndicesValues(indices_values: *IndicesValues) void {
-    freeValuesMemory(IndicesValues, indices_values);
+/// Frees a `coefficients` buffer previously produced by `extract`.
+/// This function is designed to be used by the non-Zig language bindings.
+/// `coefficients.data` must matches the value stored in `coefficients.len`.
+/// A mismatch between these will corrupt the memory allocator state.
+export fn freeCoefficients(coefficients: *Coefficients) void {
+    freeArray(Coefficients, coefficients);
 }
 
-/// Frees a `values` struct previously produced by the TerseTS library. This function is an
-/// internal helper used by the exported `free*Values` functions for the C and Python bindings.
-/// It checks the `ValuesType` at compile time to ensure only supported types are freed.
-/// If the `values.len` is zero, it indicates that the memory has already been freed.
-fn freeValuesMemory(comptime ValuesType: type, values: *ValuesType) void {
-    if (ValuesType != CompressedValues and ValuesType != UncompressedValues and
-        ValuesType != CoefficientsValues and ValuesType != IndicesValues)
+/// Frees an `array` struct previously produced by the TerseTS library. This function is an
+/// internal helper used by the exported `free*` functions for the non-Zig language bindings.
+/// It checks the `Type` at compile time to ensure only supported types are freed.
+/// If the `array.len` is zero, it indicates that the memory has already been freed.
+fn freeArray(comptime Type: type, array: *Type) void {
+    if (Type != CompressedValues and Type != UncompressedValues and
+        Type != Coefficients and Type != Indices)
     {
-        @compileError("freeValuesMemory: unsuported ValuesType"); // Invalid type for freeing values.
+        @compileError("freeArray: unsuported Type"); // Invalid type for freeing array.
     }
-    if (values.len != 0) {
-        allocator.free(values.data[0..values.len]);
-        values.len = 0; // Mark it as freed.
+    if (array.len != 0) {
+        allocator.free(array.data[0..array.len]);
+        array.len = 0; // Mark it as freed.
     }
 }
 
@@ -269,7 +265,7 @@ fn Array(comptime data_type: type) type {
 }
 
 // Convert `err` to an `i32` as is not guaranteed to be stable `@intFromError`.
-fn errorToInt(err: Error) i32 {
+fn errorToIndex(err: Error) i32 {
     switch (err) {
         Error.UnknownMethod => return 1,
         Error.UnsupportedInput => return 2,
@@ -441,11 +437,11 @@ test "free allocated compressed values" {
     };
 
     // First free should release the array and zero the length.
-    freeValuesMemory(CompressedValues, &compressed_values);
+    freeArray(CompressedValues, &compressed_values);
     try testing.expectEqual(@as(usize, 0), compressed_values.len);
 
     // Second free should no try to deallocate again.
-    freeValuesMemory(CompressedValues, &compressed_values);
+    freeArray(CompressedValues, &compressed_values);
     try testing.expectEqual(@as(usize, 0), compressed_values.len);
 }
 
@@ -459,9 +455,9 @@ test "free allocated uncompressed values" {
         .len = array.len,
     };
 
-    freeValuesMemory(UncompressedValues, &uncompressed_values);
+    freeArray(UncompressedValues, &uncompressed_values);
     try testing.expectEqual(@as(usize, 0), uncompressed_values.len);
 
-    freeValuesMemory(UncompressedValues, &uncompressed_values);
+    freeArray(UncompressedValues, &uncompressed_values);
     try testing.expectEqual(@as(usize, 0), uncompressed_values.len);
 }

@@ -127,31 +127,31 @@ Decompress a TerseTS-compressed `AbstractVector` into an `AbstractVector` of `Fl
 function decompress(compressed_values::AbstractVector{UInt8})::AbstractVector{Float64}
     compressed_values_struct =
         CompressedValues(pointer(compressed_values), length(compressed_values))
-    uncompressed_values_struct_ref = Ref{UncompressedValues}(UncompressedValues(C_NULL, 0))
+    decompressed_values_struct_ref = Ref{UncompressedValues}(UncompressedValues(C_NULL, 0))
 
     tersets_error = @ccall library.decompress(
         compressed_values_struct::CompressedValues,
-        uncompressed_values_struct_ref::Ref{UncompressedValues},
+        decompressed_values_struct_ref::Ref{UncompressedValues},
     )::Cint
 
     if tersets_error != 0
         error("decompress failed: $tersets_error")
     end
 
-    uncompressed_values_struct = uncompressed_values_struct_ref[]
+    decompressed_values_struct = decompressed_values_struct_ref[]
 
-    uncompressed_values_view = unsafe_wrap(
+    decompressed_values_view = unsafe_wrap(
         Vector{Float64},
-        uncompressed_values_struct.data,
-        uncompressed_values_struct.len,
+        decompressed_values_struct.data,
+        decompressed_values_struct.len,
     )
-    uncompressed_values = copy(uncompressed_values_view)
+    decompressed_values = copy(decompressed_values_view)
 
     @ccall library.freeUncompressedValues(
-        uncompressed_values_struct_ref::Ref{UncompressedValues},
+        decompressed_values_struct_ref::Ref{UncompressedValues},
     )::Cvoid
 
-    uncompressed_values
+    decompressed_values
 end
 
 end
