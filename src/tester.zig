@@ -626,10 +626,10 @@ pub fn testCompressAndDecompress(
     ));
 }
 
-// Replace each normal value in `uncompressed_values` with a positive +inf, -inf, or NaN
-// with the passed probability. The non-normal values are written to `uncompressed_values`
-// in the previously listed order, thus a +inf maybe overwritten by a -inf
-// and so on. The probabilities are asserted to be between zero and one.
+/// Replace each normal value in `uncompressed_values` with a positive +inf, -inf, or NaN
+/// with the passed probability. The non-normal values are written to `uncompressed_values`
+/// in the previously listed order, thus a +inf maybe overwritten by a -inf
+/// and so on. The probabilities are asserted to be between zero and one.
 pub fn replaceNormalValues(
     uncompressed_values: *ArrayList(f64),
     positive_infinity_probability: f32,
