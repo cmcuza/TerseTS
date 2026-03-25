@@ -333,7 +333,7 @@ Please read our [contributing guidelines](.github/CONTRIBUTING.md) before submit
 # Citing
 If TerseTS is used in a project that leads to a publication, please acknowledge this by citing our [open-access paper](https://openproceedings.org/2026/conf/edbt/paper-286.pdf).
 
-```
+```bibtex
 @inproceedings{TerseTS:Demo:2026,
   author       = {Carlos Enrique Mu{\~{n}}iz{-}Cuza and
                   S{\o}ren Kejser Jensen and
