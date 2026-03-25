@@ -330,5 +330,25 @@ fn main() -> Result<()> {
 # Contributing:  
 Please read our [contributing guidelines](.github/CONTRIBUTING.md) before submitting an [issue](https://github.com/cmcuza/TerseTS/issues/new/choose) or a [pull request](https://github.com/cmcuza/TerseTS/compare).
 
+# Citing
+If TerseTS is used in a project that leads to a publication, please acknowledge this by citing our [open-access paper](https://openproceedings.org/2026/conf/edbt/paper-286.pdf).
+
+```
+@inproceedings{TerseTS:Demo:2026,
+  author       = {Carlos Enrique Mu{\~{n}}iz{-}Cuza and
+                  S{\o}ren Kejser Jensen and
+                  Tom Louis Klein and
+                  Sabina Bakhtiiarova and
+                  Matthias Boehm and
+                  Torben Bach Pedersen},
+  title        = {TerseTS: {A} Framework for Time Series Compression},
+  booktitle    = {Proceedings 29th International Conference on Extending Database Technology (EDBT)},
+  pages        = {760--763},
+  publisher    = {OpenProceedings.org},
+  year         = {2026},
+  doi          = {10.48786/EDBT.2026.74}
+}
+```
+
 # License
 TerseTS is licensed under version 2.0 of the Apache License and a copy of the license is bundled with the program.
