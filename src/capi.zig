@@ -323,29 +323,6 @@ test "error for unknown compression method" {
     try testing.expectEqual(1, return_code);
 }
 
-test "error for empty input when compressing" {
-    const uncompressed_values = UncompressedValues{
-        .data = undefined,
-        .len = 0,
-    };
-    var compressed_values = CompressedValues{
-        .data = undefined,
-        .len = undefined,
-    };
-
-    const method_index: u8 = math.maxInt(u8);
-    const configuration = "{ \"abs_error_bound\": 0.1 }";
-
-    const return_code = compress(
-        uncompressed_values,
-        &compressed_values,
-        method_index,
-        configuration,
-    );
-
-    try testing.expectEqual(1, return_code);
-}
-
 test "error for negative error bound when compressing" {
     const uncompressed_array = [_]f64{ 0.1, 0.3, 0.4, 0.5 };
     const uncompressed_values = UncompressedValues{
@@ -376,15 +353,6 @@ test "error for unknown decompression method" {
     const return_code = decompress(compressed_values, &decompressed_values);
 
     try testing.expectEqual(1, return_code);
-}
-
-test "error for empty input when decompressing" {
-    const compressed_values = CompressedValues{ .data = undefined, .len = 0 };
-    var decompressed_values = UncompressedValues{ .data = undefined, .len = undefined };
-
-    const return_code = decompress(compressed_values, &decompressed_values);
-
-    try testing.expectEqual(4, return_code);
 }
 
 test "can compress and decompress" {

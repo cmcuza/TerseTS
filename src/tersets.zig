@@ -103,16 +103,13 @@ pub fn compress(
 ) Error!ArrayList(u8) {
     var compressed_values = ArrayList(u8).empty;
 
-    // If the input is one or zero elements, just store them uncompressed disregarding
-    // the compression method.
-    if (uncompressed_values.len < 2) {
-        if (uncompressed_values.len == 1) {
-            const value_as_bytes: [8]u8 = @bitCast(uncompressed_values[0]);
-            try compressed_values.appendSlice(allocator, value_as_bytes[0..]);
-            return compressed_values;
-        }
-        // The `uncompressed_values` is empty.
+    // Handle the trivial cases of zero or one element.
+    if (uncompressed_values.len == 0) {
         return Error.UnsupportedInput;
+    } else if (uncompressed_values.len == 1) {
+        const value_as_bytes: [8]u8 = @bitCast(uncompressed_values[0]);
+        try compressed_values.appendSlice(allocator, value_as_bytes[0..]);
+        return compressed_values;
     }
 
     switch (method) {
@@ -264,12 +261,12 @@ pub fn decompress(
     allocator: Allocator,
     compressed_values: []const u8,
 ) Error!ArrayList(f64) {
-    if (compressed_values.len == 0) return Error.CorruptedCompressedData;
-
     var decompressed_values = ArrayList(f64).empty;
 
-    // Handle the trivial case of one element.
-    if (compressed_values.len == 8) {
+    // Handle the trivial cases of zero or one element.
+    if (compressed_values.len == 0) {
+        return decompressed_values;
+    } else if (compressed_values.len == 8) {
         const value: f64 = @bitCast(compressed_values[0..8].*);
         try decompressed_values.append(allocator, value);
         return decompressed_values;
@@ -343,7 +340,8 @@ pub fn extract(
     indices: *ArrayList(u64),
     coefficients: *ArrayList(f64),
 ) Error!void {
-    if (compressed_values.len == 0) return Error.UnsupportedInput;
+    // Handle the trivial cases of zero or one element.
+    if (compressed_values.len <= 8) return Error.UnsupportedInput;
 
     const method_index: u8 = compressed_values[compressed_values.len - 1];
     if (method_index > getMaxMethodIndex()) return Error.UnknownMethod;
