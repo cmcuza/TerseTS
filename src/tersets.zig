@@ -105,7 +105,7 @@ pub fn compress(
 
     // Handle the trivial cases of zero or one element.
     if (uncompressed_values.len == 0) {
-        return Error.UnsupportedInput;
+        return compressed_values;
     } else if (uncompressed_values.len == 1) {
         const value_as_bytes: [8]u8 = @bitCast(uncompressed_values[0]);
         try compressed_values.appendSlice(allocator, value_as_bytes[0..]);
