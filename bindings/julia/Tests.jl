@@ -72,11 +72,26 @@ end
     end
 end
 
+@testset "Compress with Discrete Fourier Transform Method and Decompress" begin
+    n = 100
+    uncompressed_values = randn(n) .* 1e3 .+ 0.123
+
+    compressed_values = TerseTS.compress(
+        uncompressed_values,
+        TerseTS.DiscreteFourierTransform,
+        "{\"number_of_coefficients\": 10}",
+    )
+    decompressed_values = TerseTS.decompress(compressed_values)
+
+    @test length(decompressed_values) == length(uncompressed_values)
+end
+
 @testset "Julia Method Enum Matches C and Zig Enums" begin
     # Get repository root
     repo_root = normpath(joinpath(@__DIR__, "..", ".."))
     c_file = joinpath(repo_root, "bindings", "c", "tersets.h")
     zig_file = joinpath(repo_root, "src", "tersets.zig")
+    rust_file = joinpath(repo_root, "bindings", "rust", "src", "lib.rs")
 
     # Helper function to extract enum members from C header
     function extract_c_enum()
@@ -136,9 +151,32 @@ end
         return members
     end
 
+    # Helper function to extract enum members from Rust source
+    function extract_rust_enum()
+        content = read(rust_file, String)
+        # Match pub enum Method { ... }
+        m = match(r"pub\s+enum\s+Method\s*\{([^}]*)\}", content)
+        if m === nothing
+            error("Could not find Method enum in lib.rs")
+        end
+
+        body = m.captures[1]
+        members = String[]
+
+        for line in split(body, '\n')
+            line = strip(line)
+            line = rstrip(line, ',')
+            isempty(line) && continue
+            push!(members, line)
+        end
+
+        return members
+    end
+
     # Extract enums from source files
     c_members, c_values = extract_c_enum()
     zig_members = extract_zig_enum()
+    rust_members = extract_rust_enum()
 
     # Get Julia enum members
     julia_members = String[string(m) for m in instances(TerseTS.Method)]
@@ -147,7 +185,7 @@ end
     # Test that all enums match
     @test zig_members == c_members
     @test zig_members == julia_members
-
+    @test zig_members == rust_members
     # Test that C enum values are sequential starting from 0
     @test c_values == collect(0:(length(c_members)-1))
 
