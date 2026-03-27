@@ -1,4 +1,4 @@
-<h1 align="center">
+<h1 align="center"> mention
   <img src="docs/tersets.svg" alt="TerseTS", width="400">
 </h1>
 
@@ -331,7 +331,7 @@ fn main() -> Result<()> {
 Please read our [contributing guidelines](.github/CONTRIBUTING.md) before submitting an [issue](https://github.com/cmcuza/TerseTS/issues/new/choose) or a [pull request](https://github.com/cmcuza/TerseTS/compare).
 
 # Citing
-If TerseTS is used in a project that leads to a publication, please acknowledge this by citing our [open-access paper](https://openproceedings.org/2026/conf/edbt/paper-286.pdf).
+If TerseTS is used in a project that leads to a publication, please acknowledge this by citing our [open-access demo paper](https://openproceedings.org/2026/conf/edbt/paper-286.pdf). The demo was presented at EDBT 2026 in Tampere and was an Honorable Mention for the Best Demo Award.
 
 ```bibtex
 @inproceedings{TerseTS:Demo:2026,
