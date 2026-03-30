@@ -1,10 +1,10 @@
-<h1 align="center"> mention
+<h1 align="center"> 
   <img src="docs/tersets.svg" alt="TerseTS", width="400">
 </h1>
 
 :warning: **The current version of TerseTS is beta software and not yet ready for production use.**
 
-TerseTS is a library that provides methods for lossless and lossy compressing time series. To match existing literature, the lossy compression methods are organized in the hierarchy below based on [Time Series Compression Survey](https://dl.acm.org/doi/10.1145/3560814). Each category represents a distinct approach to time series compression. The library is implemented in Zig and provides a Zig-API and C-API with [bindings](#usage) for other languages.
+TerseTS is a library that provides methods for lossless and lossy compression of time series. To match existing literature, the lossy compression methods are organized in the hierarchy below based on [Time Series Compression Survey](https://dl.acm.org/doi/10.1145/3560814). Each category represents a distinct approach to time series compression. The library is implemented in Zig and provides a Zig-API and C-API with [bindings](#usage) for other languages.
 
 <p align="center">
    <img src="docs/figure.svg" alt="Compression Techniques Hierarchy" width="600">
@@ -98,7 +98,7 @@ pub fn main() void {
 <details>
 <summary><strong>C Usage Example</strong></summary>
 
-TerseTS provides `bindings/c/tersets.h` as API for C which should be included in the source code, i.e., `#include "tersets.h"`. The TerseTS library must also be [linked](#linking) to the project. The two main functions `compress()` and `decompress()` are exposed as follows:
+TerseTS provides `bindings/c/tersets.h` as API for C, which should be included in the source code, i.e., `#include "tersets.h"`. The TerseTS library must also be [linked](#linking) to the project. The two main functions `compress()` and `decompress()` are exposed as follows:
 
 - **`int32_t compress(struct UncompressedValues uncompressed_values, struct CompressedValues *compressed_values, uint8_t method, const char *configuration)`:**
    - **Parameters:**
