@@ -861,7 +861,6 @@ pub fn generateBoundedRandomValues(
         try uncompressed_values.append(allocator, bounded_value);
     }
 }
-
 /// Generate a random number of `f64` values following a linear function with random slope
 /// and intercept, and add them to `uncompressed_values`. The noise added to each value is
 /// a random value in the range [-0.5%, 0.5%] times the absolute value. The generated
