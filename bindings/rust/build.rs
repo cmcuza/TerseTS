@@ -25,7 +25,10 @@ fn main() {
     // Make the optimization level of TerseTS and Rust bindings match.
     let build_profile = env::var("PROFILE").unwrap();
     let optimize = match build_profile.as_str() {
-        "debug" => "-Doptimize=Debug",
+        // `-Doptimize=Debug` in Zig enables extra safety/runtime instrumentation
+        // that Rust's link step is not automatically satisfying. 
+        // `-Doptimize=ReleaseFast` in Zig avoids this instrumentation.
+        "debug" => "-Doptimize=ReleaseFast",
         "release" => "-Doptimize=ReleaseFast",
         build_profile => {
             println!(
@@ -36,10 +39,17 @@ fn main() {
         }
     };
 
+    let zig_args = vec![
+        "build".to_string(),
+        "-Dlinking=static".to_string(),
+        "-Dpic=true".to_string(),
+        optimize.to_string(),
+    ];
+
     // Build the TerseTS library into a statically linked library.
     let output = Command::new("zig")
         .current_dir(repository_root)
-        .args(["build", "-Dlinking=static", "-Dpic=true", optimize])
+        .args(&zig_args)
         .output()
         .unwrap();
 
