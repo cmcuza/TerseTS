@@ -659,7 +659,7 @@ test "Create incrementally convex hull with known result" {
 
 test "Create incrementally a convex hull with random elements" {
     const allocator = testing.allocator;
-    const seed: u64 = @bitCast(time.milliTimestamp());
+    const seed: u64 = @bitCast(tester.milliTimestamp());
     var rnd = std.Random.DefaultPrng.init(seed);
     const random = rnd.random();
 
@@ -901,7 +901,7 @@ test "Merge not-in-place convex hulls with random elements" {
 
 test "Merge in-place single element's convex hull with other convex hull" {
     const allocator = testing.allocator;
-    const seed: u64 = @bitCast(time.milliTimestamp());
+    const seed: u64 = @bitCast(tester.milliTimestamp());
     var rnd = std.Random.DefaultPrng.init(seed);
     const random = rnd.random();
 
@@ -924,7 +924,7 @@ test "Merge in-place single element's convex hull with other convex hull" {
 
 test "Merge not-in-place single element's convex hull with other convex hull" {
     const allocator = testing.allocator;
-    const seed: u64 = @bitCast(time.milliTimestamp());
+    const seed: u64 = @bitCast(tester.milliTimestamp());
     var rnd = std.Random.DefaultPrng.init(seed);
     const random = rnd.random();
 
@@ -950,7 +950,7 @@ test "Merge not-in-place single element's convex hull with other convex hull" {
 
 test "Merge in-place convex hull with single element's convex hull" {
     const allocator = testing.allocator;
-    const seed: u64 = @bitCast(time.milliTimestamp());
+    const seed: u64 = @bitCast(tester.milliTimestamp());
     var rnd = std.Random.DefaultPrng.init(seed);
     const random = rnd.random();
 
@@ -974,7 +974,7 @@ test "Merge in-place convex hull with single element's convex hull" {
 
 test "Merge not-in-place convex hull with single element's convex hull" {
     const allocator = testing.allocator;
-    const seed: u64 = @bitCast(time.milliTimestamp());
+    const seed: u64 = @bitCast(tester.milliTimestamp());
     var rnd = std.Random.DefaultPrng.init(seed);
     const random = rnd.random();
 
@@ -1001,7 +1001,7 @@ test "Merge not-in-place convex hull with single element's convex hull" {
 
 test "Merge not-in-place does not modify the convex hulls one and two" {
     const allocator = testing.allocator;
-    const seed: u64 = @bitCast(time.milliTimestamp());
+    const seed: u64 = @bitCast(tester.milliTimestamp());
     var rnd = std.Random.DefaultPrng.init(seed);
     const random = rnd.random();
 
@@ -1080,7 +1080,7 @@ test "Compute max error with known points and linear function" {
 
 test "Compute max error with random points and linear function" {
     const allocator = testing.allocator;
-    const seed: u64 = @bitCast(time.milliTimestamp());
+    const seed: u64 = @bitCast(tester.milliTimestamp());
     var rnd = std.Random.DefaultPrng.init(seed);
     const random = rnd.random();
 

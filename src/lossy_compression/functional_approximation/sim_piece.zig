@@ -672,7 +672,7 @@ test "f64 context can hash" {
         f64,
     ).init(allocator);
     defer f64_hash_map.deinit();
-    var rnd = std.Random.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
+    var rnd = std.Random.DefaultPrng.init(@as(u64, @bitCast(tester.milliTimestamp())));
 
     // Add 100 elements into the HashMap. For each element, add two more with small deviation of
     // 1e-16 to test that the numbers are different and a new key is created.
@@ -710,7 +710,7 @@ test "hashmap can map f64 to segment metadata array list" {
     var f64_usize_hash_map = shared_structs.HashMapf64(usize).init(allocator);
     defer f64_usize_hash_map.deinit();
 
-    var rnd = std.Random.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())));
+    var rnd = std.Random.DefaultPrng.init(@as(u64, @bitCast(tester.milliTimestamp())));
 
     for (0..200) |_| {
         const rand_number = @floor((rnd.random().float(f64) - 0.5) * 100) / 10;

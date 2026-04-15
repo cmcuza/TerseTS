@@ -25,8 +25,7 @@ const Error = tersets.Error;
 const Method = tersets.Method;
 
 /// Global memory allocator used by tersets.
-var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-const allocator = gpa.allocator();
+const allocator = std.heap.smp_allocator;
 
 /// A pointer to uncompressed values and the number of values.
 pub const UncompressedValues = Array(f64);
@@ -277,6 +276,7 @@ fn errorToIndex(err: Error) i32 {
         Error.ByteStreamError => return 8,
         Error.UnsupportedMethod => return 9,
         Error.OutOfMemory => return 10,
+        Error.WriteFailed => return 11,
     }
 }
 

@@ -653,7 +653,7 @@ test "Hash PriorityQueue with hash_context for MergeError" {
 
 test "Histogram insert, and merge test number buckets in PWCH" {
     // Initialize a random number generator.
-    const seed: u64 = @bitCast(time.milliTimestamp());
+    const seed: u64 = @bitCast(tester.milliTimestamp());
     var prng = std.Random.DefaultPrng.init(seed);
     const random = prng.random();
 
@@ -721,7 +721,7 @@ test "Simple fixed values test of PWCH" {
 
 test "Fixed cluster number with random values for PWCH" {
     // Initialize a random number generator.
-    const seed: u64 = @bitCast(time.milliTimestamp());
+    const seed: u64 = @bitCast(tester.milliTimestamp());
     var prng = std.Random.DefaultPrng.init(seed);
     const random = prng.random();
 

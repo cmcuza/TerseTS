@@ -36,6 +36,7 @@ const expectError = testing.expectError;
 
 const tersets = @import("../tersets.zig");
 const Error = tersets.Error;
+const tester = @import("../tester.zig");
 
 /// A generic priority queue for storing generic data with hashed indexing for fast updates.
 /// Similar as with Zig's std.PriorityQueue, initialize with `init`. Provide `compareFn` that
@@ -274,7 +275,7 @@ test "add and remove min keys of simple values in HashedPriorityQueue" {
     defer list.deinit(allocator);
 
     // Initialize a random number generator.
-    const seed: u64 = @bitCast(time.milliTimestamp());
+    const seed: u64 = @bitCast(tester.milliTimestamp());
     var rnd = std.Random.DefaultPrng.init(seed);
 
     for (0..100) |_| {
