@@ -43,6 +43,8 @@ const ParameterSpacePoint = shared_structs.ParameterSpacePoint;
 
 const tester = @import("../../tester.zig");
 
+const ext_poly = @import("../../utilities/extended_polygon.zig");
+
 /// Compresses `uncompressed_values` within `error_bound` using the "Mixed-Type PLA" algorithm.
 /// The function writes the result to `compressed_values`.  The `allocator` is used for
 /// memory allocation of  intermediate data structures and the `method_configuration` parser. The
@@ -96,7 +98,10 @@ pub fn compress(
     const dynamic_eps = @min(1e-7, @max(1e-14, normalized_error_bound * 1e-4));
     const safety_margin = dynamic_eps * 2.0;
     const safe_error_bound = normalized_error_bound - safety_margin;
-    const tolerances = Tolerances{ .val = dynamic_eps, .time = sign_time_diff };
+    const tolerances = ext_poly.Tolerances{
+        .val = dynamic_eps,
+        .time = ext_poly.sign_time_diff,
+    };
 
     // Run the Mixed-Type PLA algorithm on normalized data.
     var state =
@@ -524,7 +529,7 @@ fn readSegments(
         const end_point = segment_data[it];
         it += 1;
 
-        const line = linearFromTwoPoints(start_point, end_point);
+        const line = ext_poly.linearFromTwoPoints(start_point, end_point);
         const connected = knot_flags[knot_idx];
 
         try line_segments.append(allocator, .{
@@ -550,7 +555,7 @@ fn readSegments(
     // Handle last segment if there are remaining points.
     if (it < segment_data.len) {
         const end_point = segment_data[it];
-        const line = linearFromTwoPoints(start_point, end_point);
+        const line = ext_poly.linearFromTwoPoints(start_point, end_point);
 
         try line_segments.append(allocator, .{
             .start_time = start_point.index,
@@ -563,242 +568,6 @@ fn readSegments(
 /// Linkage between consecutive pieces: `connected` continues from the previous end,
 /// `disjoint` starts independently, and `mixed_link` lets the DP choose dynamically.
 const PieceType = enum { connected, disjoint, mixed_link };
-
-/// Marks whether a convex chain is the upper or lower boundary of the feasible
-/// parameter-space polygon; used to select geometric test directions.
-const ChainType = enum { upper, lower };
-
-/// Direction of a half-plane constraint induced by `(t, m +/- delta)`: keep points
-/// above (`point_to_above`) or below (`point_to_below`) the boundary line.
-const HalfplaneDirection = enum { point_to_above, point_to_below };
-
-/// Result of intersecting a half-plane with a convex chain: `contain_all` keeps
-/// everything, `contain_some` trims to a smaller non-empty chain, `contain_none`
-/// excludes all, and `non_exist` means the chain was already empty.
-const ContainmentResult = enum { non_exist, contain_none, contain_some, contain_all };
-
-/// Three-way point classification relative to a boundary: strictly inside
-/// (`include`), strictly outside (`exclude`), or within tolerance (`touch`).
-const PointRelation = enum { exclude, touch, include };
-
-/// Selects which extremal polygon vertex to retrieve: right-most (upper chain)
-/// or left-most (lower chain).
-const EndmostSide = enum { right_most, left_most };
-
-/// Value-space comparison tolerance: values differing less than this are equal.
-const sign_value_diff: f64 = 0.0000001;
-
-/// Time-space comparison tolerance: timestamps differing less than this coincide.
-const sign_time_diff: f64 = 0.0000001;
-
-/// Large sentinel used as an effectively unlimited convex-chain size when `eps == 0`.
-const max_uni: i64 = 222222222;
-
-/// Dynamic value/time tolerances computed in `compress()` and threaded through
-/// algorithm structs so geometric tests scale with data amplitude.
-const Tolerances = struct {
-    val: f64,
-    time: f64,
-};
-
-/// Default tolerances for contexts that bypass dynamic initialization (e.g. tests).
-const default_tols =
-    Tolerances{ .val = sign_value_diff, .time = sign_time_diff };
-
-/// Classify `val` as `.include`, `.exclude`, or `.touch` using tolerance `tol`.
-fn judgeValueByTwoSides(val: f64, tol: f64) PointRelation {
-    if (val > tol) return .include;
-    if (val < -tol) return .exclude;
-    return .touch;
-}
-
-/// Evaluate linear function `f` at `x` as `f.slope * x + f.intercept`.
-fn evaluateLinear(f: LinearFunction, x: f64) f64 {
-    return f.slope * x + f.intercept;
-}
-
-/// Build the unique line through `p1` and `p2`; if timestamps are near-identical
-/// (`1e-10`), return a horizontal line through `p1.value`.
-fn linearFromTwoPoints(p1: ContinousPoint, p2: ContinousPoint) LinearFunction {
-    if (@abs(p1.index - p2.index) < 1e-10) {
-        return .{ .slope = 0.0, .intercept = p1.value };
-    }
-    const slope = (p1.value - p2.value) / (p1.index - p2.index);
-    // Point-slope evaluation prevents precision loss on large coordinates
-    const intercept = p1.value - slope * p1.index;
-    return .{ .slope = slope, .intercept = intercept };
-}
-
-/// Build a line through point `p` with given `slope`.
-fn linearFromPointAndSlope(p: ContinousPoint, slope: f64) LinearFunction {
-    return .{ .slope = slope, .intercept = p.value - slope * p.index };
-}
-
-/// Convert parameter-space point `(x, y)` plus `shift` into primal line
-/// `(slope=x, intercept=y - x * shift).
-fn linearFromParamPoint(
-    pp: ParameterSpacePoint,
-    shift: f64,
-) LinearFunction {
-    return .{
-        .slope = pp.x_axis,
-        .intercept = pp.y_axis - pp.x_axis * shift,
-    };
-}
-
-/// Compute the parameter-space intersection of two lines; returns `null` for
-///  near-parallel lines (`|slope diff| < 1e-10`).
-fn intersectTwoLines(
-    l1: LinearFunction,
-    l2: LinearFunction,
-) ?ParameterSpacePoint {
-    if (@abs(l1.slope - l2.slope) < 1e-10) return null;
-
-    const x = (l2.intercept - l1.intercept) / (l1.slope - l2.slope);
-    // Evaluate y from the first line instead of cross-multiplying
-    const y = l1.slope * x + l1.intercept;
-
-    return .{
-        .x_axis = x,
-        .y_axis = y,
-    };
-}
-
-/// Classify a point against half-plane (`line`, `direction`) as inside,
-/// outside, or touching using tolerance `tol`.
-fn isInnerPoint(
-    line: LinearFunction,
-    p: ContinousPoint,
-    direction: HalfplaneDirection,
-    tol: f64,
-) PointRelation {
-    var diff = evaluateLinear(line, p.index);
-    if (direction == .point_to_above) {
-        diff = p.value - diff;
-    } else {
-        diff = diff - p.value;
-    }
-    return judgeValueByTwoSides(diff, tol);
-}
-
-/// Parameter-space version of `isInnerPoint` using `p.x_axis` for evaluation
-/// and `p.y_axis` for comparison.
-fn isInnerParamPoint(
-    line: LinearFunction,
-    p: ParameterSpacePoint,
-    direction: HalfplaneDirection,
-    tol: f64,
-) PointRelation {
-    var diff = evaluateLinear(line, p.x_axis);
-    if (direction == .point_to_above) {
-        diff = p.y_axis - diff;
-    } else {
-        diff = diff - p.y_axis;
-    }
-    return judgeValueByTwoSides(diff, tol);
-}
-
-/// Vertical error tube at one timestamp expanded by `delta`: `upper=(t,m+delta)`
-/// and `lower=(t,m-delta)`. This is the core input unit for polygon clipping.
-const DataSegment = struct {
-    upper: ContinousPoint,
-    lower: ContinousPoint,
-
-    /// Build a `DataSegment` from one point and error bound `delta`.
-    fn fromPointAndDelta(
-        point: ContinousPoint,
-        delta: f64,
-    ) DataSegment {
-        return .{
-            .upper = .{ .index = point.index, .value = point.value + delta },
-            .lower = .{ .index = point.index, .value = point.value - delta },
-        };
-    }
-
-    /// Create a zero-initialized `DataSegment`.
-    fn empty() DataSegment {
-        return .{
-            .upper = .{ .index = 0.0, .value = 0.0 },
-            .lower = .{ .index = 0.0, .value = 0.0 },
-        };
-    }
-
-    /// Return segment midpoint value, used as a degenerate fallback.
-    fn midpointValue(self: DataSegment) f64 {
-        return (self.upper.value + self.lower.value) / 2.0;
-    }
-
-    /// Return whether upper/lower timestamps coincide within `tols_time`.
-    fn isVertical(self: DataSegment, tolerances: Tolerances) bool {
-        return @abs(self.upper.index - self.lower.index) < tolerances.time;
-    }
-
-    /// Intersect extreme line `exl` with this tube and write result to `dp`.
-    /// For vertical tubes evaluate at tube time; otherwise intersect against the
-    /// line through `(upper, lower)`.
-    fn hittingLine(
-        self: DataSegment,
-        dp: *ContinousPoint,
-        exl: LinearFunction,
-        tolerances: Tolerances,
-    ) void {
-        if (self.isVertical(tolerances)) {
-            dp.* = .{
-                .index = self.upper.index,
-                .value = evaluateLinear(exl, self.upper.index),
-            };
-        } else {
-            const lw = linearFromTwoPoints(self.upper, self.lower);
-            if (@abs(lw.slope - exl.slope) > 1e-10) {
-                const t = (exl.intercept - lw.intercept) /
-                    (lw.slope - exl.slope);
-                // Evaluate the extreme line at time t
-                const m = exl.slope * t + exl.intercept;
-                dp.* = .{ .index = t, .value = m };
-            } else {
-                dp.* = .{
-                    .index = (self.upper.index + self.lower.index) / 2.0,
-                    .value = (self.upper.value + self.lower.value) / 2.0,
-                };
-            }
-        }
-    }
-};
-
-/// Chain vertex in the convex polygon: wraps a `ParameterSpacePoint` plus a
-/// `color` marker for intersection-generated vertices.
-const Edge = struct {
-    p: ParameterSpacePoint,
-    color: bool,
-};
-
-/// Half-plane constraint in `(k, b)` space defined by separating line `sep` and
-/// feasible-side `direction`; consumed by chain/polygon intersection routines.
-const Halfplane = struct {
-    sep: LinearFunction,
-    direction: HalfplaneDirection,
-
-    /// Classify parameter-space point `p` relative to this half-plane.
-    fn isInner(self: Halfplane, p: ParameterSpacePoint, tol: f64) PointRelation {
-        return isInnerParamPoint(self.sep, p, self.direction, tol);
-    }
-};
-
-/// Per-chain limits derived from algorithm parameters (`delta`, `eps`).
-const ChainMeters = struct {
-    size: i64,
-    thr: f64,
-
-    /// Compute chain meters from `delta` and `eps`: size is `ceil(4/eps)` when
-    /// `eps > 0`, else `max_uni`; threshold is `eps * delta`.
-    fn init(delta: f64, eps: f64) ChainMeters {
-        const size: i64 = if (eps > 0)
-            @intFromFloat(@ceil(4.0 / eps))
-        else
-            max_uni;
-        return .{ .size = size, .thr = eps * delta };
-    }
-};
 
 /// Compact fitting-window bounds used by DP; `tu`/`tg` define knot-placement
 /// range and default to `-1` (unset).
@@ -851,951 +620,19 @@ const Ck = struct {
 const LineSegment = struct {
     start_time: f64,
     end_time: f64,
-    line: LinearFunction,
+    line: ext_poly.LinearFunction,
 
     /// Evaluate segment line at time `t`.
     fn evaluate(self: LineSegment, t: f64) f64 {
-        return evaluateLinear(self.line, t);
-    }
-};
-
-/// Doubly-ended chain of polygon `Edge` vertices (upper or lower boundary) with a dedicated
-/// `extreme_vertex`. `padConvexChain` and `cutConvexChain` perform incremental half-plane clipping
-/// as new samples arrive.
-const ConvexChain = struct {
-    convex_type: ChainType,
-    edges: ArrayList(Edge),
-    extreme_vertex: ParameterSpacePoint,
-    has_extreme_vertex: bool,
-    tolerances: Tolerances,
-    allocator: Allocator,
-
-    /// Create an empty `ConvexChain` of the given type with no extreme vertex.
-    fn create(allocator: Allocator, convex_type: ChainType, tolerances: Tolerances) ConvexChain {
-        return .{
-            .convex_type = convex_type,
-            .edges = ArrayList(Edge).empty,
-            .extreme_vertex = .{ .x_axis = 0.0, .y_axis = 0.0 },
-            .has_extreme_vertex = false,
-            .tolerances = tolerances,
-            .allocator = allocator,
-        };
-    }
-
-    fn deinit(self: *ConvexChain) void {
-        self.edges.deinit(self.allocator);
-    }
-
-    /// Initialize chain with one or two start vertices plus extreme point. If `middle_vertex`
-    /// is null only `start_vertex` is added.
-    fn initializeChain(
-        self: *ConvexChain,
-        start_vertex: ParameterSpacePoint,
-        middle_vertex: ?ParameterSpacePoint,
-        extreme_vertex: ParameterSpacePoint,
-    ) Allocator.Error!void {
-        self.edges.clearRetainingCapacity();
-        try self.edges
-            .append(self.allocator, .{
-            .p = start_vertex,
-            .color = false,
-        });
-        if (middle_vertex) |middle| {
-            try self.edges
-                .append(self.allocator, .{
-                .p = middle,
-                .color = false,
-            });
-        }
-        self.extreme_vertex = extreme_vertex;
-        self.has_extreme_vertex = true;
-    }
-
-    /// Overwrite the current extreme vertex.
-    fn setExtremeVertex(self: *ConvexChain, vertex: ParameterSpacePoint) void {
-        self.extreme_vertex = vertex;
-    }
-
-    /// Return current extreme vertex.
-    fn getExtremeVertex(self: ConvexChain) ParameterSpacePoint {
-        return self.extreme_vertex;
-    }
-
-    /// Return approximate chain size metric used to bound complexity.
-    fn approximateStateSize(self: ConvexChain) usize {
-        const edge_count = self.edges.items.len;
-        if (self.has_extreme_vertex) {
-            return @intFromFloat(
-                @as(f64, @floatFromInt(edge_count)) * 1.5 + 1.0 + 0.5,
-            );
-        } else {
-            return @intFromFloat(
-                @as(f64, @floatFromInt(edge_count)) * 1.5,
-            );
-        }
-    }
-
-    /// Insert a colored edge at the front; used for `load_arc_plane` intersection vertices that
-    /// must precede existing edges.
-    fn pushFrontIntersectionVertex(
-        self: *ConvexChain,
-        front_vertex: ParameterSpacePoint,
-    ) Allocator.Error!void {
-        try self.edges.insert(self.allocator, 0, .{
-            .p = front_vertex,
-            .color = true,
-        });
-    }
-
-    /// Intersect this chain with half-plane `h` by scanning from end-most  (`reverse=false`) or
-    /// front (`reverse=true`), trimming excluded vertices and inserting/marking boundary
-    ///  intersections. Returns containment status.
-    fn padConvexChain(
-        self: *ConvexChain,
-        half_plane: Halfplane,
-        reverse: bool,
-    ) Allocator.Error!ContainmentResult {
-        if (!self.has_extreme_vertex) return .non_exist;
-
-        if (!reverse) {
-            // Normal case: search from extreme vertex inward.
-            var back_vertex = self.extreme_vertex;
-            const inner = half_plane.isInner(back_vertex, self.tolerances.val);
-
-            if (inner != .exclude) return .contain_all;
-
-            while (self.edges.items.len > 0) {
-                const front_vertex = self.edges.items[
-                    self.edges.items.len - 1
-                ].p;
-                const front_inner = half_plane.isInner(
-                    front_vertex,
-                    self.tolerances.val,
-                );
-
-                if (front_inner == .include) {
-                    const current_edge = linearFromTwoPoints(
-                        .{ .index = front_vertex.x_axis, .value = front_vertex.y_axis },
-                        .{ .index = back_vertex.x_axis, .value = back_vertex.y_axis },
-                    );
-                    if (intersectTwoLines(current_edge, half_plane.sep)) |intersection_vertex| {
-                        try self.edges.append(self.allocator, .{
-                            .p = intersection_vertex,
-                            .color = false,
-                        });
-                    }
-                    return .contain_some;
-                } else if (front_inner == .touch) {
-                    self.edges.items[
-                        self.edges.items.len - 1
-                    ].color = true;
-                    return .contain_some;
-                } else {
-                    // Update both the tracker and the actual chain boundary.
-                    back_vertex = front_vertex;
-                    self.extreme_vertex = front_vertex;
-                    _ = self.edges.pop();
-                }
-            }
-
-            self.has_extreme_vertex = false;
-            return .contain_none;
-        } else {
-            // Reverse case: search from front inward.
-            var front_vertex: ParameterSpacePoint = undefined;
-            if (self.edges.items.len == 0) {
-                front_vertex = self.extreme_vertex;
-            } else {
-                front_vertex = self.edges.items[0].p;
-            }
-
-            const inner = half_plane.isInner(
-                front_vertex,
-                self.tolerances.val,
-            );
-            if (inner != .exclude) return .contain_all;
-
-            while (self.edges.items.len > 0) {
-                var back_vertex: ParameterSpacePoint = undefined;
-                if (self.edges.items.len > 1) {
-                    back_vertex = self.edges.items[1].p;
-                } else {
-                    back_vertex = self.extreme_vertex;
-                }
-
-                const back_inner = half_plane.isInner(
-                    back_vertex,
-                    self.tolerances.val,
-                );
-                if (back_inner == .include) {
-                    const cur_edge = linearFromTwoPoints(
-                        .{ .index = front_vertex.x_axis, .value = front_vertex.y_axis },
-                        .{ .index = back_vertex.x_axis, .value = back_vertex.y_axis },
-                    );
-                    if (intersectTwoLines(cur_edge, half_plane.sep)) |intersection_vertex| {
-                        self.edges.items[0].p = intersection_vertex;
-                    }
-                    return .contain_some;
-                } else if (back_inner == .touch) {
-                    _ = self.edges.orderedRemove(0);
-                    return .contain_some;
-                } else {
-                    _ = self.edges.orderedRemove(0);
-                    front_vertex = back_vertex;
-                }
-            }
-
-            self.has_extreme_vertex = false;
-            return .contain_none;
-        }
-    }
-
-    /// Trim excluded vertices from the opposite end of `padConvexChain` and return the
-    /// first surviving/boundary vertex, or `null` if none survives. `reverse`
-    /// selects direction (used by `loadArcPlane`).
-    fn cutConvexChain(
-        self: *ConvexChain,
-        half_plane: Halfplane,
-        reverse: bool,
-    ) ?ParameterSpacePoint {
-        if (!self.has_extreme_vertex) return null;
-
-        if (!reverse) {
-            // Normal case: search from front inward.
-            var front_vertex: ParameterSpacePoint = undefined;
-            if (self.edges.items.len > 0) {
-                front_vertex = self.edges.items[0].p;
-            } else {
-                front_vertex = self.extreme_vertex;
-            }
-
-            const inner = half_plane.isInner(front_vertex, self.tolerances.val);
-            if (inner != .exclude) return null;
-
-            while (self.edges.items.len > 0) {
-                var back_vertex: ParameterSpacePoint = undefined;
-                if (self.edges.items.len > 1) {
-                    back_vertex = self.edges.items[1].p;
-                } else {
-                    back_vertex = self.extreme_vertex;
-                }
-
-                const back_inner = half_plane.isInner(back_vertex, self.tolerances.val);
-                if (back_inner == .exclude) {
-                    _ = self.edges.orderedRemove(0);
-                    front_vertex = back_vertex;
-                } else if (back_inner == .touch) {
-                    _ = self.edges.orderedRemove(0);
-                    return back_vertex;
-                } else {
-                    // include: compute intersection.
-                    const cur_edge = linearFromTwoPoints(
-                        .{ .index = front_vertex.x_axis, .value = front_vertex.y_axis },
-                        .{ .index = back_vertex.x_axis, .value = back_vertex.y_axis },
-                    );
-                    if (intersectTwoLines(cur_edge, half_plane.sep)) |intersection_vertex| {
-                        self.edges.items[0].p = intersection_vertex;
-                        return intersection_vertex;
-                    }
-                    return front_vertex;
-                }
-            }
-
-            self.has_extreme_vertex = false;
-            return null;
-        } else {
-            // Reverse case: search from extreme vertex inward.
-            var back_vertex = self.extreme_vertex;
-            const inner = half_plane.isInner(back_vertex, self.tolerances.val);
-
-            if (inner != .exclude) return null;
-
-            while (self.edges.items.len > 0) {
-                const front_vertex = self.edges.items[
-                    self.edges.items.len - 1
-                ].p;
-                const front_inner = half_plane.isInner(front_vertex, self.tolerances.val);
-
-                if (front_inner == .include) {
-                    const cur_edge = linearFromTwoPoints(
-                        .{ .index = front_vertex.x_axis, .value = front_vertex.y_axis },
-                        .{ .index = back_vertex.x_axis, .value = back_vertex.y_axis },
-                    );
-                    if (intersectTwoLines(cur_edge, half_plane.sep)) |intersection_vertex| {
-                        // Mutate both local tracker and actual chain state.
-                        back_vertex = intersection_vertex;
-                        self.extreme_vertex = intersection_vertex;
-                    }
-                    return back_vertex;
-                } else if (front_inner == .touch) {
-                    // Mutate both local tracker and actual chain state.
-                    back_vertex = front_vertex;
-                    self.extreme_vertex = front_vertex;
-                    _ = self.edges.pop();
-                    return back_vertex;
-                } else {
-                    // Mutate both local tracker and actual chain state.
-                    back_vertex = front_vertex;
-                    self.extreme_vertex = front_vertex;
-                    _ = self.edges.pop();
-                }
-            }
-
-            self.has_extreme_vertex = false;
-            return null;
-        }
-    }
-
-    /// Deep-copy this chain (including all edges).
-    fn cloneConvexChain(self: ConvexChain, allocator: Allocator) Allocator.Error!ConvexChain {
-        var new_chain = ConvexChain{
-            .convex_type = self.convex_type,
-            .edges = ArrayList(Edge).empty,
-            .extreme_vertex = self.extreme_vertex,
-            .has_extreme_vertex = self.has_extreme_vertex,
-            .tolerances = self.tolerances,
-            .allocator = allocator,
-        };
-        try new_chain.edges.appendSlice(allocator, self.edges.items);
-        return new_chain;
-    }
-};
-
-/// Convex feasible polygon in `(k, b)` parameter space, represented by upper and lower
-/// `ConvexChain` boundaries. Stores admissible `(slope, intercept)` pairs shrunk
-/// incrementally by half-plane intersections from incoming data samples.
-const ConvexPolygon = struct {
-    chain_meters: ChainMeters,
-    upper_edges: ConvexChain,
-    lower_edges: ConvexChain,
-    instantiated: bool,
-    tolerances: Tolerances,
-
-    /// Create an uninstantiated polygon with error bound `delta`, size tolerance `eps`,
-    /// and dynamic `tolerances`. Neither chain holds vertices until `initializePolygon`
-    /// or `reInitializePolygon` is called.
-    fn create(
-        allocator: Allocator,
-        delta: f64,
-        eps: f64,
-        tols: Tolerances,
-    ) ConvexPolygon {
-        return .{
-            .chain_meters = ChainMeters
-                .init(delta, eps),
-            .upper_edges = ConvexChain
-                .create(allocator, .upper, tols),
-            .lower_edges = ConvexChain
-                .create(allocator, .lower, tols),
-            .instantiated = false,
-            .tolerances = tols,
-        };
-    }
-
-    fn deinit(self: *ConvexPolygon) void {
-        self.upper_edges.deinit();
-        self.lower_edges.deinit();
-    }
-
-    /// Initialize the polygon from `first_point` and `second_point`, each expanded by `delta`.
-    /// In dual `(k, b)` space each tube boundary maps to a line; their four pairwise intersections
-    /// `left_middle`, `right_middle`, `middle_top`, `middle_bottom` form the initial
-    /// quadrilateral. Distinct timestamps guarantee non-parallel lines, so intersections always exist.
-    fn initializePolygon(
-        self: *ConvexPolygon,
-        first_point: ContinousPoint,
-        second_point: ContinousPoint,
-        delta: f64,
-    ) Allocator.Error!void {
-        self.instantiated = true;
-
-        const first_upper_line =
-            LinearFunction{
-                .slope = -first_point.index,
-                .intercept = first_point.value + delta,
-            };
-        const first_lower_line =
-            LinearFunction{
-                .slope = -first_point.index,
-                .intercept = first_point.value - delta,
-            };
-        const second_upper_line =
-            LinearFunction{
-                .slope = -second_point.index,
-                .intercept = second_point.value + delta,
-            };
-        const second_lower_line =
-            LinearFunction{
-                .slope = -second_point.index,
-                .intercept = second_point.value - delta,
-            };
-
-        // Intersections succeed for distinct timestamps because slopes differ.
-        const left_middle =
-            intersectTwoLines(first_upper_line, second_lower_line) orelse unreachable;
-        const right_middle =
-            intersectTwoLines(first_lower_line, second_upper_line) orelse unreachable;
-        const middle_top =
-            intersectTwoLines(first_upper_line, second_upper_line) orelse unreachable;
-        const middle_bottom =
-            intersectTwoLines(first_lower_line, second_lower_line) orelse unreachable;
-
-        try self.upper_edges
-            .initializeChain(
-            left_middle,
-            middle_top,
-            right_middle,
-        );
-        try self.lower_edges
-            .initializeChain(
-            right_middle,
-            middle_bottom,
-            left_middle,
-        );
-    }
-
-    /// Intersect `first_line` and `second_line` in parameter space. When the lines are
-    /// parallel — which occurs when `limiting_segment` and `current_segment` share a
-    /// timestamp, making their dual lines have identical slopes -`intersectTwoLines` returns
-    /// `null`. Defaulting to `(0, 0)` in that case would inject a zero constraint and instantly
-    /// destroy the feasible polygon for extreme-valued data. Instead, the intersection is capped
-    /// at `fallback_x_axis` (±`max_coordinate`) and `second_line` is evaluated there, preserving
-    /// the open tube of the feasible region.
-    fn computeSafeIntersection(
-        first_line: LinearFunction,
-        second_line: LinearFunction,
-        fallback_x_axis: f64,
-    ) ParameterSpacePoint {
-        if (intersectTwoLines(first_line, second_line)) |p| {
-            return p;
-        }
-        // Parallel lines: no finite intersection; cap at the infinity sentinel.
-        return .{
-            .x_axis = fallback_x_axis,
-            .y_axis = evaluateLinear(second_line, fallback_x_axis),
-        };
-    }
-
-    /// Reinitialize the polygon for a new fitting round from `limiting_segment` (the boundary
-    /// carried over from the previous round) and `current_segment` (the first sample of the
-    /// new round). Each tube boundary at timestamp `t` dualises to a line with slope
-    /// `time_base - t`. The four polygon corners are the pairwise intersections of the
-    /// upper/lower half-planes of `limiting_segment` and `current_segment`.
-    /// Three degenerate cases require special handling. If
-    /// `limiting_segment.upper.index ≈ current_segment.upper.index`, the dual lines on the left
-    /// side are parallel and sentinels push `left_top` and `left_bottom` to −inf. If
-    /// `limiting_segment.lower.index ≈ current_segment.upper.index`, the dual lines on the right
-    /// side are parallel and sentinels push `right_top` and `right_bottom` to +inf.
-    /// Crossing corners are also handled explicitly: when
-    /// `limiting_segment.upper.index > limiting_segment.lower.index` or the reverse, the bounding
-    /// lines may cross and the polygon degenerates to a triangle; a fully collapsed polygon
-    /// (`is_polygon_empty`) is resolved via `closed_direction`.
-    fn reInitializePolygon(
-        self: *ConvexPolygon,
-        limiting_segment: DataSegment,
-        current_segment: DataSegment,
-        time_base: f64,
-        closed_direction: ChainType,
-    ) Allocator.Error!void {
-        self.instantiated = true;
-
-        // Slope `time_base - t` anchors each constraint line at the new round's time origin.
-        const current_upper_halfplane = Halfplane{
-            .sep = .{
-                .slope = time_base - current_segment.upper.index,
-                .intercept = current_segment.upper.value,
-            },
-            .direction = .point_to_below,
-        };
-        const current_lower_halfplane = Halfplane{
-            .sep = .{
-                .slope = time_base - current_segment.lower.index,
-                .intercept = current_segment.lower.value,
-            },
-            .direction = .point_to_above,
-        };
-        const limiting_upper_halfplane = Halfplane{
-            .sep = .{
-                .slope = time_base - limiting_segment.upper.index,
-                .intercept = limiting_segment.upper.value,
-            },
-            .direction = .point_to_below,
-        };
-        const limiting_lower_halfplane = Halfplane{
-            .sep = .{
-                .slope = time_base - limiting_segment.lower.index,
-                .intercept = limiting_segment.lower.value,
-            },
-            .direction = .point_to_above,
-        };
-
-        var left_top = ParameterSpacePoint{ .x_axis = 0.0, .y_axis = 0.0 };
-        var left_bottom = ParameterSpacePoint{ .x_axis = 0.0, .y_axis = 0.0 };
-        var right_top = ParameterSpacePoint{ .x_axis = 0.0, .y_axis = 0.0 };
-        var right_bottom = ParameterSpacePoint{ .x_axis = 0.0, .y_axis = 0.0 };
-
-        // `max_coordinate` acts as ±∞ in parameter space. Using a finite sentinel rather than
-        // `math.inf` avoids IEEE edge cases in downstream chain operations.
-        const max_coordinate: f64 = 100000000.0;
-        if (@abs(limiting_segment.upper.index - current_segment.upper.index) < 1e-10) {
-            // `limiting_segment.upper` and `current_segment.upper` share a timestamp; their dual
-            // lines are parallel. Left corners are pushed to the -inf sentinel to keep the polygon
-            // open on the left. Right corners are computed normally from `limiting_lower`.
-            left_top = .{
-                .x_axis = -max_coordinate,
-                .y_axis = current_segment.upper.value,
-            };
-            left_bottom = .{
-                .x_axis = -10.0 * max_coordinate,
-                .y_axis = current_segment.lower.value,
-            };
-            right_top =
-                computeSafeIntersection(
-                    limiting_lower_halfplane.sep,
-                    current_upper_halfplane.sep,
-                    max_coordinate,
-                );
-            right_bottom =
-                computeSafeIntersection(
-                    limiting_lower_halfplane.sep,
-                    current_lower_halfplane.sep,
-                    max_coordinate,
-                );
-        } else if (@abs(limiting_segment.lower.index - current_segment.upper.index) < 1e-10) {
-            // `limiting_segment.lower` and `current_segment.upper` share a timestamp; their dual
-            // lines are parallel. Right corners are pushed to the +inf sentinel. Left corners are
-            // computed normally from `limiting_upper`.
-            left_top =
-                computeSafeIntersection(
-                    limiting_upper_halfplane.sep,
-                    current_upper_halfplane.sep,
-                    -max_coordinate,
-                );
-            left_bottom =
-                computeSafeIntersection(
-                    limiting_upper_halfplane.sep,
-                    current_lower_halfplane.sep,
-                    -max_coordinate,
-                );
-            right_top = .{ .x_axis = 10.0 * max_coordinate, .y_axis = current_segment.upper.value };
-            right_bottom = .{ .x_axis = max_coordinate, .y_axis = current_segment.lower.value };
-        } else {
-            // General case: no coincident timestamps, so all four corners have finite intersections.
-            left_top =
-                computeSafeIntersection(
-                    limiting_upper_halfplane.sep,
-                    current_upper_halfplane.sep,
-                    -max_coordinate,
-                );
-            left_bottom =
-                computeSafeIntersection(
-                    limiting_upper_halfplane.sep,
-                    current_lower_halfplane.sep,
-                    -max_coordinate,
-                );
-            right_top =
-                computeSafeIntersection(
-                    limiting_lower_halfplane.sep,
-                    current_upper_halfplane.sep,
-                    max_coordinate,
-                );
-            right_bottom =
-                computeSafeIntersection(
-                    limiting_lower_halfplane.sep,
-                    current_lower_halfplane.sep,
-                    max_coordinate,
-                );
-
-            var is_polygon_empty = false;
-
-            if (limiting_segment.upper.index > limiting_segment.lower.index) {
-                // Upper boundary timestamp is later than lower boundary timestamp.
-                // The two bounding lines may cross, turning the quadrilateral into a triangle.
-                if (left_top.x_axis >= right_top.x_axis and left_bottom.x_axis <= right_bottom.x_axis) {
-                    // Top corners crossed; recompute `right_top` as the self-intersection of
-                    // the two limiting half-planes and build a degenerate triangle on top.
-                    right_top =
-                        computeSafeIntersection(
-                            limiting_upper_halfplane.sep,
-                            limiting_lower_halfplane.sep,
-                            max_coordinate,
-                        );
-                    try self.upper_edges
-                        .initializeChain(left_bottom, null, right_top);
-                    try self.lower_edges
-                        .initializeChain(right_top, right_bottom, left_bottom);
-                    return;
-                } else if (left_bottom.x_axis > right_bottom.x_axis) {
-                    // Both corner pairs crossed: polygon fully collapsed.
-                    is_polygon_empty = true;
-                }
-            } else if (limiting_segment.upper.index < limiting_segment.lower.index) {
-                // Lower boundary timestamp is later; symmetric degenerate case on the bottom.
-                if (left_bottom.x_axis >= right_bottom.x_axis and left_top.x_axis <= right_top.x_axis) {
-                    // Bottom corners crossed; recompute `left_bottom` as the self-intersection
-                    // of the two limiting half-planes and build a degenerate triangle on bottom.
-                    left_bottom =
-                        computeSafeIntersection(
-                            limiting_upper_halfplane.sep,
-                            limiting_lower_halfplane.sep,
-                            -max_coordinate,
-                        );
-                    try self.upper_edges
-                        .initializeChain(left_bottom, left_top, right_top);
-                    try self.lower_edges
-                        .initializeChain(right_top, null, left_bottom);
-                    return;
-                } else if (left_top.x_axis > right_top.x_axis) {
-                    // Both corner pairs crossed: polygon fully collapsed.
-                    is_polygon_empty = true;
-                }
-            }
-
-            if (is_polygon_empty) {
-                // Polygon collapsed entirely. Which degenerate side survives is determined by
-                // `closed_direction`: the chain boundary that terminated the previous round.
-                // `.lower` closed → collapse right side onto left; `.upper` closed → vice versa.
-                if (closed_direction == .lower) {
-                    right_top = left_top;
-                    right_bottom = left_bottom;
-                } else {
-                    left_top = right_top;
-                    left_bottom = right_bottom;
-                }
-            }
-        }
-
-        // Standard quadrilateral: upper chain [left_bottom, left_top, right_top],
-        // lower chain [right_top, right_bottom, left_bottom].
-        try self.upper_edges
-            .initializeChain(left_bottom, left_top, right_top);
-        try self.lower_edges
-            .initializeChain(right_top, right_bottom, left_bottom);
-    }
-
-    /// Return approximate polygon size metric (sum of chain sizes), or 0 if
-    /// uninstantiated.
-    fn approximateSize(self: ConvexPolygon) usize {
-        if (self.instantiated) {
-            return self.upper_edges.approximateStateSize() +
-                self.lower_edges.approximateStateSize();
-        }
-        return 0;
-    }
-
-    /// Return endmost vertex from upper (`right_most`) or lower (`left_most`) chain.
-    fn getEndmostVertex(
-        self: ConvexPolygon,
-        side: EndmostSide,
-    ) ParameterSpacePoint {
-        return switch (side) {
-            .right_most => self.upper_edges.getExtremeVertex(),
-            .left_most => self.lower_edges.getExtremeVertex(),
-        };
-    }
-
-    /// Overwrite the endmost vertices on both chains with `upper_point` and `lower_point`.
-    fn setEndmostVertices(
-        self: *ConvexPolygon,
-        upper_point: ParameterSpacePoint,
-        lower_point: ParameterSpacePoint,
-    ) void {
-        self.upper_edges.setExtremeVertex(upper_point);
-        self.lower_edges.setExtremeVertex(lower_point);
-    }
-
-    fn isInstantiated(self: ConvexPolygon) bool {
-        return self.instantiated;
-    }
-
-    fn setUninstantiated(self: *ConvexPolygon) void {
-        self.instantiated = false;
-    }
-
-    /// Select the best current solution line from the feasible polygon. If uninstantiated,
-    /// returns a horizontal line at `current_boundary_value`. Otherwise picks the endmost
-    /// vertex with the smaller absolute slope, minimising approximation excursion.
-    fn selectSolution(
-        self: ConvexPolygon,
-        shift: f64,
-        curb: f64,
-    ) LinearFunction {
-        if (!self.instantiated) {
-            return .{ .slope = 0.0, .intercept = curb };
-        }
-        const up = self.upper_edges.getExtremeVertex();
-        const lp = self.lower_edges.getExtremeVertex();
-        if (@abs(up.x_axis) > @abs(lp.x_axis)) {
-            return linearFromParamPoint(lp, shift);
-        } else {
-            return linearFromParamPoint(up, shift);
-        }
-    }
-
-    /// Intersect polygon with half-plane `h`: apply `padConvexChain` to one chain and
-    /// `cutConvexChain` to the other, then update endmost from cut result when present.
-    /// Returns containment from the `padConvexChain` side.
-    fn intersect(
-        self: *ConvexPolygon,
-        half_plane: Halfplane,
-    ) Allocator.Error!ContainmentResult {
-        if (half_plane.direction == .point_to_below) {
-            const relationship =
-                try self.upper_edges.padConvexChain(half_plane, false);
-            const end = self.lower_edges
-                .cutConvexChain(half_plane, false);
-            if (end) |e| self.upper_edges
-                .setExtremeVertex(e);
-            return relationship;
-        } else {
-            const relationship = try self.lower_edges
-                .padConvexChain(half_plane, false);
-            const end = self.upper_edges
-                .cutConvexChain(half_plane, false);
-            if (end) |e| self.lower_edges
-                .setExtremeVertex(e);
-            return relationship;
-        }
-    }
-
-    /// Load arc plane during restart: reverse-direction variant of `intersect`
-    /// that prepends new intersection vertices via `pushFrontIntersectionVertex`.
-    fn loadArcPlane(
-        self: *ConvexPolygon,
-        half_plane: Halfplane,
-    ) Allocator.Error!ContainmentResult {
-        if (half_plane.direction == .point_to_below) {
-            const relationship =
-                try self.upper_edges.padConvexChain(half_plane, true);
-            const new_start = self.lower_edges
-                .cutConvexChain(half_plane, true);
-            if (new_start) |start| try self.upper_edges
-                .pushFrontIntersectionVertex(start);
-            return relationship;
-        } else {
-            const relationship = try self.lower_edges
-                .padConvexChain(half_plane, true);
-            const new_start = self.upper_edges
-                .cutConvexChain(half_plane, true);
-            if (new_start) |start| try self.lower_edges
-                .pushFrontIntersectionVertex(start);
-            return relationship;
-        }
-    }
-
-    /// Deep-copy this polygon, including both boundary chains.
-    fn cloneConvexPolygon(self: ConvexPolygon, allocator: Allocator) Allocator.Error!ConvexPolygon {
-        return .{
-            .chain_meters = self.chain_meters,
-            .upper_edges = try self.upper_edges.cloneConvexChain(allocator),
-            .lower_edges = try self.lower_edges.cloneConvexChain(allocator),
-            .instantiated = self.instantiated,
-            .tolerances = self.tolerances,
-        };
-    }
-};
-
-/// Incremental convex chain that tracks the extremal boundary of the feasible region across
-/// multiple data samples. Unlike `ConvexChain`, which performs polygon clipping, `ArcBoundaryChain`
-/// maintains a list of `ContinousPoint` `vertices` and a `reference_line`. As new data points arrive
-/// via `extendConvexHull`, dominated vertices are popped to restore convexity.
-const ArcBoundaryChain = struct {
-    convex_type: ChainType,
-    chain_meters: ChainMeters,
-    vertices: ArrayList(ContinousPoint),
-    reference_line: LinearFunction,
-    tolerances: Tolerances,
-    allocator: Allocator,
-
-    /// Create a new `ArcBoundaryChain` of the given `convex_type` with error bound
-    /// `delta`, size tolerance `eps`, and dynamic `tolerances`.
-    fn create(
-        allocator: Allocator,
-        convex_type: ChainType,
-        delta: f64,
-        eps: f64,
-        tolerances: Tolerances,
-    ) ArcBoundaryChain {
-        return .{
-            .convex_type = convex_type,
-            .chain_meters = ChainMeters.init(delta, eps),
-            .vertices = ArrayList(ContinousPoint).empty,
-            .reference_line = .{ .slope = 0.0, .intercept = 0.0 },
-            .tolerances = tolerances,
-            .allocator = allocator,
-        };
-    }
-
-    fn deinit(self: *ArcBoundaryChain) void {
-        self.vertices.deinit(self.allocator);
-    }
-
-    /// Reset the chain from `seed_dual_point` and `seed_data_point`. Clears all
-    /// existing vertices, rebuilds `reference_line` from `seed_dual_point` and
-    /// `shift_time`, then calls `extendConvexHull` to seed the first vertex.
-    fn resetFromSeedPoint(
-        self: *ArcBoundaryChain,
-        seed_dual_point: ParameterSpacePoint,
-        seed_data_point: ContinousPoint,
-        shift_time: f64,
-    ) void {
-        self.vertices.clearRetainingCapacity();
-        self.reference_line = linearFromParamPoint(seed_dual_point, shift_time);
-        self.extendConvexHull(seed_data_point);
-    }
-    /// Add `new_point` to the chain, maintaining the convex hull invariant.
-    /// `adjusted_point` is `new_point` shifted by `chain_limits.threshold`:
-    /// down for upper chains, up for lower chains. Dominated vertices are then
-    /// popped from the back until convexity is restored. When the chain is
-    /// reduced to fewer than two vertices, `adjusted_point` is checked against
-    /// `adjusted_reference_line`; it is appended, replaces the front vertex,
-    /// or triggers `unreachable` if it falls outside the feasible region.
-    fn extendConvexHull(self: *ArcBoundaryChain, new_point: ContinousPoint) void {
-        var adjusted_point: ContinousPoint = undefined;
-        if (self.convex_type == .upper) {
-            adjusted_point = .{
-                .index = new_point.index,
-                .value = new_point.value - self.chain_meters.thr,
-            };
-        } else {
-            adjusted_point = .{
-                .index = new_point.index,
-                .value = new_point.value + self.chain_meters.thr,
-            };
-        }
-
-        if (self.vertices.items.len == 0) {
-            self.vertices.append(self.allocator, adjusted_point) catch unreachable;
-            return;
-        }
-
-        // Pop dominated vertices. `edge_line` is the hull edge between `prev_vertex` and
-        // `last_vertex`; `convexity_direction` is `.point_to_above` for upper chains so that
-        // points below the edge are dominated and removed.
-        while (self.vertices.items.len >= 2) {
-            const last_vertex = self.vertices.items[self.vertices.items.len - 1];
-            const prev_vertex = self.vertices.items[self.vertices.items.len - 2];
-
-            const edge_line = linearFromTwoPoints(prev_vertex, last_vertex);
-            const convexity_direction: HalfplaneDirection = if (self.convex_type == .upper)
-                .point_to_above
-            else
-                .point_to_below;
-
-            const vertex_relation = isInnerParamPoint(
-                edge_line,
-                .{ .x_axis = adjusted_point.index, .y_axis = adjusted_point.value },
-                convexity_direction,
-                self.tolerances.val,
-            );
-
-            if (vertex_relation == .include) {
-                self.vertices.append(self.allocator, adjusted_point) catch unreachable;
-                return;
-            } else {
-                _ = self.vertices.pop();
-            }
-        }
-
-        // Fewer than two vertices remain: check `adjusted_point` against
-        // `adjusted_reference_line` (the seed line shifted by `chain_limits.threshold`).
-        var ln_copy = self.reference_line;
-        if (self.convex_type == .upper) {
-            ln_copy.intercept -= self.chain_meters.thr;
-        } else {
-            ln_copy.intercept += self.chain_meters.thr;
-        }
-
-        // `reference_direction` mirrors `convexity_direction`: upper chains test above,
-        // lower chains test below.
-        const point_dir: HalfplaneDirection = if (self.convex_type == .upper)
-            .point_to_above
-        else
-            .point_to_below;
-
-        const rel =
-            isInnerPoint(ln_copy, adjusted_point, point_dir, self.tolerances.val);
-        if (rel == .include) {
-            self.vertices.append(self.allocator, adjusted_point) catch unreachable;
-        } else if (rel == .touch) {
-            self.vertices.append(self.allocator, adjusted_point) catch unreachable;
-            if (self.vertices.items.len > 0) {
-                _ = self.vertices.orderedRemove(0);
-            }
-        } else {
-            unreachable;
-        }
-    }
-    /// Add `new_point` to the chain. Delegates to `extendConvexHull` and
-    /// returns `true` unconditionally.
-    fn addPoint(self: *ArcBoundaryChain, new_point: ContinousPoint) bool {
-        self.extendConvexHull(new_point);
-        return true;
-    }
-
-    /// Remove and return the last vertex from the chain, or `null` if the
-    /// chain is empty.
-    fn popBack(self: *ArcBoundaryChain) ?ContinousPoint {
-        if (self.vertices.items.len == 0) return null;
-        return self.vertices.pop();
-    }
-
-    /// Return the first vertex of the chain, or `null` if the chain is empty.
-    fn front(self: ArcBoundaryChain) ?ContinousPoint {
-        if (self.vertices.items.len == 0) return null;
-        return self.vertices.items[0];
-    }
-
-    /// Return the `reference_line` (the extremal line seeded at `resetFromSeedPoint`).
-    fn getExtremeLine(self: ArcBoundaryChain) LinearFunction {
-        return self.reference_line;
-    }
-
-    /// Return an approximate size metric for this chain.
-    // fn ApproximateStateSize(self: ArcBoundaryChain) usize {
-    //     if (self.vertices.items.len == 0) return 1;
-    //     return @intFromFloat(
-    //         @as(f64, @floatFromInt(self.vertices.items.len)) * 1.5 + 1.0,
-    //     );
-    // }
-
-    /// Clear all vertices from the chain.
-    fn clear(self: *ArcBoundaryChain) void {
-        self.vertices.clearRetainingCapacity();
-    }
-
-    /// Return the `HalfplaneDirection` for this chain's type: upper chains
-    /// produce `.point_to_below` constraints; lower chains produce `.point_to_above`.
-    fn pointToDirection(self: ArcBoundaryChain) HalfplaneDirection {
-        return if (self.convex_type == .upper)
-            .point_to_below
-        else
-            .point_to_above;
-    }
-
-    /// Deep-copy this `ArcBoundaryChain`, including all `vertices`.
-    fn cloneArcBoundaryChain(
-        self: ArcBoundaryChain,
-        allocator: Allocator,
-    ) Allocator.Error!ArcBoundaryChain {
-        var new_chain = ArcBoundaryChain{
-            .convex_type = self.convex_type,
-            .chain_meters = self.chain_meters,
-            .vertices = ArrayList(ContinousPoint).empty,
-            .reference_line = self.reference_line,
-            .tolerances = self.tolerances,
-            .allocator = allocator,
-        };
-        try new_chain.vertices.appendSlice(allocator, self.vertices.items);
-        return new_chain;
+        return ext_poly.evaluateLinear(self.line, t);
     }
 };
 
 /// A candidate fitting state explored in parallel by `MixedTypePlaState`.`Fittable` is a flat
 /// struct that consolidates all per-candidate state needed to decide whether a single line segment
 /// can be extended to cover a growing window of buffered samples within the error bound `delta`.
-/// It maintains a `ConvexPolygon` (the feasible region in slope/intercept space),
-/// two `ArcBoundaryChain` instances (`upper_arc_chain` and `lower_arc_chain`) that track the
+/// It maintains a `ExtendedPolygon` (the feasible region in slope/intercept space),
+/// two `VisibleRegionChain` instances (`upper_visible_region` and `lower_visible_region`) that track the
 /// extremal boundary of past constraints, and a sliding `active_error_tube` that bounds where the
 /// next knot may fall. When a new sample makes the feasible polygon empty, `Fittable` computes the
 /// best-fit line (`segment_start_point`, `segment_end_point`), stores a `restart_bias_segment` for
@@ -1806,7 +643,7 @@ const Fittable = struct {
     eps: f64,
     pieces_type: PieceType,
     /// Committed output knot points for this candidate.
-    segs: ArrayList(ContinousPoint),
+    segments: ArrayList(ContinousPoint),
     /// The timestamp of the most-recently fed data point.
     current_time: f64,
     /// Time origin of the current fitting round (equals the timestamp of
@@ -1819,12 +656,12 @@ const Fittable = struct {
     apx_type: i32,
 
     // Feasible-region state.
-    closed_direction: ChainType,
-    boundary_segment: ArrayList(DataSegment),
-    feasible_polygon: ConvexPolygon,
-    active_error_tube: DataSegment,
-    upper_arc_chain: ArcBoundaryChain,
-    lower_arc_chain: ArcBoundaryChain,
+    closed_direction: ext_poly.ChainType,
+    boundary_segment: ArrayList(ext_poly.ErrorTubeSegment),
+    feasible_polygon: ext_poly.ExtendedPolygon,
+    active_error_tube: ext_poly.ErrorTubeSegment,
+    upper_visible_region: ext_poly.VisibleRegionChain,
+    lower_visible_region: ext_poly.VisibleRegionChain,
 
     // Knot and fitting-window state.
     knot_type: bool,
@@ -1835,11 +672,11 @@ const Fittable = struct {
     /// Set by `tryExtendOrTerminateNow`/`finalizeWithLastBufferedPoint`
     /// via `computeRestartBoundarySegment`; consumed and nulled by
     /// `restartConnectedRound`.
-    restart_bias_segment: ?DataSegment,
-    /// `true` if the restart boundary came from `upper_arc_chain`;
-    /// `false` if it came from `lower_arc_chain`. `null` when not set.
-    restart_bias_uses_upper_chain: ?bool,
-    tolerances: Tolerances,
+    restart_bias_segment: ?ext_poly.ErrorTubeSegment,
+    /// `true` if the restart boundary came from `upper_visible_region`;
+    /// `false` if it came from `lower_visible_region`. `null` when not set.
+    restart_bias_uses_upper_region: ?bool,
+    tolerances: ext_poly.Tolerances,
 
     allocator: Allocator,
 
@@ -1850,35 +687,35 @@ const Fittable = struct {
         delta: f64,
         eps: f64,
         connected: bool,
-        tolerances: Tolerances,
+        tolerances: ext_poly.Tolerances,
     ) Fittable {
         return .{
             .delta = delta,
             .eps = eps,
             .pieces_type = .connected,
-            .segs = ArrayList(ContinousPoint).empty,
+            .segments = ArrayList(ContinousPoint).empty,
             .current_time = 0.0,
             .time_base = 0.0,
             .data_point_buffer = null,
             .delay_info = 0,
             .apx_type = 4,
             .closed_direction = .lower,
-            .boundary_segment = ArrayList(DataSegment).empty,
-            .feasible_polygon = ConvexPolygon.create(
+            .boundary_segment = ArrayList(ext_poly.ErrorTubeSegment).empty,
+            .feasible_polygon = ext_poly.ExtendedPolygon.create(
                 allocator,
                 delta,
                 eps,
                 tolerances,
             ),
-            .active_error_tube = DataSegment.empty(),
-            .upper_arc_chain = ArcBoundaryChain.create(
+            .active_error_tube = ext_poly.ErrorTubeSegment.empty(),
+            .upper_visible_region = ext_poly.VisibleRegionChain.create(
                 allocator,
                 .upper,
                 delta,
                 eps,
                 tolerances,
             ),
-            .lower_arc_chain = ArcBoundaryChain.create(
+            .lower_visible_region = ext_poly.VisibleRegionChain.create(
                 allocator,
                 .lower,
                 delta,
@@ -1890,24 +727,24 @@ const Fittable = struct {
             .segment_start_point = .{ .index = 0.0, .value = 0.0 },
             .segment_end_point = .{ .index = 0.0, .value = 0.0 },
             .restart_bias_segment = null,
-            .restart_bias_uses_upper_chain = null,
+            .restart_bias_uses_upper_region = null,
             .tolerances = tolerances,
             .allocator = allocator,
         };
     }
 
     fn deinit(self: *Fittable) void {
-        self.segs.deinit(self.allocator);
+        self.segments.deinit(self.allocator);
         self.boundary_segment.deinit(self.allocator);
         self.feasible_polygon.deinit();
-        self.upper_arc_chain.deinit();
-        self.lower_arc_chain.deinit();
+        self.upper_visible_region.deinit();
+        self.lower_visible_region.deinit();
     }
 
     /// Buffer an incoming data point into `boundary_segments`. On the first
     /// point, sets `time_base`, stashes `buffer_dp`, and initialises the
     /// `active_error_tube`. On the second point, initialises the
-    /// `feasible_polygon` and seeds both arc chains from the polygon's
+    /// `feasible_polygon` and seeds both visible region chains from the polygon's
     /// endmost vertices. Subsequent points (indices 2–3) are appended to
     /// `boundary_segments` without further processing; the sliding-window
     /// logic in `tryExtendOrTerminateNow` handles them once the buffer
@@ -1920,7 +757,7 @@ const Fittable = struct {
             self.time_base = dp.index;
             self.data_point_buffer = dp;
             self.initializeErrorTube(dp, self.delta);
-            self.boundary_segment.append(self.allocator, DataSegment
+            self.boundary_segment.append(self.allocator, ext_poly.ErrorTubeSegment
                 .fromPointAndDelta(dp, self.delta)) catch unreachable;
         } else if (size == 1) {
             self.feasible_polygon.initializePolygon(
@@ -1929,23 +766,23 @@ const Fittable = struct {
                 self.delta,
             ) catch unreachable;
 
-            const sec = DataSegment.fromPointAndDelta(dp, self.delta);
-            self.upper_arc_chain.resetFromSeedPoint(
+            const sec = ext_poly.ErrorTubeSegment.fromPointAndDelta(dp, self.delta);
+            self.upper_visible_region.resetFromSeedPoint(
                 self.feasible_polygon.getEndmostVertex(.right_most),
                 sec.upper,
                 self.time_base,
             );
-            self.lower_arc_chain.resetFromSeedPoint(
+            self.lower_visible_region.resetFromSeedPoint(
                 self.feasible_polygon.getEndmostVertex(.left_most),
                 sec.lower,
                 self.time_base,
             );
 
             self.data_point_buffer = null;
-            self.boundary_segment.append(self.allocator, DataSegment
+            self.boundary_segment.append(self.allocator, ext_poly.ErrorTubeSegment
                 .fromPointAndDelta(dp, self.delta)) catch unreachable;
         } else if (size == 2 or size == 3) {
-            self.boundary_segment.append(self.allocator, DataSegment
+            self.boundary_segment.append(self.allocator, ext_poly.ErrorTubeSegment
                 .fromPointAndDelta(dp, self.delta)) catch unreachable;
         }
     }
@@ -1982,17 +819,17 @@ const Fittable = struct {
     /// Slide the boundary window one step and test whether the feasible
     /// polygon remains non-empty. Pops the front of `boundary_segments`,
     /// applies the upper and lower half-planes from the new leading segment
-    /// `c` to `feasible_polygon`, and updates the arc chains accordingly.
+    /// `c` to `feasible_polygon`, and updates the visible region chains accordingly.
     ///
     /// If either half-plane empties the polygon (`contain_none`), the current
-    /// segment is terminated: the surviving arc chain's extremal line is used
+    /// segment is terminated: the surviving visible region chain's extremal line is used
     /// to set `segment_start_point` and `segment_end_point` via
-    /// `computeSegmentEndpoints`, the depleted arc chain is cleared,
+    /// `computeSegmentEndpoints`, the depleted visible region chain is cleared,
     /// `restart_bias_segment` is saved via `computeRestartBoundarySegment`,
     /// and `fitting_window` is recorded. Returns `false`.
     ///
-    /// If both half-planes leave the polygon non-empty, arc chain vertices
-    /// that survive `contain_all` are forwarded to `extendConvexHull`.
+    /// If both half-planes leave the polygon non-empty, visible region chain vertices
+    /// that survive `contain_all` are forwarded to `updateVisibleRegion`.
     /// Returns `true`.
     fn tryExtendOrTerminateNow(self: *Fittable) bool {
         if (self.boundary_segment.items.len > 0) {
@@ -2005,7 +842,7 @@ const Fittable = struct {
 
         const leading_segment = self.boundary_segment.items[1];
 
-        const upper_halfplane = Halfplane{
+        const upper_halfplane = ext_poly.Halfplane{
             .sep = .{
                 .slope = self.time_base - leading_segment.upper.index,
                 .intercept = leading_segment.upper.value,
@@ -2014,14 +851,14 @@ const Fittable = struct {
         };
         const upper_result = self.feasible_polygon.intersect(upper_halfplane) catch unreachable;
         if (upper_result == .contain_some) {
-            self.upper_arc_chain.resetFromSeedPoint(
+            self.upper_visible_region.resetFromSeedPoint(
                 self.feasible_polygon.getEndmostVertex(.right_most),
                 leading_segment.upper,
                 self.time_base,
             );
         }
 
-        const lower_halfplane = Halfplane{
+        const lower_halfplane = ext_poly.Halfplane{
             .sep = .{
                 .slope = self.time_base - leading_segment.lower.index,
                 .intercept = leading_segment.lower.value,
@@ -2030,7 +867,7 @@ const Fittable = struct {
         };
         const lower_result = self.feasible_polygon.intersect(lower_halfplane) catch unreachable;
         if (lower_result == .contain_some) {
-            self.lower_arc_chain.resetFromSeedPoint(
+            self.lower_visible_region.resetFromSeedPoint(
                 self.feasible_polygon.getEndmostVertex(.left_most),
                 leading_segment.lower,
                 self.time_base,
@@ -2040,19 +877,19 @@ const Fittable = struct {
         if (upper_result == .contain_none or lower_result == .contain_none) {
             if (upper_result == .contain_none) {
                 self.closed_direction = .upper;
-                self.upper_arc_chain.clear();
-                self.restart_bias_uses_upper_chain = false; // surviving chain is lower_arc_chain
+                self.upper_visible_region.clear();
+                self.restart_bias_uses_upper_region = false; // surviving chain is lower_visible_region
             } else {
                 self.closed_direction = .lower;
-                self.lower_arc_chain.clear();
-                self.restart_bias_uses_upper_chain = true; // surviving chain is upper_arc_chain
+                self.lower_visible_region.clear();
+                self.restart_bias_uses_upper_region = true; // surviving chain is upper_visible_region
             }
 
-            // Derive the best-fit line from the surviving arc chain.
-            const extremal_line = if (self.restart_bias_uses_upper_chain.?)
-                self.upper_arc_chain.getExtremeLine()
+            // Derive the best-fit line from the surviving visible region chain.
+            const extremal_line = if (self.restart_bias_uses_upper_region.?)
+                self.upper_visible_region.getExtremeLine()
             else
-                self.lower_arc_chain.getExtremeLine();
+                self.lower_visible_region.getExtremeLine();
             self.computeSegmentEndpoints(extremal_line, leading_segment.upper.index);
 
             // Save restart boundary for the connected follow-on round.
@@ -2073,10 +910,10 @@ const Fittable = struct {
             return false;
         } else {
             if (upper_result == .contain_all) {
-                _ = self.upper_arc_chain.addPoint(leading_segment.upper);
+                _ = self.upper_visible_region.addPoint(leading_segment.upper);
             }
             if (lower_result == .contain_all) {
-                _ = self.lower_arc_chain.addPoint(leading_segment.lower);
+                _ = self.lower_visible_region.addPoint(leading_segment.lower);
             }
             return true;
         }
@@ -2097,7 +934,7 @@ const Fittable = struct {
 
         const last_segment = self.boundary_segment.items[self.boundary_segment.items.len - 1];
 
-        const upper_halfplane = Halfplane{
+        const upper_halfplane = ext_poly.Halfplane{
             .sep = .{
                 .slope = self.time_base - last_segment.upper.index,
                 .intercept = last_segment.upper.value,
@@ -2106,14 +943,14 @@ const Fittable = struct {
         };
         const upper_result = self.feasible_polygon.intersect(upper_halfplane) catch unreachable;
         if (upper_result == .contain_some) {
-            self.upper_arc_chain.resetFromSeedPoint(
+            self.upper_visible_region.resetFromSeedPoint(
                 self.feasible_polygon.getEndmostVertex(.right_most),
                 last_segment.upper,
                 self.time_base,
             );
         }
 
-        const lower_halfplane = Halfplane{
+        const lower_halfplane = ext_poly.Halfplane{
             .sep = .{
                 .slope = self.time_base - last_segment.lower.index,
                 .intercept = last_segment.lower.value,
@@ -2122,7 +959,7 @@ const Fittable = struct {
         };
         const lower_result = self.feasible_polygon.intersect(lower_halfplane) catch unreachable;
         if (lower_result == .contain_some) {
-            self.lower_arc_chain.resetFromSeedPoint(
+            self.lower_visible_region.resetFromSeedPoint(
                 self.feasible_polygon.getEndmostVertex(.left_most),
                 last_segment.lower,
                 self.time_base,
@@ -2132,18 +969,18 @@ const Fittable = struct {
         if (upper_result == .contain_none or lower_result == .contain_none) {
             if (upper_result == .contain_none) {
                 self.closed_direction = .upper;
-                self.upper_arc_chain.clear();
-                self.restart_bias_uses_upper_chain = false; // TODO
+                self.upper_visible_region.clear();
+                self.restart_bias_uses_upper_region = false; // TODO
             } else {
                 self.closed_direction = .lower;
-                self.lower_arc_chain.clear();
-                self.restart_bias_uses_upper_chain = true;
+                self.lower_visible_region.clear();
+                self.restart_bias_uses_upper_region = true;
             }
 
-            const extremal_line = if (self.restart_bias_uses_upper_chain.?)
-                self.upper_arc_chain.getExtremeLine()
+            const extremal_line = if (self.restart_bias_uses_upper_region.?)
+                self.upper_visible_region.getExtremeLine()
             else
-                self.lower_arc_chain.getExtremeLine();
+                self.lower_visible_region.getExtremeLine();
             self.computeSegmentEndpoints(extremal_line, last_segment.upper.index);
 
             self.restart_bias_segment = self.computeRestartBoundarySegment(
@@ -2162,69 +999,69 @@ const Fittable = struct {
             return false;
         } else {
             if (upper_result == .contain_all) {
-                _ = self.upper_arc_chain.addPoint(last_segment.upper);
+                _ = self.upper_visible_region.addPoint(last_segment.upper);
             }
             if (lower_result == .contain_all) {
-                _ = self.lower_arc_chain.addPoint(last_segment.lower);
+                _ = self.lower_visible_region.addPoint(last_segment.lower);
             }
             return true;
         }
     }
 
     /// Compute the restart boundary segment from the terminated segment's error tube and the
-    /// surviving arc chain. When the upper boundary caused termination (`up_or_low == .upper`),
+    /// surviving visible region chain. When the upper boundary caused termination (`up_or_low == .upper`),
     /// the extremal line from the lower polygon endpoint (`left_most`) is used to update
-    /// `active_error_tube`, and the last lower-arc vertex  becomes the lower endpoint of the
+    /// `active_error_tube`, and the last lower-region vertex  becomes the lower endpoint of the
     /// restart segment. The symmetric  case applies when the lower boundary terminates.
-    /// The returned `DataSegment` is stored in `restart_bias_segment` and passed
+    /// The returned `ErrorTubeSegment` is stored in `restart_bias_segment` and passed
     /// to `restartPolygonForNewRound` at the start of the next round.
     fn computeRestartBoundarySegment(
         self: *Fittable,
-        terminating_segment: DataSegment,
-        upper_or_lower: ChainType,
-    ) DataSegment {
-        var restart_segment = DataSegment.empty();
+        terminating_segment: ext_poly.ErrorTubeSegment,
+        upper_or_lower: ext_poly.ChainType,
+    ) ext_poly.ErrorTubeSegment {
+        var restart_segment = ext_poly.ErrorTubeSegment.empty();
 
         if (upper_or_lower == .upper) {
-            const extreme_line = linearFromParamPoint(
+            const extreme_line = ext_poly.linearFromParamPoint(
                 self.feasible_polygon.getEndmostVertex(.left_most),
                 self.time_base,
             );
 
             self.active_error_tube.upper = .{
                 .index = terminating_segment.upper.index,
-                .value = evaluateLinear(extreme_line, terminating_segment.upper.index),
+                .value = ext_poly.evaluateLinear(extreme_line, terminating_segment.upper.index),
             };
-            const ft = if (self.lower_arc_chain.front()) |f| f.index else terminating_segment.upper.index;
+            const ft = if (self.lower_visible_region.front()) |f| f.index else terminating_segment.upper.index;
             self.active_error_tube.lower = .{
                 .index = ft,
-                .value = evaluateLinear(extreme_line, ft),
+                .value = ext_poly.evaluateLinear(extreme_line, ft),
             };
 
             restart_segment.upper = self.active_error_tube.upper;
-            if (self.lower_arc_chain.popBack()) |last| {
+            if (self.lower_visible_region.popBack()) |last| {
                 restart_segment.lower = last;
             } else {
                 restart_segment.lower = self.active_error_tube.lower;
             }
         } else {
-            const extreme_line = linearFromParamPoint(
+            const extreme_line = ext_poly.linearFromParamPoint(
                 self.feasible_polygon.getEndmostVertex(.right_most),
                 self.time_base,
             );
 
             self.active_error_tube.lower = .{
                 .index = terminating_segment.lower.index,
-                .value = evaluateLinear(extreme_line, terminating_segment.lower.index),
+                .value = ext_poly.evaluateLinear(extreme_line, terminating_segment.lower.index),
             };
-            const ft = if (self.upper_arc_chain.front()) |f| f.index else terminating_segment.lower.index;
+            const ft = if (self.upper_visible_region.front()) |f| f.index else terminating_segment.lower.index;
             self.active_error_tube.upper = .{
                 .index = ft,
-                .value = evaluateLinear(extreme_line, ft),
+                .value = ext_poly.evaluateLinear(extreme_line, ft),
             };
 
             restart_segment.lower = self.active_error_tube.lower;
-            if (self.upper_arc_chain.popBack()) |last| {
+            if (self.upper_visible_region.popBack()) |last| {
                 restart_segment.upper = last;
             } else {
                 restart_segment.upper = self.active_error_tube.upper;
@@ -2237,10 +1074,10 @@ const Fittable = struct {
     /// Reinitialise the feasible polygon for the next segment, using `lseg`
     /// as the limiting (carry-over) boundary and the second entry of
     /// `boundary_segments` as the first new sample. Vertices still stored in
-    /// the surviving arc chain (`use_ceil` selects upper vs. lower) are
-    /// replayed into the fresh polygon via `loadArcPlane` before both arc
+    /// the surviving visible region chain (`use_ceil` selects upper vs. lower) are
+    /// replayed into the fresh polygon via `loadVisibleRegionConstraints` before both region
     /// chains are reseeded from the new polygon's endmost vertices.
-    fn restartNewRound(self: *Fittable, lseg: DataSegment, use_ceil: bool) void {
+    fn restartNewRound(self: *Fittable, lseg: ext_poly.ErrorTubeSegment, use_ceil: bool) void {
         if (self.boundary_segment.items.len < 2) {
             return;
         }
@@ -2255,26 +1092,26 @@ const Fittable = struct {
             self.closed_direction,
         ) catch unreachable;
 
-        // Replay surviving arc-chain vertices as arc-plane constraints.
+        // Replay surviving visible-region chain vertices as half-plane constraints.
         var surviving_chain =
-            if (use_ceil) &self.upper_arc_chain else &self.lower_arc_chain;
+            if (use_ceil) &self.upper_visible_region else &self.lower_visible_region;
         while (surviving_chain.popBack()) |dp| {
-            const arc_halfplane = Halfplane{
+            const constraint_halfplane = ext_poly.Halfplane{
                 .sep = .{
                     .slope = self.time_base - dp.index,
                     .intercept = dp.value,
                 },
                 .direction = surviving_chain.pointToDirection(),
             };
-            _ = self.feasible_polygon.loadArcPlane(arc_halfplane) catch unreachable;
+            _ = self.feasible_polygon.loadVisibleRegionConstraints(constraint_halfplane) catch unreachable;
         }
 
-        self.upper_arc_chain.resetFromSeedPoint(
+        self.upper_visible_region.resetFromSeedPoint(
             self.feasible_polygon.getEndmostVertex(.right_most),
             first_segment.upper,
             self.time_base,
         );
-        self.lower_arc_chain.resetFromSeedPoint(
+        self.lower_visible_region.resetFromSeedPoint(
             self.feasible_polygon.getEndmostVertex(.left_most),
             first_segment.lower,
             self.time_base,
@@ -2282,13 +1119,13 @@ const Fittable = struct {
     }
 
     /// Intersect the extremal line `rsep` with `active_error_tube` to find
-    /// the exact knot position and append it to `segs`. Also accumulates
+    /// the exact knot position and append it to `segments`. Also accumulates
     /// `accumulated_delay` to track the lag between the current time and
     /// the committed segment's base time.
     fn recordLastKnot(self: *Fittable, rsep: LinearFunction) void {
         var dp = ContinousPoint{ .index = 0.0, .value = 0.0 }; // TODO rename to knot_point
         self.active_error_tube.hittingLine(&dp, rsep, self.tolerances);
-        self.segs.append(self.allocator, dp) catch unreachable;
+        self.segments.append(self.allocator, dp) catch unreachable;
         self.delay_info += @intFromFloat(self.current_time - self.time_base);
     }
 
@@ -2336,7 +1173,7 @@ const Fittable = struct {
 
     /// Restart for a disjoint (disconnected) new round. Discards the oldest
     /// boundary segment, then — when exactly two segments remain —
-    /// reinitialises the polygon from them and reseeds both arc chains.
+    /// reinitialises the polygon from them and reseeds both visible region chains.
     fn restartDisconnectedRound(self: *Fittable) void {
         if (self.boundary_segment.items.len > 0) {
             _ = self.boundary_segment.orderedRemove(0);
@@ -2359,12 +1196,12 @@ const Fittable = struct {
                 self.time_base,
                 .lower,
             ) catch unreachable;
-            self.upper_arc_chain.resetFromSeedPoint(
+            self.upper_visible_region.resetFromSeedPoint(
                 self.feasible_polygon.getEndmostVertex(.right_most),
                 second_segment.upper,
                 self.time_base,
             );
-            self.lower_arc_chain.resetFromSeedPoint(
+            self.lower_visible_region.resetFromSeedPoint(
                 self.feasible_polygon.getEndmostVertex(.left_most),
                 second_segment.lower,
                 self.time_base,
@@ -2373,17 +1210,17 @@ const Fittable = struct {
     }
 
     /// Restart for a connected new round. Delegates to `restartNewRound`
-    /// with the saved `restart_bias_segment` and the surviving arc chain
-    /// indicator (`restart_bias_uses_upper_chain`), then clears both fields
+    /// with the saved `restart_bias_segment` and the surviving visible region chain
+    /// indicator (`restart_bias_uses_upper_region`), then clears both fields
     /// so they are not replayed again.
     fn restartConnectedNewRound(self: *Fittable) void {
-        if (self.restart_bias_segment != null and self.restart_bias_uses_upper_chain != null) {
+        if (self.restart_bias_segment != null and self.restart_bias_uses_upper_region != null) {
             self.restartNewRound(
                 self.restart_bias_segment.?,
-                self.restart_bias_uses_upper_chain.?,
+                self.restart_bias_uses_upper_region.?,
             );
         }
-        self.restart_bias_uses_upper_chain = null;
+        self.restart_bias_uses_upper_region = null;
         self.restart_bias_segment = null;
     }
 
@@ -2398,18 +1235,18 @@ const Fittable = struct {
         );
         self.segment_end_point = .{
             .index = ctime,
-            .value = evaluateLinear(exl, ctime),
+            .value = ext_poly.evaluateLinear(exl, ctime),
         };
     }
 
     /// Deep-copy all state from `other` into `self`. Every `ArrayList` is
-    /// cloned (not aliased), and both `feasible_polygon` and the two arc
+    /// cloned (not aliased), and both `feasible_polygon` and the two visible region
     /// chains are deep-copied via their own clone methods.
-    /// `restart_bias_segment` and `restart_bias_uses_upper_chain` are reset
+    /// `restart_bias_segment` and `restart_bias_uses_upper_region` are reset
     /// to `null`: restart state from the source candidate is not propagated.
     fn cloneFittable(self: *Fittable, other: *const Fittable) void {
         self.fitting_window = other.fitting_window;
-        self.restart_bias_uses_upper_chain = null;
+        self.restart_bias_uses_upper_region = null;
         self.restart_bias_segment = null;
 
         // Clone boundary_segments.
@@ -2426,25 +1263,25 @@ const Fittable = struct {
         self.apx_type = other.apx_type;
         self.pieces_type = other.pieces_type;
 
-        // Clone segs.
-        self.segs.clearRetainingCapacity();
-        self.segs.appendSlice(self.allocator, other.segs.items) catch unreachable;
+        // Clone segments.
+        self.segments.clearRetainingCapacity();
+        self.segments.appendSlice(self.allocator, other.segments.items) catch unreachable;
 
         self.data_point_buffer = other.data_point_buffer;
 
         // Clone feasible_polygon (deep copy both chains).
         self.feasible_polygon.deinit();
-        self.feasible_polygon = other.feasible_polygon.cloneConvexPolygon(
+        self.feasible_polygon = other.feasible_polygon.cloneExtendedPolygon(
             self.allocator,
         ) catch unreachable;
 
-        // Clone arc chains.
-        self.upper_arc_chain.deinit();
-        self.upper_arc_chain = other.upper_arc_chain.cloneArcBoundaryChain(
+        // Clone visible region chains.
+        self.upper_visible_region.deinit();
+        self.upper_visible_region = other.upper_visible_region.cloneVisibleRegionChain(
             self.allocator,
         ) catch unreachable;
-        self.lower_arc_chain.deinit();
-        self.lower_arc_chain = other.lower_arc_chain.cloneArcBoundaryChain(
+        self.lower_visible_region.deinit();
+        self.lower_visible_region = other.lower_visible_region.cloneVisibleRegionChain(
             self.allocator,
         ) catch unreachable;
     }
@@ -2467,18 +1304,18 @@ const MixedTypePlaState = struct {
     approximation_type: i32,
     // Mixed-type DP horizon state.
     horizon_index: i64,
-    commited_knot_queue: ArrayList(Ck),
+    committed_knot_queue: ArrayList(Ck),
     horizon_knots: [3]?usize, // Indices into ck_list (or null) for C[k], C[k+1], C[k+2].
     knot_pool: ArrayList(Ck), // The master array of all Ck nodes. Indices into this array are used.
     candidates: [5]Fittable,
     candidate_active: [5]bool,
     chosen_candidate: usize,
     connectivity_flags: ArrayList(bool),
-    tolerances: Tolerances,
+    tolerances: ext_poly.Tolerances,
     allocator: Allocator,
 
     /// Create a new `MixedTypePlaState` with the given error bound and tolerance.
-    fn create(allocator: Allocator, delta: f64, eps: f64, tols: Tolerances) MixedTypePlaState {
+    fn create(allocator: Allocator, delta: f64, eps: f64, tols: ext_poly.Tolerances) MixedTypePlaState {
         return .{
             .delta = delta,
             .eps = eps,
@@ -2489,7 +1326,7 @@ const MixedTypePlaState = struct {
             .accumulated_delay = 0,
             .approximation_type = 4,
             .horizon_index = -1,
-            .commited_knot_queue = ArrayList(Ck).empty,
+            .committed_knot_queue = ArrayList(Ck).empty,
             .knot_pool = ArrayList(Ck).empty,
             .horizon_knots = .{ null, null, null },
             // Candidate index semantics:
@@ -2545,7 +1382,7 @@ const MixedTypePlaState = struct {
 
     fn deinit(self: *MixedTypePlaState) void {
         self.output_segments.deinit(self.allocator);
-        self.commited_knot_queue.deinit(self.allocator);
+        self.committed_knot_queue.deinit(self.allocator);
         self.knot_pool.deinit(self.allocator);
         self.connectivity_flags.deinit(self.allocator);
         for (&self.candidates) |*b| {
@@ -2724,7 +1561,7 @@ const MixedTypePlaState = struct {
         return self.knot_pool.items.len - 1;
     }
 
-    /// Append the knot at `knot_index` to `commited_knot_queue` and walk its `prev`
+    /// Append the knot at `knot_index` to `committed_knot_queue` and walk its `prev`
     /// chain, decrementing reference counts and removing nodes whose `refn` drops to zero.
     /// Returns the `refn` of the first still-live ancestor (positive value), `-1` if the
     /// chain was fully pruned or the input index was `null`, or a negative error code if
@@ -2734,7 +1571,7 @@ const MixedTypePlaState = struct {
             return -1;
         }
 
-        self.commited_knot_queue.append(
+        self.committed_knot_queue.append(
             self.allocator,
             self.knot_pool.items[knot_index.?],
         ) catch unreachable;
@@ -2743,11 +1580,11 @@ const MixedTypePlaState = struct {
         while (current_index) |node_index| {
             // Find the index of this node in ck_list from the end.
             var list_position: ?usize = null;
-            var i: usize = self.commited_knot_queue.items.len;
+            var i: usize = self.committed_knot_queue.items.len;
             while (i > 0) {
                 i -= 1;
                 // Compare by knot index k (unique identifier).
-                if (self.commited_knot_queue.items[i].k == self.knot_pool.items[node_index].k) {
+                if (self.committed_knot_queue.items[i].k == self.knot_pool.items[node_index].k) {
                     list_position = i;
                     break;
                 }
@@ -2760,7 +1597,7 @@ const MixedTypePlaState = struct {
 
             self.knot_pool.items[node_index].decRef();
             // Also update the copy in ck_list.
-            self.commited_knot_queue.items[list_position.?].references = self.knot_pool.items[node_index].references;
+            self.committed_knot_queue.items[list_position.?].references = self.knot_pool.items[node_index].references;
 
             if (self.knot_pool.items[node_index].references < 0) {
                 // Technical error.
@@ -2771,14 +1608,14 @@ const MixedTypePlaState = struct {
 
             // refn == 0: remove from ck_list and continue to prev.
             const prev = self.knot_pool.items[node_index].previous_knot;
-            _ = self.commited_knot_queue.orderedRemove(list_position.?);
+            _ = self.committed_knot_queue.orderedRemove(list_position.?);
             current_index = prev;
         }
 
         return -1;
     }
 
-    /// Flush any knots at the head of `commited_knot_queue` that are now uniquely
+    /// Flush any knots at the head of `committed_knot_queue` that are now uniquely
     /// referenced and therefore fully committed. A knot is fixed when its `refn == 1`
     /// and the next queue entry's `prev` index confirms the chain relationship. For each
     /// fixed knot, its type flag is appended to `connectivity_flags`, its `lastknot` is
@@ -2786,16 +1623,16 @@ const MixedTypePlaState = struct {
     /// disconnected), and the delay statistic is accumulated. The knot is then removed
     /// from the queue and the successor's `prev` reference is cleared.
     fn emitFixedPieces(self: *MixedTypePlaState) void {
-        while (self.commited_knot_queue.items.len > 0) {
-            const leading_knot = self.commited_knot_queue.items[0];
+        while (self.committed_knot_queue.items.len > 0) {
+            const leading_knot = self.committed_knot_queue.items[0];
             if (leading_knot.references != 1) {
                 return;
             }
 
             // Find the successor.
             var successor_knot: Ck = undefined;
-            if (self.commited_knot_queue.items.len > 1) {
-                successor_knot = self.commited_knot_queue.items[1];
+            if (self.committed_knot_queue.items.len > 1) {
+                successor_knot = self.committed_knot_queue.items[1];
             } else {
                 // Fallback: try to find successor among committed c nodes.
                 if (self.horizon_knots[0]) |c0| {
@@ -2830,14 +1667,14 @@ const MixedTypePlaState = struct {
                 self.accumulated_delay += @intFromFloat(self.current_time - leading_knot.last_knot.index);
 
                 // Remove the fixed knot from the queue.
-                _ = self.commited_knot_queue.orderedRemove(0);
+                _ = self.committed_knot_queue.orderedRemove(0);
 
                 // Clear successor_knot.prev (set to null in the ck_nodes array).
                 if (successor_knot.previous_knot) |sp| {
                     _ = sp; // The prev reference is now consumed.
                 }
                 // Update the actual ck_node's prev to null.
-                if (self.commited_knot_queue.items.len > 0) {
+                if (self.committed_knot_queue.items.len > 0) {
                     // Find successor_knot in ck_nodes and clear its prev.
                     for (self.knot_pool.items) |*node| {
                         if (node.k == successor_knot.k) {
@@ -2847,8 +1684,8 @@ const MixedTypePlaState = struct {
                     }
                 }
                 // Also update ck_list[0] if it exists.
-                if (self.commited_knot_queue.items.len > 0) {
-                    self.commited_knot_queue.items[0].previous_knot = null;
+                if (self.committed_knot_queue.items.len > 0) {
+                    self.committed_knot_queue.items[0].previous_knot = null;
                 }
             } else {
                 return;
@@ -2952,12 +1789,12 @@ const MixedTypePlaState = struct {
         }
     }
 
-    /// Reset the `horizon_knots` triple to `null` and drain `commited_knot_queue`,
+    /// Reset the `horizon_knots` triple to `null` and drain `committed_knot_queue`,
     /// preparing `MixedTypePlaState` for the next fitting call after `closeFitting`
     /// has flushed all remaining output.
     fn clearData(self: *MixedTypePlaState) void {
         self.horizon_knots = .{ null, null, null };
-        self.commited_knot_queue.clearRetainingCapacity();
+        self.committed_knot_queue.clearRetainingCapacity();
     }
 
     /// Feed a full slice of raw `f64` values to the Mixed-Type PLA algorithm. Each value
