@@ -48,7 +48,7 @@ const configuration = @import("../../configuration.zig");
 
 const shared_structs = @import("../../utilities/shared_structs.zig");
 const shared_functions = @import("../../utilities/shared_functions.zig");
-const ConvexHull = @import("../../utilities/convex_hull.zig").ConvexHull;
+const GrahamScanConvexHull = @import("../../utilities/graham_scan_convex_hull.zig").GrahamScanConvexHull;
 const extractors = @import("../../utilities/extractors.zig");
 const rebuilders = @import("../../utilities/rebuilders.zig");
 
@@ -285,7 +285,7 @@ pub fn compressSlideFilter(
     else
         error_bound;
 
-    var convex_hull = try ConvexHull.init(allocator);
+    var convex_hull = try GrahamScanConvexHull.init(allocator);
     defer convex_hull.deinit();
 
     // Initialize the interception point between the upper and lower bounds. The point will be

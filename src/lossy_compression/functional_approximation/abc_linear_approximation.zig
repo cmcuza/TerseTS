@@ -41,7 +41,7 @@ const LinearFunction = shared_structs.LinearFunction;
 const Segment = shared_structs.Segment;
 
 const shared_functions = @import("../../utilities/shared_functions.zig");
-const ConvexHull = @import("../../utilities/convex_hull.zig").ConvexHull;
+const GrahamScanConvexHull = @import("../../utilities/graham_scan_convex_hull.zig").GrahamScanConvexHull;
 
 const extractors = @import("../../utilities/extractors.zig");
 const rebuilders = @import("../../utilities/rebuilders.zig");
@@ -69,7 +69,7 @@ pub fn compress(
     if (uncompressed_values.len < 2) return Error.UnsupportedInput;
 
     // The algorithm uses a convex hull to store a reduce set of significant points.
-    var convex_hull = try ConvexHull.init(allocator);
+    var convex_hull = try GrahamScanConvexHull.init(allocator);
     defer convex_hull.deinit();
 
     var current_segment_start: usize = 0;
@@ -261,7 +261,7 @@ pub fn rebuild(
 /// A and B points form a segment (AB) on the lower or upper hull. The C point is found on
 /// the opposite hull with maximum deviation, projected vertically into the segment AB.
 /// The `allocator` is used to create a AutoHashMap to control which point has been visited.
-pub fn findABCOptimalSegment(convex_hull: *ConvexHull, allocator: Allocator) Error!LinearFunction {
+pub fn findABCOptimalSegment(convex_hull: *GrahamScanConvexHull, allocator: Allocator) Error!LinearFunction {
     const len = convex_hull.len();
 
     // Initialize first side l1 = (p0, p1).
@@ -337,7 +337,7 @@ pub fn findABCOptimalSegment(convex_hull: *ConvexHull, allocator: Allocator) Err
 }
 
 /// Find and return the pivot point C in the `convex_hull` based on the `point_a_index`.
-fn findPivotC(convex_hull: *ConvexHull, point_a_index: usize) ?usize {
+fn findPivotC(convex_hull: *GrahamScanConvexHull, point_a_index: usize) ?usize {
     const point_a = convex_hull.at(point_a_index);
     const point_b = convex_hull.at(point_a_index + 1);
     var max_dev: f64 = -1.0;

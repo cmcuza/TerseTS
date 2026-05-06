@@ -862,7 +862,7 @@ const LineSegment = struct {
 /// Doubly-ended chain of polygon `Edge` vertices (upper or lower boundary) with a dedicated
 /// `extreme_vertex`. `padConvexChain` and `cutConvexChain` perform incremental half-plane clipping
 /// as new samples arrive.
-const ConvexChain = struct {
+const ClippingChain = struct {
     convex_type: ChainType,
     edges: ArrayList(Edge),
     extreme_vertex: ParameterSpacePoint,
@@ -871,7 +871,7 @@ const ConvexChain = struct {
     allocator: Allocator,
 
     /// Create an empty `ConvexChain` of the given type with no extreme vertex.
-    fn create(allocator: Allocator, convex_type: ChainType, tolerances: Tolerances) ConvexChain {
+    fn create(allocator: Allocator, convex_type: ChainType, tolerances: Tolerances) ClippingChain {
         return .{
             .convex_type = convex_type,
             .edges = ArrayList(Edge).empty,
@@ -882,14 +882,14 @@ const ConvexChain = struct {
         };
     }
 
-    fn deinit(self: *ConvexChain) void {
+    fn deinit(self: *ClippingChain) void {
         self.edges.deinit(self.allocator);
     }
 
     /// Initialize chain with one or two start vertices plus extreme point. If `middle_vertex`
     /// is null only `start_vertex` is added.
     fn initializeChain(
-        self: *ConvexChain,
+        self: *ClippingChain,
         start_vertex: ParameterSpacePoint,
         middle_vertex: ?ParameterSpacePoint,
         extreme_vertex: ParameterSpacePoint,
@@ -912,17 +912,17 @@ const ConvexChain = struct {
     }
 
     /// Overwrite the current extreme vertex.
-    fn setExtremeVertex(self: *ConvexChain, vertex: ParameterSpacePoint) void {
+    fn setExtremeVertex(self: *ClippingChain, vertex: ParameterSpacePoint) void {
         self.extreme_vertex = vertex;
     }
 
     /// Return current extreme vertex.
-    fn getExtremeVertex(self: ConvexChain) ParameterSpacePoint {
+    fn getExtremeVertex(self: ClippingChain) ParameterSpacePoint {
         return self.extreme_vertex;
     }
 
     /// Return approximate chain size metric used to bound complexity.
-    fn approximateStateSize(self: ConvexChain) usize {
+    fn approximateStateSize(self: ClippingChain) usize {
         const edge_count = self.edges.items.len;
         if (self.has_extreme_vertex) {
             return @intFromFloat(
@@ -938,7 +938,7 @@ const ConvexChain = struct {
     /// Insert a colored edge at the front; used for `load_arc_plane` intersection vertices that
     /// must precede existing edges.
     fn pushFrontIntersectionVertex(
-        self: *ConvexChain,
+        self: *ClippingChain,
         front_vertex: ParameterSpacePoint,
     ) Allocator.Error!void {
         try self.edges.insert(self.allocator, 0, .{
@@ -950,8 +950,8 @@ const ConvexChain = struct {
     /// Intersect this chain with half-plane `h` by scanning from end-most  (`reverse=false`) or
     /// front (`reverse=true`), trimming excluded vertices and inserting/marking boundary
     ///  intersections. Returns containment status.
-    fn padConvexChain(
-        self: *ConvexChain,
+    fn padClippingChain(
+        self: *ClippingChain,
         half_plane: Halfplane,
         reverse: bool,
     ) Allocator.Error!ContainmentResult {
@@ -1053,8 +1053,8 @@ const ConvexChain = struct {
     /// Trim excluded vertices from the opposite end of `padConvexChain` and return the
     /// first surviving/boundary vertex, or `null` if none survives. `reverse`
     /// selects direction (used by `loadArcPlane`).
-    fn cutConvexChain(
-        self: *ConvexChain,
+    fn cutClippingChain(
+        self: *ClippingChain,
         half_plane: Halfplane,
         reverse: bool,
     ) ?ParameterSpacePoint {
@@ -1147,8 +1147,8 @@ const ConvexChain = struct {
     }
 
     /// Deep-copy this chain (including all edges).
-    fn cloneConvexChain(self: ConvexChain, allocator: Allocator) Allocator.Error!ConvexChain {
-        var new_chain = ConvexChain{
+    fn cloneConvexChain(self: ClippingChain, allocator: Allocator) Allocator.Error!ClippingChain {
+        var new_chain = ClippingChain{
             .convex_type = self.convex_type,
             .edges = ArrayList(Edge).empty,
             .extreme_vertex = self.extreme_vertex,
@@ -1164,10 +1164,10 @@ const ConvexChain = struct {
 /// Convex feasible polygon in `(k, b)` parameter space, represented by upper and lower
 /// `ConvexChain` boundaries. Stores admissible `(slope, intercept)` pairs shrunk
 /// incrementally by half-plane intersections from incoming data samples.
-const ConvexPolygon = struct {
+const IncrementalClippingPolygon = struct {
     chain_meters: ChainMeters,
-    upper_edges: ConvexChain,
-    lower_edges: ConvexChain,
+    upper_edges: ClippingChain,
+    lower_edges: ClippingChain,
     instantiated: bool,
     tolerances: Tolerances,
 
@@ -1179,20 +1179,20 @@ const ConvexPolygon = struct {
         delta: f64,
         eps: f64,
         tols: Tolerances,
-    ) ConvexPolygon {
+    ) IncrementalClippingPolygon {
         return .{
             .chain_meters = ChainMeters
                 .init(delta, eps),
-            .upper_edges = ConvexChain
+            .upper_edges = ClippingChain
                 .create(allocator, .upper, tols),
-            .lower_edges = ConvexChain
+            .lower_edges = ClippingChain
                 .create(allocator, .lower, tols),
             .instantiated = false,
             .tolerances = tols,
         };
     }
 
-    fn deinit(self: *ConvexPolygon) void {
+    fn deinit(self: *IncrementalClippingPolygon) void {
         self.upper_edges.deinit();
         self.lower_edges.deinit();
     }
@@ -1202,7 +1202,7 @@ const ConvexPolygon = struct {
     /// `left_middle`, `right_middle`, `middle_top`, `middle_bottom` form the initial
     /// quadrilateral. Distinct timestamps guarantee non-parallel lines, so intersections always exist.
     fn initializePolygon(
-        self: *ConvexPolygon,
+        self: *IncrementalClippingPolygon,
         first_point: ContinousPoint,
         second_point: ContinousPoint,
         delta: f64,
@@ -1291,7 +1291,7 @@ const ConvexPolygon = struct {
     /// lines may cross and the polygon degenerates to a triangle; a fully collapsed polygon
     /// (`is_polygon_empty`) is resolved via `closed_direction`.
     fn reInitializePolygon(
-        self: *ConvexPolygon,
+        self: *IncrementalClippingPolygon,
         limiting_segment: DataSegment,
         current_segment: DataSegment,
         time_base: f64,
@@ -1475,7 +1475,7 @@ const ConvexPolygon = struct {
 
     /// Return approximate polygon size metric (sum of chain sizes), or 0 if
     /// uninstantiated.
-    fn approximateSize(self: ConvexPolygon) usize {
+    fn approximateSize(self: IncrementalClippingPolygon) usize {
         if (self.instantiated) {
             return self.upper_edges.approximateStateSize() +
                 self.lower_edges.approximateStateSize();
@@ -1485,7 +1485,7 @@ const ConvexPolygon = struct {
 
     /// Return endmost vertex from upper (`right_most`) or lower (`left_most`) chain.
     fn getEndmostVertex(
-        self: ConvexPolygon,
+        self: IncrementalClippingPolygon,
         side: EndmostSide,
     ) ParameterSpacePoint {
         return switch (side) {
@@ -1496,7 +1496,7 @@ const ConvexPolygon = struct {
 
     /// Overwrite the endmost vertices on both chains with `upper_point` and `lower_point`.
     fn setEndmostVertices(
-        self: *ConvexPolygon,
+        self: *IncrementalClippingPolygon,
         upper_point: ParameterSpacePoint,
         lower_point: ParameterSpacePoint,
     ) void {
@@ -1504,11 +1504,11 @@ const ConvexPolygon = struct {
         self.lower_edges.setExtremeVertex(lower_point);
     }
 
-    fn isInstantiated(self: ConvexPolygon) bool {
+    fn isInstantiated(self: IncrementalClippingPolygon) bool {
         return self.instantiated;
     }
 
-    fn setUninstantiated(self: *ConvexPolygon) void {
+    fn setUninstantiated(self: *IncrementalClippingPolygon) void {
         self.instantiated = false;
     }
 
@@ -1516,7 +1516,7 @@ const ConvexPolygon = struct {
     /// returns a horizontal line at `current_boundary_value`. Otherwise picks the endmost
     /// vertex with the smaller absolute slope, minimising approximation excursion.
     fn selectSolution(
-        self: ConvexPolygon,
+        self: IncrementalClippingPolygon,
         shift: f64,
         curb: f64,
     ) LinearFunction {
@@ -1536,22 +1536,22 @@ const ConvexPolygon = struct {
     /// `cutConvexChain` to the other, then update endmost from cut result when present.
     /// Returns containment from the `padConvexChain` side.
     fn intersect(
-        self: *ConvexPolygon,
+        self: *IncrementalClippingPolygon,
         half_plane: Halfplane,
     ) Allocator.Error!ContainmentResult {
         if (half_plane.direction == .point_to_below) {
             const relationship =
-                try self.upper_edges.padConvexChain(half_plane, false);
+                try self.upper_edges.padClippingChain(half_plane, false);
             const end = self.lower_edges
-                .cutConvexChain(half_plane, false);
+                .cutClippingChain(half_plane, false);
             if (end) |e| self.upper_edges
                 .setExtremeVertex(e);
             return relationship;
         } else {
             const relationship = try self.lower_edges
-                .padConvexChain(half_plane, false);
+                .padClippingChain(half_plane, false);
             const end = self.upper_edges
-                .cutConvexChain(half_plane, false);
+                .cutClippingChain(half_plane, false);
             if (end) |e| self.lower_edges
                 .setExtremeVertex(e);
             return relationship;
@@ -1561,22 +1561,22 @@ const ConvexPolygon = struct {
     /// Load arc plane during restart: reverse-direction variant of `intersect`
     /// that prepends new intersection vertices via `pushFrontIntersectionVertex`.
     fn loadArcPlane(
-        self: *ConvexPolygon,
+        self: *IncrementalClippingPolygon,
         half_plane: Halfplane,
     ) Allocator.Error!ContainmentResult {
         if (half_plane.direction == .point_to_below) {
             const relationship =
-                try self.upper_edges.padConvexChain(half_plane, true);
+                try self.upper_edges.padClippingChain(half_plane, true);
             const new_start = self.lower_edges
-                .cutConvexChain(half_plane, true);
+                .cutClippingChain(half_plane, true);
             if (new_start) |start| try self.upper_edges
                 .pushFrontIntersectionVertex(start);
             return relationship;
         } else {
             const relationship = try self.lower_edges
-                .padConvexChain(half_plane, true);
+                .padClippingChain(half_plane, true);
             const new_start = self.upper_edges
-                .cutConvexChain(half_plane, true);
+                .cutClippingChain(half_plane, true);
             if (new_start) |start| try self.lower_edges
                 .pushFrontIntersectionVertex(start);
             return relationship;
@@ -1584,7 +1584,7 @@ const ConvexPolygon = struct {
     }
 
     /// Deep-copy this polygon, including both boundary chains.
-    fn cloneConvexPolygon(self: ConvexPolygon, allocator: Allocator) Allocator.Error!ConvexPolygon {
+    fn cloneConvexPolygon(self: IncrementalClippingPolygon, allocator: Allocator) Allocator.Error!IncrementalClippingPolygon {
         return .{
             .chain_meters = self.chain_meters,
             .upper_edges = try self.upper_edges.cloneConvexChain(allocator),
@@ -1821,7 +1821,7 @@ const Fittable = struct {
     // Feasible-region state.
     closed_direction: ChainType,
     boundary_segment: ArrayList(DataSegment),
-    feasible_polygon: ConvexPolygon,
+    feasible_polygon: IncrementalClippingPolygon,
     active_error_tube: DataSegment,
     upper_arc_chain: ArcBoundaryChain,
     lower_arc_chain: ArcBoundaryChain,
@@ -1864,7 +1864,7 @@ const Fittable = struct {
             .apx_type = 4,
             .closed_direction = .lower,
             .boundary_segment = ArrayList(DataSegment).empty,
-            .feasible_polygon = ConvexPolygon.create(
+            .feasible_polygon = IncrementalClippingPolygon.create(
                 allocator,
                 delta,
                 eps,

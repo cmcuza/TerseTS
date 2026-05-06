@@ -57,7 +57,7 @@ const ClipOutcome = union(enum) {
 
 /// `BorderLine` represents line in the parameter-space of the slope and intercept of a LinearFunction.
 /// The structure contains the `definition` of the `LinearFunction` as well as the `x_axis_domain` in
-/// which the line is defined. This structure is used to contain the borders of the `ConvexPolygon`.
+/// which the line is defined. This structure is used to contain the borders of the `ORourkePolygon`.
 pub const BorderLine = struct {
     x_axis_domain: XAxisDomain, // Start and end of the x-axis domain of the border line.
     definition: LinearFunction, // Parameters defining the border line.
@@ -230,13 +230,13 @@ pub const BorderLine = struct {
     }
 };
 
-/// `ConvexPolygon` represents a convex polygon in the (slope, intercept) parameter space.
+/// `ORourkePolygon` represents a convex polygon in the (slope, intercept) parameter space.
 /// It maintains the feasible region for linear model parameters under bounded error constraints.
 /// The polygon is defined by two arrays of `BorderLine` (`upper_bound_lines` and
 /// `lower_bound_lines`) and supports incremental updates via intersection with new half-plane
 /// constraints. The function `update` updates the polygon which performs clipping operations to
 /// refine the feasible region in the polygon.
-pub const ConvexPolygon = struct {
+pub const ORourkePolygon = struct {
     // Allocator for memory management.
     allocator: Allocator,
     // Vertices defining the upper segments of the Polygon.
@@ -249,8 +249,8 @@ pub const ConvexPolygon = struct {
     lower_bound_start: usize,
 
     // Initializes an empty convex polygon with the given `allocator`.
-    pub fn init(allocator: Allocator) ConvexPolygon {
-        return ConvexPolygon{
+    pub fn init(allocator: Allocator) ORourkePolygon {
+        return ORourkePolygon{
             .allocator = allocator,
             .upper_bound_lines = ArrayList(BorderLine).empty,
             .lower_bound_lines = ArrayList(BorderLine).empty,
@@ -259,20 +259,20 @@ pub const ConvexPolygon = struct {
         };
     }
 
-    // Releases all allocated memory used by the ConvexPolygon `self`.
-    pub fn deinit(self: *ConvexPolygon) void {
+    // Releases all allocated memory used by the ORourkePolygon `self`.
+    pub fn deinit(self: *ORourkePolygon) void {
         self.upper_bound_lines.deinit(self.allocator);
         self.lower_bound_lines.deinit(self.allocator);
     }
 
-    /// Updates the ConvexPolygon `self` with `new_upper_bound` and `new_lower_bound`, updating the
+    /// Updates the ORourkePolygon `self` with `new_upper_bound` and `new_lower_bound`, updating the
     /// internal upper and lower bound lines in-place. Returns `true` if the polygon remains
     /// feasible after the update, `false` if the new constraints would empty the region. The function
     /// handles three cases. First, if the polygon is empty, the function adds the two incoming lines.
     /// If one border line on each chain, build the first four border lines polygon. General case, clip
     /// by lower, then clip by upper (O’Rourke online step). If an error occurs, it is returned.
     pub fn update(
-        self: *ConvexPolygon,
+        self: *ORourkePolygon,
         new_upper_bound: BorderLine,
         new_lower_bound: BorderLine,
     ) !bool {
@@ -374,21 +374,21 @@ pub const ConvexPolygon = struct {
         return true;
     }
 
-    // Clears the contents of the `ConvexPolygon` by resetting the lower and upper bound start
+    // Clears the contents of the `ORourkePolygon` by resetting the lower and upper bound start
     // indices to zero, and clearing the `lower_bound_lines` and `upper_bound_lines` while retaining
     // their allocated capacity. This prepares the polygon for reuse without reallocating memory.
-    pub fn clear(self: *ConvexPolygon) void {
+    pub fn clear(self: *ORourkePolygon) void {
         self.lower_bound_start = 0;
         self.upper_bound_start = 0;
         self.lower_bound_lines.clearRetainingCapacity();
         self.upper_bound_lines.clearRetainingCapacity();
     }
 
-    /// Returns a representative feasible linear function for the `self` ConvexPolygon.
+    /// Returns a representative feasible linear function for the `self` ORourkePolygon.
     /// We use the midpoint of the two extreme corners in (slope, intercept) space.
     /// The polygon needs to have at least one element to contain a feasible solution.
     /// If only one upper/lower border lines, returns a LinearFunction with slope zero;
-    pub fn computeFeasibleSolution(self: *const ConvexPolygon) LinearFunction {
+    pub fn computeFeasibleSolution(self: *const ORourkePolygon) LinearFunction {
         std.debug.assert(!self.isEmpty());
 
         const upper_left = self.upperLeft();
@@ -411,7 +411,7 @@ pub const ConvexPolygon = struct {
     }
 
     // Checks whether the polygon has any border line.
-    fn isEmpty(self: *const ConvexPolygon) bool {
+    fn isEmpty(self: *const ORourkePolygon) bool {
         return (self.upper_bound_lines.items.len == 0) and (self.lower_bound_lines.items.len == 0);
     }
 
@@ -422,7 +422,7 @@ pub const ConvexPolygon = struct {
     /// polygon’s current upper and lower chains, computes the intersection segments, and
     /// returns a `ClipOutcome`. In case of intersection, the returned `Clip` variant contains
     /// absolute indices into the chain arrays and the replacement border segments.
-    fn clip(self: *const ConvexPolygon, bound_line: BorderLine, is_upper: bool) ClipOutcome {
+    fn clip(self: *const ORourkePolygon, bound_line: BorderLine, is_upper: bool) ClipOutcome {
         // 1) Locate intersection positions on both chains.
         const upper_chain_slice = self.upper_bound_lines.items[self.upper_bound_start..];
         const upper_rel_index = searchIntersection(
@@ -469,7 +469,7 @@ pub const ConvexPolygon = struct {
     /// polygon in a valid way; in this case the actual split is delegated to the function clip.
     /// If `.Reject`, is returned if the new upper bound invalidates the polygon (removes all area).
     fn clipWithUpperBound(
-        self: *const ConvexPolygon,
+        self: *const ORourkePolygon,
         new_upper_bound_line: BorderLine,
     ) ClipOutcome {
         // Guard: polygon must be initialized.
@@ -517,7 +517,7 @@ pub const ConvexPolygon = struct {
     /// valid way; the actual split is delegated to the function clip. If `.Reject`, the new lower
     /// bound misses in a way that would remove all area.
     fn clipWithLowerBound(
-        self: *const ConvexPolygon,
+        self: *const ORourkePolygon,
         new_lower_bound_line: BorderLine,
     ) ClipOutcome {
         // Guard: polygon must be initialized.
@@ -555,13 +555,13 @@ pub const ConvexPolygon = struct {
     }
 
     /// Returns the upper-left corner point of the polygon (start of current upper bound line).
-    fn upperLeft(self: *const ConvexPolygon) ParameterSpacePoint {
+    fn upperLeft(self: *const ORourkePolygon) ParameterSpacePoint {
         const upper_line = self.upper_bound_lines.items[self.upper_bound_start];
         return upper_line.evaluateAtStart();
     }
 
     /// Returns the lower-right corner point of the polygon (end of current lower bound line).
-    fn lowerRight(self: *const ConvexPolygon) ParameterSpacePoint {
+    fn lowerRight(self: *const ORourkePolygon) ParameterSpacePoint {
         const lower_line = self.lower_bound_lines.items[self.lower_bound_start];
         return lower_line.evaluateAtEnd();
     }
@@ -608,7 +608,7 @@ fn searchIntersection(
 /// two half-plane boundaries (upper and lower) at the given x position, offset by `eps`, and
 /// updates the polygon by intersecting with these constraints. Returns `true` if the polygon
 /// remains non-empty after the update, `false` otherwise.
-fn addPoint(poly: *ConvexPolygon, x_axis: usize, y_axis: f64, eps: f64) !bool {
+fn addPoint(poly: *ORourkePolygon, x_axis: usize, y_axis: f64, eps: f64) !bool {
     const slope = -@as(f64, @floatFromInt(x_axis)); // (-x_k).
     const upper_intercept = y_axis + eps;
     const lower_intercept = y_axis - eps;
@@ -632,7 +632,7 @@ test "convex polygon can update random linear sequences with slope break" {
     const random = tester.getDefaultRandomGenerator();
 
     // Create polygon.
-    var poly = ConvexPolygon.init(allocator);
+    var poly = ORourkePolygon.init(allocator);
     defer poly.deinit();
 
     const epsilon = 0.8;
