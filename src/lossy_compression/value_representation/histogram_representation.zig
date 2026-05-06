@@ -35,9 +35,9 @@ const HashedPriorityQueue = @import(
     "../../utilities/hashed_priority_queue.zig",
 ).HashedPriorityQueue;
 
-const GrahamScanConvexHull = @import(
-    "../../utilities/graham_scan_convex_hull.zig",
-).GrahamScanConvexHull;
+const ConvexHull = @import(
+    "../../utilities/convex_hull.zig",
+).ConvexHull;
 
 const shared_structs = @import("../../utilities/shared_structs.zig");
 const shared_functions = @import("../../utilities/shared_functions.zig");
@@ -330,7 +330,7 @@ pub fn rebuildPWLH(
 /// `Bucket` stores information about a range of consecutives values in the time series. The
 /// structure stores the indices `begin` and `end` indexing where the bucket starts and ends. It stores the
 /// minimum and maximum values (`min_val` and `max_val`) in the bucket. Additionally, it stores
-/// the `convex_hull` of type `GrahamScanConvexHull` that represents the elements in the bucket. The
+/// the `convex_hull` of type `ConvexHull` that represents the elements in the bucket. The
 /// `convex_hull` is utilized when a linear approximation of the data points in the bucket is required. The
 /// structure contains the function `computeConstantApproximation` which computes and returns the
 /// constant approximation that minimizes the $L_\inf$ error of the data points in the bucket. Likewise,
@@ -346,7 +346,7 @@ const Bucket = struct {
     // Max value of the bucket.
     max_val: f64,
     // Convex Hull of the elements in the bucket.
-    convex_hull: GrahamScanConvexHull,
+    convex_hull: ConvexHull,
 
     /// Initialize the bucket with the given indices and min/max values.
     pub fn init(allocator: Allocator, begin: usize, end: usize, min_val: f64, max_val: f64) !Bucket {
@@ -355,7 +355,7 @@ const Bucket = struct {
             .end = end,
             .min_val = min_val,
             .max_val = max_val,
-            .convex_hull = try GrahamScanConvexHull.init(allocator),
+            .convex_hull = try ConvexHull.init(allocator),
         };
     }
 
@@ -516,7 +516,7 @@ const Histogram = struct {
         var convex_hull_one = self.buckets.items[index].convex_hull;
         var convex_hull_two = self.buckets.items[index + 1].convex_hull;
 
-        var convex_hull_merged: GrahamScanConvexHull = try GrahamScanConvexHull.init(self.allocator);
+        var convex_hull_merged: ConvexHull = try ConvexHull.init(self.allocator);
         defer convex_hull_merged.deinit();
 
         try convex_hull_one.merge(&convex_hull_two, &convex_hull_merged);
@@ -694,7 +694,7 @@ test "Simple fixed values test of PWCH" {
     }
     try expectEqual(@as(usize, @intCast(3)), histogram.buckets.items.len);
 
-    var convex_hull: GrahamScanConvexHull = try GrahamScanConvexHull.init(allocator);
+    var convex_hull: ConvexHull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
 
     const expected_histogram = [_]Bucket{
@@ -769,7 +769,7 @@ test "Fixed cluster number with random values for PWCH" {
     var expected_histogram = ArrayList(Bucket).empty;
     defer expected_histogram.deinit(allocator);
 
-    var convex_hull: GrahamScanConvexHull = try GrahamScanConvexHull.init(allocator);
+    var convex_hull: ConvexHull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
 
     var current_begin: usize = 0;
@@ -860,7 +860,7 @@ test "Random clusters, elements per cluster and values for PWCH" {
     var expected_histogram = ArrayList(Bucket).empty;
     defer expected_histogram.deinit(allocator);
 
-    var convex_hull: GrahamScanConvexHull = try GrahamScanConvexHull.init(allocator);
+    var convex_hull: ConvexHull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
 
     var current_begin: usize = 0;
@@ -890,13 +890,13 @@ test "Compute simple linear approximation merge error with known results" {
 
     // Create Convex Hulls for the buckets.
     // No need to deallocate memory because histogram will do it.
-    var convex_hull_one = try GrahamScanConvexHull.init(allocator);
+    var convex_hull_one = try ConvexHull.init(allocator);
 
     try convex_hull_one.add(.{ .index = 0.0, .value = 0.0 });
     try convex_hull_one.add(.{ .index = 1.0, .value = 1.0 });
 
     // No need to deallocate memory because histogram will do it.
-    var convex_hull_two = try GrahamScanConvexHull.init(allocator);
+    var convex_hull_two = try ConvexHull.init(allocator);
 
     try convex_hull_two.add(.{ .index = 2.0, .value = 2.0 });
     try convex_hull_two.add(.{ .index = 3.0, .value = 3.0 });
@@ -929,13 +929,13 @@ test "Compute divergent linear approximation merge error with known results" {
     const allocator = testing.allocator;
 
     // No need to deallocate memory because `histogram` will do it.
-    var convex_hull_one = try GrahamScanConvexHull.init(allocator);
+    var convex_hull_one = try ConvexHull.init(allocator);
 
     try convex_hull_one.add(.{ .index = 0.0, .value = 0.0 });
     try convex_hull_one.add(.{ .index = 1.0, .value = 1.0 });
 
     // No need to deallocate memory because histogram will do it.
-    var convex_hull_two = try GrahamScanConvexHull.init(allocator);
+    var convex_hull_two = try ConvexHull.init(allocator);
 
     try convex_hull_two.add(.{ .index = 2.0, .value = 3.0 });
     try convex_hull_two.add(.{ .index = 3.0, .value = 4.0 });

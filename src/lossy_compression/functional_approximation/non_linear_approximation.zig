@@ -42,11 +42,11 @@ const Method = tersets.Method;
 const Allocator = mem.Allocator;
 
 const shared_structs = @import("../../utilities/shared_structs.zig");
-const orourke_parameter_space_polygon = @import("../../utilities/orourke_parameter_space_polygon.zig");
+const convex_polygon = @import("../../utilities/convex_polygon.zig");
 const shared_functions = @import("../../utilities/shared_functions.zig");
 const DiscretePoint = shared_structs.DiscretePoint;
 const LinearFunction = shared_structs.LinearFunction;
-const BorderLine = orourke_parameter_space_polygon.BorderLine;
+const BorderLine = convex_polygon.BorderLine;
 
 /// Represents the different function types available for approximating time series segments,
 /// as defined in Table I of the NeaTS paper. Each type corresponds to a specific mathematical form:
@@ -546,7 +546,7 @@ fn findOptimalFunctionalApproximation(
     const n = uncompressed_data.len;
 
     // Initializes the convex polygon representing the feasible parameter region.
-    var polygon = orourke_parameter_space_polygon.ORourkePolygon.init(allocator);
+    var polygon = convex_polygon.ConvexPolygon.init(allocator);
     defer polygon.deinit();
 
     // Allocates dynamic programming arrays for the shortest path algorithm.
@@ -641,7 +641,7 @@ fn findOptimalFunctionalApproximation(
 /// The `polygon` parameter is used to maintain the feasible region of parameters.
 /// If an error occurs, it is returned.
 fn computeApproximation(
-    polygon: *orourke_parameter_space_polygon.ORourkePolygon,
+    polygon: *convex_polygon.ConvexPolygon,
     uncompressed_data: []const f64,
     start_idx: usize,
     function_type: FunctionType,

@@ -47,15 +47,15 @@ const Turn = enum(i8) { right, left, collinear };
 const HullType = enum(i8) { upperHull, lowerHull };
 
 /// Convex Hull formed by an upper and lower hull. The hulls are formed by the input data with
-/// discrete time axis thus, the GrahamScanConvexH is always represented by `DiscretePoint`.
-pub const GrahamScanConvexHull = struct {
+/// discrete time axis thus, the ConvexHull is always represented by `DiscretePoint`.
+pub const ConvexHull = struct {
     allocator: Allocator,
     lower_hull: ArrayList(DiscretePoint),
     upper_hull: ArrayList(DiscretePoint),
 
     // Initialize the container with a given `allocator`.
-    pub fn init(allocator: Allocator) !GrahamScanConvexHull {
-        return GrahamScanConvexHull{
+    pub fn init(allocator: Allocator) !ConvexHull {
+        return ConvexHull{
             .allocator = allocator,
             .lower_hull = ArrayList(DiscretePoint).empty,
             .upper_hull = ArrayList(DiscretePoint).empty,
@@ -63,25 +63,25 @@ pub const GrahamScanConvexHull = struct {
     }
 
     // Deinitialize the container and free the allocated memory.
-    pub fn deinit(self: *GrahamScanConvexHull) void {
+    pub fn deinit(self: *ConvexHull) void {
         self.lower_hull.deinit(self.allocator);
         self.upper_hull.deinit(self.allocator);
     }
 
     /// Add a new `point` to the convex hull.
-    pub fn add(self: *GrahamScanConvexHull, point: DiscretePoint) !void {
+    pub fn add(self: *ConvexHull, point: DiscretePoint) !void {
         try addToHull(self.allocator, &self.upper_hull, Turn.right, point);
         try addToHull(self.allocator, &self.lower_hull, Turn.left, point);
     }
 
     /// Invalidates all element pointers in the upper and lower hull. The capacity is preserved.
-    pub fn clean(self: *GrahamScanConvexHull) void {
+    pub fn clean(self: *ConvexHull) void {
         self.upper_hull.clearRetainingCapacity();
         self.lower_hull.clearRetainingCapacity();
     }
 
     /// Returns the points in the `upper_hull` except the last one.
-    pub fn getUpperHullExceptLast(self: *GrahamScanConvexHull) []const DiscretePoint {
+    pub fn getUpperHullExceptLast(self: *ConvexHull) []const DiscretePoint {
         const upper_hull_len = self.upper_hull.items.len;
         if (upper_hull_len <= 1) {
             // Return an empty array if there's only one or no items.
@@ -91,7 +91,7 @@ pub const GrahamScanConvexHull = struct {
     }
 
     /// Returns the points in the `lower_hull` except the last one.
-    pub fn getLowerHullExceptLast(self: *GrahamScanConvexHull) []const DiscretePoint {
+    pub fn getLowerHullExceptLast(self: *ConvexHull) []const DiscretePoint {
         const lower_hull_len = self.lower_hull.items.len;
         if (lower_hull_len <= 1) {
             // Return an empty array if there's only one or no items.
@@ -107,7 +107,7 @@ pub const GrahamScanConvexHull = struct {
     /// The `LinearFunction` is computed following the description provided in the paper
     /// Space Efficient Streaming Algorithms for the Maximum Error Histogram.
     /// IEEE ICDE 2006. https://doi.org/10.1109/ICDE.2007.368961.
-    pub fn computeMABRLinearFunction(self: *GrahamScanConvexHull) Error!LinearFunction {
+    pub fn computeMABRLinearFunction(self: *ConvexHull) Error!LinearFunction {
         const convex_hull_len: usize = self.len();
 
         // Check if the Convex Hull has only one point. If so, the linear function is a horizontal
@@ -194,10 +194,10 @@ pub const GrahamScanConvexHull = struct {
         return LinearFunction{ .slope = min_slope, .intercept = min_intercept };
     }
 
-    /// Merges another `other: GrahamScanConvexHull` into either the current `self: GrahamScanConvexHull` (in-place)
+    /// Merges another `other: ConvexHull` into either the current `self: ConvexHull` (in-place)
     /// or into the provided `merged` hull (not in-place). If `merged` is `null`, the operation is
     /// in-place. If appending to the hulls fails due to allocation issues, the error is returned.
-    pub fn merge(self: *GrahamScanConvexHull, other: *GrahamScanConvexHull, merged: ?*GrahamScanConvexHull) !void {
+    pub fn merge(self: *ConvexHull, other: *ConvexHull, merged: ?*ConvexHull) !void {
         // Add points from `self` to `merged` if non-in-place.
         if (merged) |m| {
             var self_points = try self.getAllPointsSorted();
@@ -254,7 +254,7 @@ pub const GrahamScanConvexHull = struct {
 
     // Computes and returns the maximum $L_{\inf}$ error of the `linear_function` with respect to
     // the points in the convex hull `self`.
-    pub fn computeMaxError(self: *GrahamScanConvexHull, linear_function: LinearFunction) !f64 {
+    pub fn computeMaxError(self: *ConvexHull, linear_function: LinearFunction) !f64 {
         const convex_hull_len = self.len();
 
         // If the Convex Hull is empty, return an error.
@@ -282,8 +282,8 @@ pub const GrahamScanConvexHull = struct {
         return @as(f64, @floatCast(max_error));
     }
 
-    /// Returns the length of the `GrahamScanConvexHull`.
-    pub fn len(self: *GrahamScanConvexHull) usize {
+    /// Returns the length of the `ConvexHull`.
+    pub fn len(self: *ConvexHull) usize {
         const lower_hull_len = self.lower_hull.items.len;
         const upper_hull_len = self.upper_hull.items.len;
         const convex_hull_len = lower_hull_len + upper_hull_len;
@@ -305,7 +305,7 @@ pub const GrahamScanConvexHull = struct {
 
     /// Returns the item at the given `index` when counterclockwise concatenating the lower and upper
     /// hull and considering the repeated first and last element.
-    pub fn at(self: *GrahamScanConvexHull, index: usize) DiscretePoint {
+    pub fn at(self: *ConvexHull, index: usize) DiscretePoint {
         const lower_hull_len = self.lower_hull.items.len;
         const convex_hull_len = self.len();
         var new_index = @mod(index, convex_hull_len);
@@ -317,9 +317,9 @@ pub const GrahamScanConvexHull = struct {
         }
     }
 
-    /// Helper function to get all points as an `ArrayList(DiscretePoint)` from the GrahamScanConvexHull.
-    /// If the `GrahamScanConvexHull` is empty, an empty ArrayList is returned.
-    fn getAllPoints(self: *GrahamScanConvexHull) !ArrayList(DiscretePoint) {
+    /// Helper function to get all points as an `ArrayList(DiscretePoint)` from the ConvexHull.
+    /// If the `ConvexHull` is empty, an empty ArrayList is returned.
+    fn getAllPoints(self: *ConvexHull) !ArrayList(DiscretePoint) {
         // Since the first and final element are repeated, we substract two from the sum of the
         // lower and upper hull length.
         var hull: ArrayList(DiscretePoint) = try ArrayList(DiscretePoint).initCapacity(
@@ -338,8 +338,8 @@ pub const GrahamScanConvexHull = struct {
 
     /// Helper function to get all points sorted as an `ArrayList(DiscretePoint)`. The function
     /// merges the lower and upper hulls, which are already sorted, in O(N) time. If the
-    /// `GrahamScanConvexHull` is empty, an empty ArrayList is returned.
-    fn getAllPointsSorted(self: *GrahamScanConvexHull) !ArrayList(DiscretePoint) {
+    /// `ConvexHull` is empty, an empty ArrayList is returned.
+    fn getAllPointsSorted(self: *ConvexHull) !ArrayList(DiscretePoint) {
         // Initialize the result list with enough capacity for both hulls.
         var all_points = try ArrayList(DiscretePoint).initCapacity(
             self.allocator,
@@ -533,7 +533,7 @@ fn findTangent(
 /// 1. In the `upper_hull`, every sequence of three consecutive points must turn to the right.
 /// 2. In the `lower_hull`, every sequence of three consecutive points must turn to the left.
 /// If any of these properties are violated, an error is returned.
-fn testGrahamScanConvexHullProperty(convex_hull: *GrahamScanConvexHull) !void {
+fn testConvexHullProperty(convex_hull: *ConvexHull) !void {
     // All points in the Upper Hull should turn to the right.
     for (1..convex_hull.upper_hull.items.len - 1) |i| {
         const turn = computeTurn(
@@ -558,12 +558,12 @@ fn testGrahamScanConvexHullProperty(convex_hull: *GrahamScanConvexHull) !void {
 /// Helper function to test the merging of two convex hulls. The function initializes two convex
 /// hulls with random points and merges them either in-place or not in-place based on the `in_place`
 /// flag. After merging, it validates the properties of the resulting convex hull.
-fn mergeGrahamScanConvexHullsTestHelper(in_place: bool) !void {
+fn mergeConvexHullsTestHelper(in_place: bool) !void {
     const allocator = testing.allocator;
     const random = tester.getDefaultRandomGenerator();
 
     // Initialize the first convex hull with random points.
-    var convex_hull_one = try GrahamScanConvexHull.init(allocator);
+    var convex_hull_one = try ConvexHull.init(allocator);
     defer convex_hull_one.deinit();
 
     const number_of_values = tester.generateNumberOfValues(random);
@@ -572,7 +572,7 @@ fn mergeGrahamScanConvexHullsTestHelper(in_place: bool) !void {
     }
 
     // Initialize the second convex hull with random points.
-    var convex_hull_two = try GrahamScanConvexHull.init(allocator);
+    var convex_hull_two = try ConvexHull.init(allocator);
     defer convex_hull_two.deinit();
     for (number_of_values..2 * number_of_values) |i| {
         try convex_hull_two.add(.{ .index = i, .value = random.float(f64) });
@@ -582,21 +582,21 @@ fn mergeGrahamScanConvexHullsTestHelper(in_place: bool) !void {
         // Merge the second convex hull into the first one in-place.
         try convex_hull_one.merge(&convex_hull_two, null);
         // Validate the properties of the merged convex hull.
-        try testGrahamScanConvexHullProperty(&convex_hull_one);
+        try testConvexHullProperty(&convex_hull_one);
     } else {
         // Initialize a new convex hull for the merged result.
-        var convex_hull_merged = try GrahamScanConvexHull.init(allocator);
+        var convex_hull_merged = try ConvexHull.init(allocator);
         defer convex_hull_merged.deinit();
         // Merge the two convex hulls into the new one.
         try convex_hull_one.merge(&convex_hull_two, &convex_hull_merged);
         // Validate the properties of the merged convex hull.
-        try testGrahamScanConvexHullProperty(&convex_hull_merged);
+        try testConvexHullProperty(&convex_hull_merged);
     }
 }
 
 /// Helper function that verifies that the points in the `convex_hull` are the same as the points
 /// in `list_of_points`. This ensures that the convex hull has not been modified during operations.
-fn verifyGrahamScanConvexHullNotModified(allocator: Allocator, convex_hull: *GrahamScanConvexHull, list_of_points: *const ArrayList(DiscretePoint)) !void {
+fn verifyConvexHullNotModified(allocator: Allocator, convex_hull: *ConvexHull, list_of_points: *const ArrayList(DiscretePoint)) !void {
     // Get all points from the convex hull, sorted.
     var convex_hull_points = try convex_hull.getAllPointsSorted();
     defer convex_hull_points.deinit(allocator); // Ensure the allocated memory is freed.
@@ -615,7 +615,7 @@ fn verifyGrahamScanConvexHullNotModified(allocator: Allocator, convex_hull: *Gra
 test "Create incrementally convex hull with known result" {
     const allocator = testing.allocator;
 
-    var convex_hull = try GrahamScanConvexHull.init(allocator);
+    var convex_hull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
 
     try convex_hull.add(.{ .index = 0, .value = 3 });
@@ -663,20 +663,20 @@ test "Create incrementally a convex hull with random elements" {
     var rnd = std.Random.DefaultPrng.init(seed);
     const random = rnd.random();
 
-    var convex_hull = try GrahamScanConvexHull.init(allocator);
+    var convex_hull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
 
     for (0..tester.generateNumberOfValues(random)) |i| {
         try convex_hull.add(.{ .index = i, .value = random.float(f64) });
     }
 
-    try testGrahamScanConvexHullProperty(&convex_hull);
+    try testConvexHullProperty(&convex_hull);
 }
 
 test "Compute MABR Linear Function for one value Convex Hull" {
     const allocator = std.testing.allocator;
 
-    var convex_hull = try GrahamScanConvexHull.init(allocator);
+    var convex_hull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
 
     try convex_hull.add(.{ .index = 0, .value = 5 });
@@ -694,7 +694,7 @@ test "Compute MABR Linear Function for two horizontal points" {
         .{ .index = 1, .value = 2.0 },
     };
 
-    var convex_hull = try GrahamScanConvexHull.init(allocator);
+    var convex_hull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
 
     for (points) |point| {
@@ -714,7 +714,7 @@ test "Compute MABR Linear Function for two diagonal points" {
         .{ .index = 1, .value = 3.0 },
     };
 
-    var convex_hull = try GrahamScanConvexHull.init(allocator);
+    var convex_hull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
 
     for (points) |point| {
@@ -739,7 +739,7 @@ test "Compute MABR LinearFunction for known Convex Hull one" {
     };
 
     // Initialize the convex hull and add points to it.
-    var convex_hull = try GrahamScanConvexHull.init(allocator);
+    var convex_hull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
 
     for (points) |point| {
@@ -766,7 +766,7 @@ test "Compute MABR LinearFunction for known Convex Hull two" {
         .{ .index = 4, .value = 2.0 },
     };
     // Initialize the convex hull and add points to it.
-    var convex_hull = try GrahamScanConvexHull.init(allocator);
+    var convex_hull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
 
     for (points) |point| {
@@ -785,7 +785,7 @@ test "Compute MABR LinearFunction for random Convex Hull" {
     const allocator = testing.allocator;
     const random = tester.getDefaultRandomGenerator();
 
-    var convex_hull = try GrahamScanConvexHull.init(allocator);
+    var convex_hull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
 
     for (0..tester.generateNumberOfValues(random)) |i| {
@@ -805,7 +805,7 @@ test "MABR recovers random and noisy linear function" {
     const allocator = testing.allocator;
     const random = tester.getDefaultRandomGenerator();
 
-    var convex_hull = try GrahamScanConvexHull.init(allocator);
+    var convex_hull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
 
     // Generating small slope and intercept to avoid overflowing.
@@ -837,10 +837,10 @@ test "MABR recovers random and noisy linear function" {
 test "Merge in-place convex hulls with known result" {
     const allocator = testing.allocator;
 
-    var convex_hull_one = try GrahamScanConvexHull.init(allocator);
+    var convex_hull_one = try ConvexHull.init(allocator);
     defer convex_hull_one.deinit();
 
-    var convex_hull_two = try GrahamScanConvexHull.init(allocator);
+    var convex_hull_two = try ConvexHull.init(allocator);
     defer convex_hull_two.deinit();
 
     try convex_hull_one.add(.{ .index = 0, .value = 3 });
@@ -892,11 +892,11 @@ test "Merge in-place convex hulls with known result" {
 }
 
 test "Merge in-place convex hulls with random elements" {
-    try mergeGrahamScanConvexHullsTestHelper(true);
+    try mergeConvexHullsTestHelper(true);
 }
 
 test "Merge not-in-place convex hulls with random elements" {
-    try mergeGrahamScanConvexHullsTestHelper(false);
+    try mergeConvexHullsTestHelper(false);
 }
 
 test "Merge in-place single element's convex hull with other convex hull" {
@@ -905,12 +905,12 @@ test "Merge in-place single element's convex hull with other convex hull" {
     var rnd = std.Random.DefaultPrng.init(seed);
     const random = rnd.random();
 
-    var convex_hull_one = try GrahamScanConvexHull.init(allocator);
+    var convex_hull_one = try ConvexHull.init(allocator);
     defer convex_hull_one.deinit();
 
     try convex_hull_one.add(.{ .index = 0, .value = random.float(f64) });
 
-    var convex_hull_two = try GrahamScanConvexHull.init(allocator);
+    var convex_hull_two = try ConvexHull.init(allocator);
     defer convex_hull_two.deinit();
 
     for (1..tester.generateNumberOfValues(random)) |i| {
@@ -919,7 +919,7 @@ test "Merge in-place single element's convex hull with other convex hull" {
 
     try convex_hull_one.merge(&convex_hull_two, null);
 
-    try testGrahamScanConvexHullProperty(&convex_hull_one);
+    try testConvexHullProperty(&convex_hull_one);
 }
 
 test "Merge not-in-place single element's convex hull with other convex hull" {
@@ -928,24 +928,24 @@ test "Merge not-in-place single element's convex hull with other convex hull" {
     var rnd = std.Random.DefaultPrng.init(seed);
     const random = rnd.random();
 
-    var convex_hull_one = try GrahamScanConvexHull.init(allocator);
+    var convex_hull_one = try ConvexHull.init(allocator);
     defer convex_hull_one.deinit();
 
     try convex_hull_one.add(.{ .index = 0, .value = random.float(f64) });
 
-    var convex_hull_two = try GrahamScanConvexHull.init(allocator);
+    var convex_hull_two = try ConvexHull.init(allocator);
     defer convex_hull_two.deinit();
 
     for (1..tester.generateNumberOfValues(random)) |i| {
         try convex_hull_two.add(.{ .index = i, .value = random.float(f64) });
     }
 
-    var convex_hull_merged = try GrahamScanConvexHull.init(allocator);
+    var convex_hull_merged = try ConvexHull.init(allocator);
     defer convex_hull_merged.deinit();
 
     try convex_hull_one.merge(&convex_hull_two, &convex_hull_merged);
 
-    try testGrahamScanConvexHullProperty(&convex_hull_merged);
+    try testConvexHullProperty(&convex_hull_merged);
 }
 
 test "Merge in-place convex hull with single element's convex hull" {
@@ -954,7 +954,7 @@ test "Merge in-place convex hull with single element's convex hull" {
     var rnd = std.Random.DefaultPrng.init(seed);
     const random = rnd.random();
 
-    var convex_hull_one = try GrahamScanConvexHull.init(allocator);
+    var convex_hull_one = try ConvexHull.init(allocator);
     defer convex_hull_one.deinit();
 
     const number_of_values = tester.generateNumberOfValues(random);
@@ -962,14 +962,14 @@ test "Merge in-place convex hull with single element's convex hull" {
         try convex_hull_one.add(.{ .index = i, .value = random.float(f64) });
     }
 
-    var convex_hull_two = try GrahamScanConvexHull.init(allocator);
+    var convex_hull_two = try ConvexHull.init(allocator);
     defer convex_hull_two.deinit();
 
     try convex_hull_two.add(.{ .index = number_of_values, .value = random.float(f64) });
 
     try convex_hull_one.merge(&convex_hull_two, null);
 
-    try testGrahamScanConvexHullProperty(&convex_hull_one);
+    try testConvexHullProperty(&convex_hull_one);
 }
 
 test "Merge not-in-place convex hull with single element's convex hull" {
@@ -978,7 +978,7 @@ test "Merge not-in-place convex hull with single element's convex hull" {
     var rnd = std.Random.DefaultPrng.init(seed);
     const random = rnd.random();
 
-    var convex_hull_one = try GrahamScanConvexHull.init(allocator);
+    var convex_hull_one = try ConvexHull.init(allocator);
     defer convex_hull_one.deinit();
 
     const number_of_values = tester.generateNumberOfValues(random);
@@ -986,17 +986,17 @@ test "Merge not-in-place convex hull with single element's convex hull" {
         try convex_hull_one.add(.{ .index = i, .value = random.float(f64) });
     }
 
-    var convex_hull_two = try GrahamScanConvexHull.init(allocator);
+    var convex_hull_two = try ConvexHull.init(allocator);
     defer convex_hull_two.deinit();
 
     try convex_hull_two.add(.{ .index = number_of_values, .value = random.float(f64) });
 
-    var convex_hull_merged = try GrahamScanConvexHull.init(allocator);
+    var convex_hull_merged = try ConvexHull.init(allocator);
     defer convex_hull_merged.deinit();
 
     try convex_hull_one.merge(&convex_hull_two, &convex_hull_merged);
 
-    try testGrahamScanConvexHullProperty(&convex_hull_merged);
+    try testConvexHullProperty(&convex_hull_merged);
 }
 
 test "Merge not-in-place does not modify the convex hulls one and two" {
@@ -1006,7 +1006,7 @@ test "Merge not-in-place does not modify the convex hulls one and two" {
     const random = rnd.random();
 
     // Initialize convex_hull_one.
-    var convex_hull_one = try GrahamScanConvexHull.init(allocator);
+    var convex_hull_one = try ConvexHull.init(allocator);
     defer convex_hull_one.deinit();
 
     const number_of_values = tester.generateNumberOfValues(random);
@@ -1019,7 +1019,7 @@ test "Merge not-in-place does not modify the convex hulls one and two" {
     defer convex_hull_one_before.deinit(allocator);
 
     // Initialize convex_hull_two.
-    var convex_hull_two = try GrahamScanConvexHull.init(allocator);
+    var convex_hull_two = try ConvexHull.init(allocator);
     defer convex_hull_two.deinit();
     for (number_of_values..2 * number_of_values) |i| {
         try convex_hull_two.add(.{ .index = i, .value = random.float(f64) });
@@ -1030,23 +1030,23 @@ test "Merge not-in-place does not modify the convex hulls one and two" {
     defer convex_hull_two_before.deinit(allocator);
 
     // Initialize the merged convex hull.
-    var convex_hull_merged = try GrahamScanConvexHull.init(allocator);
+    var convex_hull_merged = try ConvexHull.init(allocator);
     defer convex_hull_merged.deinit();
 
     // Merge convex_hull_two into convex_hull_one, not in-place.
     try convex_hull_one.merge(&convex_hull_two, &convex_hull_merged);
 
     // Verify the merged convex hull satisfies its properties.
-    try testGrahamScanConvexHullProperty(&convex_hull_merged);
+    try testConvexHullProperty(&convex_hull_merged);
 
-    try verifyGrahamScanConvexHullNotModified(allocator, &convex_hull_one, &convex_hull_one_before);
-    try verifyGrahamScanConvexHullNotModified(allocator, &convex_hull_two, &convex_hull_two_before);
+    try verifyConvexHullNotModified(allocator, &convex_hull_one, &convex_hull_one_before);
+    try verifyConvexHullNotModified(allocator, &convex_hull_two, &convex_hull_two_before);
 }
 
 test "Compute max error with known points and linear function" {
     const allocator = testing.allocator;
 
-    var convex_hull = try GrahamScanConvexHull.init(allocator);
+    var convex_hull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
 
     try convex_hull.add(.{ .index = 0, .value = 1 });
@@ -1084,7 +1084,7 @@ test "Compute max error with random points and linear function" {
     var rnd = std.Random.DefaultPrng.init(seed);
     const random = rnd.random();
 
-    var convex_hull = try GrahamScanConvexHull.init(allocator);
+    var convex_hull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
 
     var points = ArrayList(f64).empty;
