@@ -14,10 +14,8 @@
 
 //! Implementation of the Mixed-Type PLA algorithm from the paper
 //! "G. Luo, K. Yi, S.-W. Cheng, Z. Li, W. Fan, C. He, and Y. Mu.
-//! Piecewise Linear Approximation of Streaming Time Series Data with
-//! Max-Error Guarantees.
-//! Proc. IEEE 31st Int'l Conf. Data Engineering (ICDE), Seoul, South Korea
-//! 2015, pp. 173–184.
+//! Piecewise Linear Approximation of Streaming Time Series Data with Max-Error Guarantees.
+//! Proc. IEEE 31st Int'l Conf. Data Engineering (ICDE), Seoul, South Korea 2015, pp. 173–184.
 //! https://ieeexplore.ieee.org/document/7113282".
 //! The implementation is partially based on the authors' C++ implementation generously
 //! provided by Prof. Ke Yi of Hong Kong University of Science and Technology.

@@ -12,8 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Geometric primitives for polygon clipping and feasibility tests used by
-//! Mixed-Type PLA.
+//! Parameter-space geometric primitives for the Mixed-Type PLA algorithm.
+//!
+//! This module provides the `ExtendedPolygon` and `VisibleRegionChain` structures
+//! necessary to incrementally track the feasible region of linear models under
+//! bounded maximum-error constraints from the paper:
+//! "G. Luo, K. Yi, S.-W. Cheng, Z. Li, W. Fan, C. He, and Y. Mu.
+//! Piecewise Linear Approximation of Streaming Time Series Data with Max-Error Guarantees.
+//! Proc. IEEE 31st Int'l Conf. Data Engineering (ICDE), Seoul, South Korea 2015, pp. 173–184.
+//! https://ieeexplore.ieee.org/document/7113282".
+//!
+//! The implementation is partially based on the authors' C++ implementation generously
+//! provided by Prof. Ke Yi of Hong Kong University of Science and Technology.
 
 const std = @import("std");
 const math = std.math;
