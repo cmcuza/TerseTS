@@ -125,7 +125,7 @@ pub fn compress(
     const large_limit = 0xFFFFFFFF; // Fits in 32 bits.
 
     // Bit-wise packing with fixed-length header.
-    var bit_writer = try shared_structs.BitWriter(.little).init(allocator);
+    var bit_writer = try shared_structs.BitWriter(.big).init(allocator);
     defer bit_writer.deinit();
 
     for (quantized_values.items) |val| {
@@ -168,7 +168,7 @@ pub fn decompress(
 
     // Create a bit reader from remaining bytes.
     const reader = Reader.fixed(compressed_values[16..]);
-    var bit_reader = shared_structs.BitReader(.little).init(reader);
+    var bit_reader = shared_structs.BitReader(.big).init(reader);
     var decompressed_value: f64 = 0.0;
 
     // Convert minimum_value to its ordered bit representation.
