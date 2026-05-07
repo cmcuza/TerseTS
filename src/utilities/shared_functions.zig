@@ -220,6 +220,7 @@ pub fn decodeZigZag(value: u64) i64 {
 /// if the input is unsupported or if memory allocation fails.
 pub fn encodeEliasGamma(allocator: Allocator, values: []const u64, encoded_values: *ArrayList(u8)) !void {
     var bit_writer = try shared_structs.BitWriter.init(allocator, encoded_values);
+    defer bit_writer.deinit();
 
     for (values) |value| {
         if (value == 0) {

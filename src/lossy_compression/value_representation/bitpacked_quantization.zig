@@ -126,6 +126,7 @@ pub fn compress(
 
     // Bit-wise packing with fixed-length header.
     var bit_writer = try shared_structs.BitWriter.init(allocator, compressed_values);
+    defer bit_writer.deinit();
 
     for (quantized_values.items) |val| {
         if (val <= small_limit) {
