@@ -347,10 +347,12 @@ test "add and remove min key of custom struct in HashedPriorityQueue" {
     };
 
     const HashContext = struct {
-        pub fn hash(_: @This(), s: S) u64 {
+        const Self = @This();
+
+        pub fn hash(_: Self, s: S) u64 {
             return @as(u64, @bitCast(s.key));
         }
-        pub fn eql(_: @This(), s_one: S, s_two: S) bool {
+        pub fn eql(_: Self, s_one: S, s_two: S) bool {
             return s_one.key == s_two.key;
         }
     };
@@ -396,10 +398,12 @@ test "add, remove and element position for key of structs in HashedPriorityQueue
     };
 
     const HashContext = struct {
-        pub fn hash(_: @This(), s: S) u64 {
+        const Self = @This();
+
+        pub fn hash(_: Self, s: S) u64 {
             return @as(u64, @bitCast(s.key));
         }
-        pub fn eql(_: @This(), s_one: S, s_two: S) bool {
+        pub fn eql(_: Self, s_one: S, s_two: S) bool {
             return s_one.key == s_two.key;
         }
     };
