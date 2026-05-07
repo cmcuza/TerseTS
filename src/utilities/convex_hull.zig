@@ -35,7 +35,6 @@ const ContinousPoint = shared.ContinousPoint;
 const Segment = shared.Segment;
 const LinearFunction = shared.LinearFunction;
 
-const time = std.time;
 const tester = @import("../tester.zig");
 
 /// Enum for the angle's `Turn` of three consecutive points A, B, and C. Essentially, it describes

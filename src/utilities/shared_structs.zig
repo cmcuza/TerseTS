@@ -96,7 +96,7 @@ pub fn HashMapf64(comptime value_type: type) type {
 /// it was removed in Zig 0.15.1. The code has since been modified to simplify its use in TerseTS.
 pub const BitWriter = struct {
     allocator: Allocator,
-    bytes: ArrayList(u8),
+    bytes: *ArrayList(u8),
     bits: u8 = 0,
     count: u4 = 0,
 
@@ -114,14 +114,13 @@ pub const BitWriter = struct {
         0b11111111,
     };
 
-    /// Initialize an empty `BitWriter`, which can be deinitialized  with `deinit`.
-    pub fn init(allocator: Allocator) !Self {
-        return .{ .allocator = allocator, .bytes = ArrayList(u8).empty, .bits = 0, .count = 0 };
+    /// Initialize an empty `BitWriter`.
+    pub fn init(allocator: Allocator, bytes: *ArrayList(u8)) !Self {
+        return .{ .allocator = allocator, .bytes = bytes, .bits = 0, .count = 0 };
     }
 
-    /// Write the specified number of bits to the writer from the least significant bits of
-    ///  the specified value. Bits will only be written to the writer when there
-    ///  are enough to fill a byte.
+    /// Write the specified number of bits to the writer from the least significant bits of the
+    /// input `value`. Bits will only be written to the writer when there are enough to fill a byte.
     pub fn writeBits(self: *Self, value: anytype, num: u16) !void {
         const T = @TypeOf(value);
         const UT = std.meta.Int(.unsigned, @bitSizeOf(T));
@@ -180,11 +179,6 @@ pub const BitWriter = struct {
         try self.bytes.append(self.allocator, self.bits);
         self.bits = 0;
         self.count = 0;
-    }
-
-    /// Deinitiate the `BitWriter`.
-    pub fn deinit(self: *Self) void {
-        self.bytes.deinit(self.allocator);
     }
 };
 

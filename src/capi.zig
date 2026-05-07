@@ -40,9 +40,9 @@ pub const Indices = Array(usize);
 pub const Coefficients = Array(f64);
 
 /// Compress `uncompressed_values` to `compressed_values` using `method` according to
-/// `configuration`. The General Purpose Allocator `allocator` is passed as a parameter to TerseTS
-/// for memory management in the compression methods. On success zero is returned, and the following
-/// non-zero values are returned on errors:
+/// `configuration`. The Heap Allocator `allocator` is passed as a parameter to TerseTS for memory
+/// management in the compression methods. On success zero is returned, and the following non-zero
+/// values are returned on errors:
 /// - 1) Unknown compression method.
 /// - 2) Unsupported input.
 /// - 3) Invalid configuration.
@@ -53,6 +53,7 @@ pub const Coefficients = Array(f64);
 /// - 8) Byte stream error.
 /// - 9) Unsupported method.
 /// - 10) Out of memory.
+/// - 11) Write failed.
 export fn compress(
     uncompressed_values: UncompressedValues,
     compressed_values: *CompressedValues,
@@ -86,9 +87,9 @@ export fn compress(
 }
 
 /// Decompress `compressed_values` to `decompressed_values`. The method is encoded in the last byte
-/// of `compressed_values`. The General Purpose Allocator `allocator` is passed as a parameter to
-/// tersets for memory management in the decompression methods. On success zero is returned, and the
-/// following non-zero values are returned on errors:
+/// of `compressed_values`. The Heap Allocator `allocator` is passed as a parameter to tersets for
+/// memory management in the decompression methods. On success zero is returned, and the following
+/// non-zero values are returned on errors:
 /// - 1) Unknown compression method.
 /// - 2) Unsupported input.
 /// - 3) Invalid configuration.
@@ -99,6 +100,7 @@ export fn compress(
 /// - 8) Byte stream error.
 /// - 9) Unsupported method.
 /// - 10) Out of memory.
+/// - 11) Write failed.
 export fn decompress(
     compressed_values: CompressedValues,
     decompressed_values: *UncompressedValues,

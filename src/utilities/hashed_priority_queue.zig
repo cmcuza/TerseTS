@@ -24,7 +24,6 @@
 const std = @import("std");
 const rand = std.Random;
 const math = std.math;
-const time = std.time;
 const Order = std.math.Order;
 const testing = std.testing;
 const HashMap = std.HashMap;

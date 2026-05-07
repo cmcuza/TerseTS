@@ -24,7 +24,6 @@ const std = @import("std");
 const math = std.math;
 const mem = std.mem;
 const rand = std.Random;
-const time = std.time;
 const testing = std.testing;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;

@@ -16,7 +16,6 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Io = std.Io;
 const math = std.math;
 const ArrayList = std.ArrayList;
 const Reader = std.Io.Reader;
@@ -27,7 +26,6 @@ const Error = tersets.Error;
 const testing = std.testing;
 
 const shared_structs = @import("shared_structs.zig");
-const BitWriter = shared_structs.BitWriter;
 
 /// Computes the Root-Mean-Squared-Errors (RMSE) for a segment of the `uncompressed_values`.
 /// This function calculates the error between the actual values and the predicted values
@@ -221,8 +219,7 @@ pub fn decodeZigZag(value: u64) i64 {
 /// encoded data. The function returns an `ArrayList(u8)` containing the encoded data, or an error
 /// if the input is unsupported or if memory allocation fails.
 pub fn encodeEliasGamma(allocator: Allocator, values: []const u64, encoded_values: *ArrayList(u8)) !void {
-    var bit_writer = try shared_structs.BitWriter.init(allocator);
-    defer bit_writer.deinit();
+    var bit_writer = try shared_structs.BitWriter.init(allocator, encoded_values);
 
     for (values) |value| {
         if (value == 0) {
@@ -239,7 +236,6 @@ pub fn encodeEliasGamma(allocator: Allocator, values: []const u64, encoded_value
         try bit_writer.writeBits(value, nbits + 1);
     }
     try bit_writer.flushBits();
-    try encoded_values.appendSlice(allocator, bit_writer.bytes.items);
 }
 
 /// Decodes an array of u8 `compressed_values` previously encoded using Elias Gamma encoding.

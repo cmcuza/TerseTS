@@ -125,8 +125,7 @@ pub fn compress(
     const large_limit = 0xFFFFFFFF; // Fits in 32 bits.
 
     // Bit-wise packing with fixed-length header.
-    var bit_writer = try shared_structs.BitWriter.init(allocator);
-    defer bit_writer.deinit();
+    var bit_writer = try shared_structs.BitWriter.init(allocator, compressed_values);
 
     for (quantized_values.items) |val| {
         if (val <= small_limit) {
@@ -149,7 +148,6 @@ pub fn compress(
     }
 
     try bit_writer.flushBits();
-    try compressed_values.appendSlice(allocator, bit_writer.bytes.items);
 }
 
 /// Decompress `compressed_values` produced by "Bucket Quantization" and "Bit-Packing". The function

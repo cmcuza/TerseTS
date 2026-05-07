@@ -67,7 +67,6 @@ const Allocator = std.mem.Allocator;
 const Error = std.mem.Allocator.Error;
 const Threaded = std.Io.Threaded;
 const math = std.math;
-const time = std.time;
 const testing = std.testing;
 const debug = std.debug;
 
@@ -1117,7 +1116,7 @@ pub fn resolveRandom(random_optional: ?Random) Random {
 
 /// Return a timestamp in milliseconds relative to UTC 1970-01-01.
 pub fn milliTimestamp() i64 {
-    var threaded: std.Io.Threaded = .init_single_threaded;
+    var threaded: Threaded = .init_single_threaded;
     const timestamp = Clock.real.now(threaded.io());
     threaded.deinit();
     return timestamp.toMilliseconds();
