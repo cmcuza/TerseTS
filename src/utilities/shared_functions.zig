@@ -221,8 +221,8 @@ pub fn decodeZigZag(value: u64) i64 {
 /// encoded data. The function returns an `ArrayList(u8)` containing the encoded data, or an error
 /// if the input is unsupported or if memory allocation fails.
 pub fn encodeEliasGamma(allocator: Allocator, values: []const u64, encoded_values: *ArrayList(u8)) !void {
-    var writer = Writer.Allocating.init(allocator);
-    var bit_writer = shared_structs.bitWriter(.big, writer.writer);
+    var bit_writer = try shared_structs.BitWriter(.big).init(allocator);
+    defer bit_writer.deinit();
 
     for (values) |value| {
         if (value == 0) {
@@ -239,7 +239,7 @@ pub fn encodeEliasGamma(allocator: Allocator, values: []const u64, encoded_value
         try bit_writer.writeBits(value, nbits + 1);
     }
     try bit_writer.flushBits();
-    try encoded_values.appendSlice(allocator, writer.toArrayList().items);
+    try encoded_values.appendSlice(allocator, bit_writer.bytes.items);
 }
 
 /// Decodes an array of u8 `compressed_values` previously encoded using Elias Gamma encoding.
@@ -254,7 +254,7 @@ pub fn decodeEliasGamma(
 ) !void {
     // Create bit reader over full byte slice.
     const reader = Reader.fixed(compressed_values);
-    var bit_reader = shared_structs.bitReader(.big, reader);
+    var bit_reader = shared_structs.BitReader(.big).init(reader);
 
     while (true) {
         // Count leading zeros.

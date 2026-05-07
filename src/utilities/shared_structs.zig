@@ -20,6 +20,7 @@ const assert = std.debug.assert;
 const Allocator = mem.Allocator;
 const ArrayList = std.ArrayList;
 const HashMap = std.HashMap;
+const Reader = std.Io.Reader;
 
 /// Margin to adjust the error bound for numerical stability. Reducing the error bound by this
 /// margin ensures that all the elements of the decompressed time series are within the error bound
@@ -90,17 +91,13 @@ pub fn HashMapf64(comptime value_type: type) type {
     return HashMap(f64, value_type, HashF64Context, std.hash_map.default_max_load_percentage);
 }
 
-/// Creates a `BitWriter` which allows for writing bits to a `Writer`. `BitWriter` was removed in
-/// Zig 0.15.1. Thus, it was copied from Zig's standard library as suggested in GitHub PR 24614
-/// "Sorry, you will have to copy the old code into your application, or use a third party package."
-/// Zig's standard library is released under the MIT license. A new `BitWriter` was added for flate
-/// after Zig 0.15.1 was released, however, it currently only supports `u56` and not `u64`. Thus,
-/// the old `BitWriter` is used despite its use of the old `Writer` interface. To make it as
-/// explicit as possible that this code is copied from Zig's standard library, no attempt to make it
-/// consistent with TerseTS has been made.
-pub fn BitWriter(comptime endian: std.builtin.Endian, comptime Writer: type) type {
+/// Creates a `BitWriter` which allows for writing bits with `endian`. The code for `BitWriter` was
+/// originally copied from Zig's MIT licensed standard library as suggested in GitHub PR 24614 since
+/// it was removed in Zig 0.15.1. The code has since been modified to simplify its use in TerseTS.
+pub fn BitWriter(comptime endian: std.builtin.Endian) type {
     return struct {
-        writer: Writer,
+        allocator: Allocator,
+        bytes: ArrayList(u8),
         bits: u8 = 0,
         count: u4 = 0,
 
@@ -115,6 +112,11 @@ pub fn BitWriter(comptime endian: std.builtin.Endian, comptime Writer: type) typ
             0b01111111,
             0b11111111,
         };
+
+        /// Initialize an empty `BitWriter`, which can be deinitialized  with `deinit`.
+        pub fn init(allocator: Allocator) !@This() {
+            return .{.allocator = allocator, .bytes = ArrayList(u8).empty, .bits = 0, .count = 0};
+        }
 
         /// Write the specified number of bits to the writer from the least significant bits of
         ///  the specified value. Bits will only be written to the writer when there
@@ -161,10 +163,10 @@ pub fn BitWriter(comptime endian: std.builtin.Endian, comptime Writer: type) typ
                 switch (endian) {
                     .big => {
                         const bits = in >> @intCast(in_count - 8);
-                        try self.writer.writeByte(@truncate(bits));
+                        try self.bytes.append(self.allocator, @truncate(bits));
                     },
                     .little => {
-                        try self.writer.writeByte(@truncate(in));
+                        try self.bytes.append(self.allocator, @truncate(in));
                         if (U == u8) in = 0 else in >>= 8;
                     },
                 }
@@ -196,32 +198,24 @@ pub fn BitWriter(comptime endian: std.builtin.Endian, comptime Writer: type) typ
         pub fn flushBits(self: *@This()) !void {
             if (self.count == 0) return;
             if (endian == .big) self.bits <<= @intCast(8 - self.count);
-            try self.writer.writeByte(self.bits);
+            try self.bytes.append(self.allocator, self.bits);
             self.bits = 0;
             self.count = 0;
+        }
+
+        /// Deinitiate the `BitWriter`.
+        pub fn deinit(self: *@This()) void {
+            self.bytes.deinit(self.allocator);
         }
     };
 }
 
-/// Helper function to create a `BitWriter` with a specific type. `BitWriter` was removed in Zig
-/// 0.15.1. Thus, it was copied from Zig's standard library as suggested in GitHub PR 24614 "Sorry,
-/// you will have to copy the old code into your application, or use a third party package." Zig's
-/// standard library is released under the MIT license. To make it as explicit as possible that this
-/// code is copied from Zig's standard library, no attempt to make it consistent with TerseTS has
-/// been made.
-pub fn bitWriter(comptime endian: std.builtin.Endian, writer: anytype) BitWriter(endian, @TypeOf(writer)) {
-    return .{ .writer = writer };
-}
-
-/// Creates a `BitReader` which allows for reading bits from a `Reader`. `BitReader` was removed in
-/// Zig 0.15.1. Thus, it was copied from Zig's standard library as suggested in GitHub PR 24614
-/// "Sorry, you will have to copy the old code into your application, or use a third party package."
-/// Zig's standard library is released under the MIT license. A new `BitReader` has not yet been
-/// added to master. To make it as explicit as possible that this code is copied from Zig's standard
-/// library, no attempt to make it consistent with TerseTS has been made.
-pub fn BitReader(comptime endian: std.builtin.Endian, comptime Reader: type) type {
+/// Creates a `BitReader` which allows for reading bits with `endian`. The code for `BitReader` was
+/// originally copied from Zig's MIT licensed standard library as suggested in GitHub PR 24614 since
+/// it was removed in Zig 0.15.1. The code has since been modified to simplify its use in TerseTS.
+pub fn BitReader(comptime endian: std.builtin.Endian) type {
     return struct {
-        reader: Reader,
+        bytes: Reader,
         bits: u8 = 0,
         count: u4 = 0,
 
@@ -250,6 +244,11 @@ pub fn BitReader(comptime endian: std.builtin.Endian, comptime Reader: type) typ
                 @bitCast(@as(UT, @intCast(out))),
                 num,
             };
+        }
+
+        /// Initialize an empty `BitReader`.
+        pub fn init(bytes: Reader) @This() {
+            return .{ .bytes = bytes };
         }
 
         /// Reads `bits` bits from the reader and returns a specified type
@@ -288,7 +287,7 @@ pub fn BitReader(comptime endian: std.builtin.Endian, comptime Reader: type) typ
             const full_bytes_left = (num - out_count) / 8;
 
             for (0..full_bytes_left) |_| {
-                const byte = self.reader.takeByte() catch |err| switch (err) {
+                const byte = self.bytes.takeByte() catch |err| switch (err) {
                     error.EndOfStream => return initBits(T, out, out_count),
                     else => |e| return e,
                 };
@@ -311,7 +310,7 @@ pub fn BitReader(comptime endian: std.builtin.Endian, comptime Reader: type) typ
 
             if (bits_left == 0) return initBits(T, out, out_count);
 
-            const final_byte = self.reader.takeByte() catch |err| switch (err) {
+            const final_byte = self.bytes.takeByte() catch |err| switch (err) {
                 error.EndOfStream => return initBits(T, out, out_count),
                 else => |e| return e,
             };
@@ -361,14 +360,4 @@ pub fn BitReader(comptime endian: std.builtin.Endian, comptime Reader: type) typ
             self.count = 0;
         }
     };
-}
-
-/// Helper function to create a `BitReader` with a specific type. `BitReader` was removed in Zig
-/// 0.15.1. Thus, it was copied from Zig's standard library as suggested in GitHub PR 24614 "Sorry,
-/// you will have to copy the old code into your application, or use a third party package." Zig's
-/// standard library is released under the MIT license. To make it as explicit as possible that this
-/// code is copied from Zig's standard library, no attempt to make it consistent with TerseTS has
-/// been made.
-pub fn bitReader(comptime endian: std.builtin.Endian, reader: anytype) BitReader(endian, @TypeOf(reader)) {
-    return .{ .reader = reader };
 }
