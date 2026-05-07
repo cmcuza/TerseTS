@@ -116,7 +116,7 @@ pub const BitWriter = struct {
 
     /// Initialize an empty `BitWriter`, which can be deinitialized  with `deinit`.
     pub fn init(allocator: Allocator) !Self {
-        return .{.allocator = allocator, .bytes = ArrayList(u8).empty, .bits = 0, .count = 0};
+        return .{ .allocator = allocator, .bytes = ArrayList(u8).empty, .bits = 0, .count = 0 };
     }
 
     /// Write the specified number of bits to the writer from the least significant bits of
