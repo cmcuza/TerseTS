@@ -91,273 +91,225 @@ pub fn HashMapf64(comptime value_type: type) type {
     return HashMap(f64, value_type, HashF64Context, std.hash_map.default_max_load_percentage);
 }
 
-/// Creates a `BitWriter` which allows for writing bits with `endian`. The code for `BitWriter` was
+/// Creates a `BitWriter` which allows for writing bits with Big Endian. The code for `BitWriter` was
 /// originally copied from Zig's MIT licensed standard library as suggested in GitHub PR 24614 since
 /// it was removed in Zig 0.15.1. The code has since been modified to simplify its use in TerseTS.
-pub fn BitWriter(comptime endian: std.builtin.Endian) type {
-    return struct {
-        allocator: Allocator,
-        bytes: ArrayList(u8),
-        bits: u8 = 0,
-        count: u4 = 0,
+pub const BitWriter = struct {
+    allocator: Allocator,
+    bytes: ArrayList(u8),
+    bits: u8 = 0,
+    count: u4 = 0,
 
-        const low_bit_mask = [9]u8{
-            0b00000000,
-            0b00000001,
-            0b00000011,
-            0b00000111,
-            0b00001111,
-            0b00011111,
-            0b00111111,
-            0b01111111,
-            0b11111111,
-        };
+    const Self = @This();
 
-        /// Initialize an empty `BitWriter`, which can be deinitialized  with `deinit`.
-        pub fn init(allocator: Allocator) !@This() {
-            return .{.allocator = allocator, .bytes = ArrayList(u8).empty, .bits = 0, .count = 0};
-        }
-
-        /// Write the specified number of bits to the writer from the least significant bits of
-        ///  the specified value. Bits will only be written to the writer when there
-        ///  are enough to fill a byte.
-        pub fn writeBits(self: *@This(), value: anytype, num: u16) !void {
-            const T = @TypeOf(value);
-            const UT = std.meta.Int(.unsigned, @bitSizeOf(T));
-            const U = if (@bitSizeOf(T) < 8) u8 else UT; //<u8 is a pain to work with
-
-            var in: U = @as(UT, @bitCast(value));
-            var in_count: u16 = num;
-
-            if (self.count > 0) {
-                //if we can't fill the buffer, add what we have
-                const bits_free = 8 - self.count;
-                if (num < bits_free) {
-                    self.addBits(@truncate(in), @intCast(num));
-                    return;
-                }
-
-                //finish filling the buffer and flush it
-                if (num == bits_free) {
-                    self.addBits(@truncate(in), @intCast(num));
-                    return self.flushBits();
-                }
-
-                switch (endian) {
-                    .big => {
-                        const bits = in >> @intCast(in_count - bits_free);
-                        self.addBits(@truncate(bits), bits_free);
-                    },
-                    .little => {
-                        self.addBits(@truncate(in), bits_free);
-                        in >>= @intCast(bits_free);
-                    },
-                }
-                in_count -= bits_free;
-                try self.flushBits();
-            }
-
-            //write full bytes while we can
-            const full_bytes_left = in_count / 8;
-            for (0..full_bytes_left) |_| {
-                switch (endian) {
-                    .big => {
-                        const bits = in >> @intCast(in_count - 8);
-                        try self.bytes.append(self.allocator, @truncate(bits));
-                    },
-                    .little => {
-                        try self.bytes.append(self.allocator, @truncate(in));
-                        if (U == u8) in = 0 else in >>= 8;
-                    },
-                }
-                in_count -= 8;
-            }
-
-            //save the remaining bits in the buffer
-            self.addBits(@truncate(in), @intCast(in_count));
-        }
-
-        //convenience function for adding bits to the buffer
-        //in the appropriate position based on endianess
-        fn addBits(self: *@This(), bits: u8, num: u4) void {
-            if (num == 8) self.bits = bits else switch (endian) {
-                .big => {
-                    self.bits <<= @intCast(num);
-                    self.bits |= bits & low_bit_mask[num];
-                },
-                .little => {
-                    const pos = bits << @intCast(self.count);
-                    self.bits |= pos;
-                },
-            }
-            self.count += num;
-        }
-
-        /// Flush any remaining bits to the writer, filling
-        /// unused bits with 0s.
-        pub fn flushBits(self: *@This()) !void {
-            if (self.count == 0) return;
-            if (endian == .big) self.bits <<= @intCast(8 - self.count);
-            try self.bytes.append(self.allocator, self.bits);
-            self.bits = 0;
-            self.count = 0;
-        }
-
-        /// Deinitiate the `BitWriter`.
-        pub fn deinit(self: *@This()) void {
-            self.bytes.deinit(self.allocator);
-        }
+    const low_bit_mask = [9]u8{
+        0b00000000,
+        0b00000001,
+        0b00000011,
+        0b00000111,
+        0b00001111,
+        0b00011111,
+        0b00111111,
+        0b01111111,
+        0b11111111,
     };
-}
 
-/// Creates a `BitReader` which allows for reading bits with `endian`. The code for `BitReader` was
-/// originally copied from Zig's MIT licensed standard library as suggested in GitHub PR 24614 since
-/// it was removed in Zig 0.15.1. The code has since been modified to simplify its use in TerseTS.
-pub fn BitReader(comptime endian: std.builtin.Endian) type {
-    return struct {
-        bytes: Reader,
-        bits: u8 = 0,
-        count: u4 = 0,
+    /// Initialize an empty `BitWriter`, which can be deinitialized  with `deinit`.
+    pub fn init(allocator: Allocator) !Self {
+        return .{.allocator = allocator, .bytes = ArrayList(u8).empty, .bits = 0, .count = 0};
+    }
 
-        const low_bit_mask = [9]u8{
-            0b00000000,
-            0b00000001,
-            0b00000011,
-            0b00000111,
-            0b00001111,
-            0b00011111,
-            0b00111111,
-            0b01111111,
-            0b11111111,
-        };
+    /// Write the specified number of bits to the writer from the least significant bits of
+    ///  the specified value. Bits will only be written to the writer when there
+    ///  are enough to fill a byte.
+    pub fn writeBits(self: *Self, value: anytype, num: u16) !void {
+        const T = @TypeOf(value);
+        const UT = std.meta.Int(.unsigned, @bitSizeOf(T));
+        const U = if (@bitSizeOf(T) < 8) u8 else UT;
 
-        fn Bits(comptime T: type) type {
-            return struct {
-                T,
-                u16,
-            };
-        }
+        const in: U = @as(UT, @bitCast(value));
+        var in_count: u16 = num;
 
-        fn initBits(comptime T: type, out: anytype, num: u16) Bits(T) {
-            const UT = std.meta.Int(.unsigned, @bitSizeOf(T));
-            return .{
-                @bitCast(@as(UT, @intCast(out))),
-                num,
-            };
-        }
-
-        /// Initialize an empty `BitReader`.
-        pub fn init(bytes: Reader) @This() {
-            return .{ .bytes = bytes };
-        }
-
-        /// Reads `bits` bits from the reader and returns a specified type
-        ///  containing them in the least significant end, returning an error if the
-        ///  specified number of bits could not be read.
-        pub fn readBitsNoEof(self: *@This(), comptime T: type, num: u16) !T {
-            const b, const c = try self.readBitsTuple(T, num);
-            if (c < num) return error.EndOfStream;
-            return b;
-        }
-
-        /// Reads `bits` bits from the reader and returns a specified type
-        ///  containing them in the least significant end. The number of bits successfully
-        ///  read is placed in `out_bits`, as reaching the end of the stream is not an error.
-        pub fn readBits(self: *@This(), comptime T: type, num: u16, out_bits: *u16) !T {
-            const b, const c = try self.readBitsTuple(T, num);
-            out_bits.* = c;
-            return b;
-        }
-
-        /// Reads `bits` bits from the reader and returns a tuple of the specified type
-        ///  containing them in the least significant end, and the number of bits successfully
-        ///  read. Reaching the end of the stream is not an error.
-        pub fn readBitsTuple(self: *@This(), comptime T: type, num: u16) !Bits(T) {
-            const UT = std.meta.Int(.unsigned, @bitSizeOf(T));
-            const U = if (@bitSizeOf(T) < 8) u8 else UT; //it is a pain to work with <u8
-
-            //dump any bits in our buffer first
-            if (num <= self.count) return initBits(T, self.removeBits(@intCast(num)), num);
-
-            var out_count: u16 = self.count;
-            var out: U = self.removeBits(self.count);
-
-            //grab all the full bytes we need and put their
-            //bits where they belong
-            const full_bytes_left = (num - out_count) / 8;
-
-            for (0..full_bytes_left) |_| {
-                const byte = self.bytes.takeByte() catch |err| switch (err) {
-                    error.EndOfStream => return initBits(T, out, out_count),
-                    else => |e| return e,
-                };
-
-                switch (endian) {
-                    .big => {
-                        if (U == u8) out = 0 else out <<= 8; //shifting u8 by 8 is illegal in Zig
-                        out |= byte;
-                    },
-                    .little => {
-                        const pos = @as(U, byte) << @intCast(out_count);
-                        out |= pos;
-                    },
-                }
-                out_count += 8;
+        if (self.count > 0) {
+            // if we can't fill the buffer, add what we have.
+            const bits_free = 8 - self.count;
+            if (num < bits_free) {
+                self.addBits(@truncate(in), @intCast(num));
+                return;
             }
 
-            const bits_left = num - out_count;
-            const keep = 8 - bits_left;
+            // Finish filling the buffer and flush it.
+            if (num == bits_free) {
+                self.addBits(@truncate(in), @intCast(num));
+                return self.flushBits();
+            }
 
-            if (bits_left == 0) return initBits(T, out, out_count);
+            const bits = in >> @intCast(in_count - bits_free);
+            self.addBits(@truncate(bits), bits_free);
 
-            const final_byte = self.bytes.takeByte() catch |err| switch (err) {
+            in_count -= bits_free;
+            try self.flushBits();
+        }
+
+        // Write full bytes while we can.
+        const full_bytes_left = in_count / 8;
+        for (0..full_bytes_left) |_| {
+            const bits = in >> @intCast(in_count - 8);
+            try self.bytes.append(self.allocator, @truncate(bits));
+            in_count -= 8;
+        }
+
+        // Save the remaining bits in the buffer.
+        self.addBits(@truncate(in), @intCast(in_count));
+    }
+
+    /// Convenience function for adding bits to the buffer.
+    fn addBits(self: *Self, bits: u8, num: u4) void {
+        if (num == 8) self.bits = bits else {
+            self.bits <<= @intCast(num);
+            self.bits |= bits & low_bit_mask[num];
+        }
+        self.count += num;
+    }
+
+    /// Flush any remaining bits to the writer, filling
+    /// unused bits with 0s.
+    pub fn flushBits(self: *Self) !void {
+        if (self.count == 0) return;
+        self.bits <<= @intCast(8 - self.count);
+        try self.bytes.append(self.allocator, self.bits);
+        self.bits = 0;
+        self.count = 0;
+    }
+
+    /// Deinitiate the `BitWriter`.
+    pub fn deinit(self: *Self) void {
+        self.bytes.deinit(self.allocator);
+    }
+};
+
+/// Creates a `BitReader` which allows for reading bits in Big Endian. The code for `BitReader` was
+/// originally copied from Zig's MIT licensed standard library as suggested in GitHub PR 24614 since
+/// it was removed in Zig 0.15.1. The code has since been modified to simplify its use in TerseTS.
+pub const BitReader = struct {
+    bytes: Reader,
+    bits: u8 = 0,
+    count: u4 = 0,
+
+    const Self = @This();
+
+    const low_bit_mask = [9]u8{
+        0b00000000,
+        0b00000001,
+        0b00000011,
+        0b00000111,
+        0b00001111,
+        0b00011111,
+        0b00111111,
+        0b01111111,
+        0b11111111,
+    };
+
+    fn Bits(comptime T: type) type {
+        return struct {
+            T,
+            u16,
+        };
+    }
+
+    fn initBits(comptime T: type, out: anytype, num: u16) Bits(T) {
+        const UT = std.meta.Int(.unsigned, @bitSizeOf(T));
+        return .{
+            @bitCast(@as(UT, @intCast(out))),
+            num,
+        };
+    }
+
+    /// Initialize an empty `BitReader`.
+    pub fn init(bytes: Reader) Self {
+        return .{ .bytes = bytes };
+    }
+
+    /// Reads `bits` bits from the reader and returns a specified type
+    ///  containing them in the least significant end, returning an error if the
+    ///  specified number of bits could not be read.
+    pub fn readBitsNoEof(self: *Self, comptime T: type, num: u16) !T {
+        const b, const c = try self.readBitsTuple(T, num);
+        if (c < num) return error.EndOfStream;
+        return b;
+    }
+
+    /// Reads `bits` bits from the reader and returns a specified type
+    /// containing them in the least significant end. The number of bits successfully
+    /// read is placed in `out_bits`, as reaching the end of the stream is not an error.
+    pub fn readBits(self: *Self, comptime T: type, num: u16, out_bits: *u16) !T {
+        const b, const c = try self.readBitsTuple(T, num);
+        out_bits.* = c;
+        return b;
+    }
+
+    /// Reads `bits` bits from the reader and returns a tuple of the specified type
+    /// containing them in the least significant end, and the number of bits successfully
+    /// read. Reaching the end of the stream is not an error.
+    pub fn readBitsTuple(self: *Self, comptime T: type, num: u16) !Bits(T) {
+        const UT = std.meta.Int(.unsigned, @bitSizeOf(T));
+        const U = if (@bitSizeOf(T) < 8) u8 else UT; //it is a pain to work with <u8
+
+        // Dump any bits in our buffer first.
+        if (num <= self.count) return initBits(T, self.removeBits(@intCast(num)), num);
+
+        var out_count: u16 = self.count;
+        var out: U = self.removeBits(self.count);
+
+        // Grab all the full bytes we need and put their bits where they belong.
+        const full_bytes_left = (num - out_count) / 8;
+
+        for (0..full_bytes_left) |_| {
+            const byte = self.bytes.takeByte() catch |err| switch (err) {
                 error.EndOfStream => return initBits(T, out, out_count),
                 else => |e| return e,
             };
 
-            switch (endian) {
-                .big => {
-                    out <<= @intCast(bits_left);
-                    out |= final_byte >> @intCast(keep);
-                    self.bits = final_byte & low_bit_mask[keep];
-                },
-                .little => {
-                    const pos = @as(U, final_byte & low_bit_mask[bits_left]) << @intCast(out_count);
-                    out |= pos;
-                    self.bits = final_byte >> @intCast(bits_left);
-                },
-            }
-
-            self.count = @intCast(keep);
-            return initBits(T, out, num);
+            if (U == u8) out = 0 else out <<= 8; //shifting u8 by 8 is illegal in Zig
+            out |= byte;
+            out_count += 8;
         }
 
-        //convenience function for removing bits from
-        //the appropriate part of the buffer based on
-        //endianess.
-        fn removeBits(self: *@This(), num: u4) u8 {
-            if (num == 8) {
-                self.count = 0;
-                return self.bits;
-            }
+        const bits_left = num - out_count;
+        const keep = 8 - bits_left;
 
-            const keep = self.count - num;
-            const bits = switch (endian) {
-                .big => self.bits >> @intCast(keep),
-                .little => self.bits & low_bit_mask[num],
-            };
-            switch (endian) {
-                .big => self.bits &= low_bit_mask[keep],
-                .little => self.bits >>= @intCast(num),
-            }
+        if (bits_left == 0) return initBits(T, out, out_count);
 
-            self.count = keep;
-            return bits;
-        }
+        const final_byte = self.bytes.takeByte() catch |err| switch (err) {
+            error.EndOfStream => return initBits(T, out, out_count),
+            else => |e| return e,
+        };
 
-        pub fn alignToByte(self: *@This()) void {
-            self.bits = 0;
+        out <<= @intCast(bits_left);
+        out |= final_byte >> @intCast(keep);
+        self.bits = final_byte & low_bit_mask[keep];
+
+        self.count = @intCast(keep);
+        return initBits(T, out, num);
+    }
+
+    // Convenience function for removing bits.
+    fn removeBits(self: *Self, num: u4) u8 {
+        if (num == 8) {
             self.count = 0;
+            return self.bits;
         }
-    };
-}
+
+        const keep = self.count - num;
+        const bits = self.bits >> @intCast(keep);
+        self.bits &= low_bit_mask[keep];
+
+        self.count = keep;
+        return bits;
+    }
+
+    pub fn alignToByte(self: *Self) void {
+        self.bits = 0;
+        self.count = 0;
+    }
+};
