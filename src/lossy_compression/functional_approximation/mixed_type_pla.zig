@@ -69,9 +69,9 @@ pub fn compress(
     else
         error_bound;
 
-    // Normalization that maps data to [-1, 1] centered at the midpoint, to improve numerical stability
-    // and allow the algorithm to adapt to the data amplitude. The normalization parameters are stored
-    // in the compressed blob header so that decompress() can undo it.
+    // Normalization that maps data to [-1, 1] centered at the midpoint, to improve numerical
+    // stability and allow the algorithm to adapt to the data amplitude. The normalization parameters
+    // are stored in the compressed blob header so that decompress() can undo it.
     var min_val: f64 = math.inf(f64);
     var max_val: f64 = -math.inf(f64);
     for (uncompressed_values) |v| {
@@ -103,7 +103,12 @@ pub fn compress(
 
     // Run the Mixed-Type PLA algorithm on normalized data.
     var state =
-        MixedTypePlaState.create(allocator, safe_error_bound, 0.0, tolerances);
+        MixedTypePlaState.create(
+            allocator,
+            safe_error_bound,
+            0.0,
+            tolerances,
+        );
     defer state.deinit();
     state.run(normalized_values);
 
@@ -187,9 +192,9 @@ pub fn decompress(
             const normalized_val = seg.evaluate(t);
             const denormalized_val = normalized_val * norm_scale + norm_offset;
             try decompressed_values.append(allocator, denormalized_val);
-            // } else {
-            //     // No segment covers this timestamp — output norm_offset as fallback.
-            //     try decompressed_values.append(allocator, norm_offset);
+        } else {
+            // If no segment covers a required timestamp, the payload is structurally inconsistent.
+            return Error.CorruptedCompressedData;
         }
     }
 }
@@ -298,20 +303,38 @@ pub fn rebuild(
 
     // Normalization header.
     try shared_functions
-        .appendValue(allocator, f64, coefficients[ci], compressed_values);
+        .appendValue(
+        allocator,
+        f64,
+        coefficients[ci],
+        compressed_values,
+    );
     ci += 1;
     try shared_functions
-        .appendValue(allocator, f64, coefficients[ci], compressed_values);
+        .appendValue(
+        allocator,
+        f64,
+        coefficients[ci],
+        compressed_values,
+    );
     ci += 1;
 
     // num_segments.
     const num_segments = indices[ii];
     try shared_functions
-        .appendValue(allocator, u64, num_segments, compressed_values);
+        .appendValue(
+        allocator,
+        u64,
+        num_segments,
+        compressed_values,
+    );
     ii += 1;
 
     // Knot points: timestamp from indices bit pattern + value from coefficients.
-    const num_segments_usize = math.cast(usize, num_segments) orelse return Error.CorruptedCompressedData;
+    const num_segments_usize = math.cast(
+        usize,
+        num_segments,
+    ) orelse return Error.CorruptedCompressedData;
     if (coefficients.len < 2 + num_segments_usize)
         return Error.CorruptedCompressedData;
     if (indices.len < 4 + num_segments_usize)
@@ -324,20 +347,35 @@ pub fn rebuild(
         ii += 1;
 
         try shared_functions
-            .appendValue(allocator, f64, coefficients[ci], compressed_values);
+            .appendValue(
+            allocator,
+            f64,
+            coefficients[ci],
+            compressed_values,
+        );
         ci += 1;
     }
 
     // num_flags.
     const num_flags = indices[ii];
     try shared_functions
-        .appendValue(allocator, u64, num_flags, compressed_values);
+        .appendValue(
+        allocator,
+        u64,
+        num_flags,
+        compressed_values,
+    );
     ii += 1;
 
     // flag_bytes_len.
     const flag_bytes_len = indices[ii];
     try shared_functions
-        .appendValue(allocator, u64, flag_bytes_len, compressed_values);
+        .appendValue(
+        allocator,
+        u64,
+        flag_bytes_len,
+        compressed_values,
+    );
     ii += 1;
 
     // flag bytes.
@@ -355,7 +393,12 @@ pub fn rebuild(
     // Original_length.
     if (ii >= indices.len) return Error.CorruptedCompressedData;
     try shared_functions
-        .appendValue(allocator, u64, indices[ii], compressed_values);
+        .appendValue(
+        allocator,
+        u64,
+        indices[ii],
+        compressed_values,
+    );
     ii += 1;
 
     // Validate that both arrays were fully consumed.
@@ -380,9 +423,19 @@ fn serializeSegments(
 ) Error!void {
     // Normalization header.
     try shared_functions
-        .appendValue(allocator, f64, norm_offset, compressed_values);
+        .appendValue(
+        allocator,
+        f64,
+        norm_offset,
+        compressed_values,
+    );
     try shared_functions
-        .appendValue(allocator, f64, norm_scale, compressed_values);
+        .appendValue(
+        allocator,
+        f64,
+        norm_scale,
+        compressed_values,
+    );
 
     // Number of segment knot points.
     try shared_functions.appendValue(
@@ -395,9 +448,19 @@ fn serializeSegments(
     // Segment knot points as (f64 index, f64 value) pairs.
     for (segments) |seg| {
         try shared_functions
-            .appendValue(allocator, f64, seg.index, compressed_values);
+            .appendValue(
+            allocator,
+            f64,
+            seg.index,
+            compressed_values,
+        );
         try shared_functions
-            .appendValue(allocator, f64, seg.value, compressed_values);
+            .appendValue(
+            allocator,
+            f64,
+            seg.value,
+            compressed_values,
+        );
     }
 
     // Number of knot flags.
@@ -413,7 +476,12 @@ fn serializeSegments(
     const num_flag_bytes =
         math.cast(u64, num_flag_bytes_usize) orelse return Error.CorruptedCompressedData;
     try shared_functions
-        .appendValue(allocator, u64, num_flag_bytes, compressed_values);
+        .appendValue(
+        allocator,
+        u64,
+        num_flag_bytes,
+        compressed_values,
+    );
 
     for (0..num_flag_bytes_usize) |byte_idx| {
         var byte_val: u8 = 0;
@@ -473,7 +541,11 @@ fn deserializeSegments(
     }
 
     // Number of knot flags.
-    const num_flags = try shared_functions.readOffsetValue(u64, compressed_values, &offset);
+    const num_flags = try shared_functions.readOffsetValue(
+        u64,
+        compressed_values,
+        &offset,
+    );
 
     // Number of bytes used for packed flags.
     const num_flag_bytes = try shared_functions
@@ -496,7 +568,11 @@ fn deserializeSegments(
     }
 
     // Original series length.
-    const raw_len = try shared_functions.readOffsetValue(u64, compressed_values, &offset);
+    const raw_len = try shared_functions.readOffsetValue(
+        u64,
+        compressed_values,
+        &offset,
+    );
     original_length.* = math.cast(usize, raw_len) orelse return Error.CorruptedCompressedData;
 }
 
@@ -939,7 +1015,9 @@ const Fittable = struct {
             },
             .direction = .point_to_below,
         };
-        const upper_result = self.feasible_polygon.intersect(upper_halfplane) catch unreachable;
+        const upper_result = self.feasible_polygon.intersect(
+            upper_halfplane,
+        ) catch unreachable;
         if (upper_result == .contain_some) {
             self.upper_visible_region.resetFromSeedPoint(
                 self.feasible_polygon.getEndmostVertex(.right_most),
@@ -955,7 +1033,9 @@ const Fittable = struct {
             },
             .direction = .point_to_above,
         };
-        const lower_result = self.feasible_polygon.intersect(lower_halfplane) catch unreachable;
+        const lower_result = self.feasible_polygon.intersect(
+            lower_halfplane,
+        ) catch unreachable;
         if (lower_result == .contain_some) {
             self.lower_visible_region.resetFromSeedPoint(
                 self.feasible_polygon.getEndmostVertex(.left_most),
@@ -1028,9 +1108,15 @@ const Fittable = struct {
 
             self.active_error_tube.upper = .{
                 .index = terminating_segment.upper.index,
-                .value = ext_poly.evaluateLinear(extreme_line, terminating_segment.upper.index),
+                .value = ext_poly.evaluateLinear(
+                    extreme_line,
+                    terminating_segment.upper.index,
+                ),
             };
-            const ft = if (self.lower_visible_region.front()) |f| f.index else terminating_segment.upper.index;
+            const ft = if (self.lower_visible_region.front()) |f|
+                f.index
+            else
+                terminating_segment.upper.index;
             self.active_error_tube.lower = .{
                 .index = ft,
                 .value = ext_poly.evaluateLinear(extreme_line, ft),
@@ -1050,9 +1136,15 @@ const Fittable = struct {
 
             self.active_error_tube.lower = .{
                 .index = terminating_segment.lower.index,
-                .value = ext_poly.evaluateLinear(extreme_line, terminating_segment.lower.index),
+                .value = ext_poly.evaluateLinear(
+                    extreme_line,
+                    terminating_segment.lower.index,
+                ),
             };
-            const ft = if (self.upper_visible_region.front()) |f| f.index else terminating_segment.lower.index;
+            const ft = if (self.upper_visible_region.front()) |f|
+                f.index
+            else
+                terminating_segment.lower.index;
             self.active_error_tube.upper = .{
                 .index = ft,
                 .value = ext_poly.evaluateLinear(extreme_line, ft),
@@ -1121,7 +1213,7 @@ const Fittable = struct {
     /// `accumulated_delay` to track the lag between the current time and
     /// the committed segment's base time.
     fn recordLastKnot(self: *Fittable, rsep: LinearFunction) void {
-        var dp = ContinousPoint{ .index = 0.0, .value = 0.0 }; // TODO rename to knot_point
+        var dp = ContinousPoint{ .index = 0.0, .value = 0.0 };
         self.active_error_tube.hittingLine(&dp, rsep, self.tolerances);
         self.segments.append(self.allocator, dp) catch unreachable;
         self.delay_info += @intFromFloat(self.current_time - self.time_base);
@@ -1755,10 +1847,10 @@ const MixedTypePlaState = struct {
                     // FW crossing — pick base with smaller endpoint excursion
                     const first_excursion =
                         @abs(self.candidates[first].segment_end_point.value -
-                        self.candidates[first].segment_start_point.value);
+                            self.candidates[first].segment_start_point.value);
                     const second_excursion =
                         @abs(self.candidates[second].segment_end_point.value -
-                        self.candidates[second].segment_start_point.value);
+                            self.candidates[second].segment_start_point.value);
                     return if (first_excursion <= second_excursion) first else second;
                 }
             } else if (self.candidates[first].fitting_window.tu < self.candidates[second].fitting_window.tu) {
@@ -1768,10 +1860,10 @@ const MixedTypePlaState = struct {
                     // FW crossing — pick base with smaller endpoint excursion
                     const first_excursion =
                         @abs(self.candidates[first].segment_end_point.value -
-                        self.candidates[first].segment_start_point.value);
+                            self.candidates[first].segment_start_point.value);
                     const second_excursion =
                         @abs(self.candidates[second].segment_end_point.value -
-                        self.candidates[second].segment_start_point.value);
+                            self.candidates[second].segment_start_point.value);
                     return if (first_excursion <= second_excursion) first else second;
                 }
             } else {
@@ -1998,11 +2090,22 @@ test "mixed-type PLA can always compress and decompress with positive error boun
 
 test "mixed-type PLA can compress and decompress bounded values with many segments" {
     const allocator = testing.allocator;
-    const error_bound = tester.generateBoundedRandomValue(f32, 0.5, 3, null);
+    const error_bound = tester.generateBoundedRandomValue(
+        f32,
+        0.5,
+        3,
+        null,
+    );
     var uncompressed_values = ArrayList(f64).empty;
     defer uncompressed_values.deinit(allocator);
     for (0..20) |_| {
-        try tester.generateBoundedRandomValues(allocator, &uncompressed_values, 0, 10, null);
+        try tester.generateBoundedRandomValues(
+            allocator,
+            &uncompressed_values,
+            0,
+            10,
+            null,
+        );
     }
 
     try tester.testCompressAndDecompress(
@@ -2028,7 +2131,12 @@ test "extract rejects compressed data shorter than the minimum 48-byte header" {
 
     try testing.expectError(
         Error.CorruptedCompressedData,
-        extract(allocator, &too_short, &indices, &coefficients),
+        extract(
+            allocator,
+            &too_short,
+            &indices,
+            &coefficients,
+        ),
     );
 }
 
@@ -2055,7 +2163,12 @@ test "extract rejects compressed data with trailing bytes after the expected end
 
     try testing.expectError(
         Error.CorruptedCompressedData,
-        extract(allocator, compressed.items, &indices, &coefficients),
+        extract(
+            allocator,
+            compressed.items,
+            &indices,
+            &coefficients,
+        ),
     );
 }
 
@@ -2075,15 +2188,27 @@ test "extract stores knot timestamps in indices and knot values in coefficients"
     var coefficients = ArrayList(f64).empty;
     defer coefficients.deinit(allocator);
 
-    try extract(allocator, compressed.items, &indices, &coefficients);
+    try extract(
+        allocator,
+        compressed.items,
+        &indices,
+        &coefficients,
+    );
 
     const num_segments = indices.items[0];
-    const num_segments_usize = math.cast(usize, num_segments) orelse return Error.CorruptedCompressedData;
+    const num_segments_usize = math.cast(
+        usize,
+        num_segments,
+    ) orelse return Error.CorruptedCompressedData;
 
     // coefficients = [norm_offset, norm_scale] + one value per segment.
-    try testing.expectEqual(@as(usize, 2 + num_segments_usize), coefficients.items.len);
+    try testing.expectEqual(
+        @as(usize, 2 + num_segments_usize),
+        coefficients.items.len,
+    );
 
-    // indices = [num_segments] + one timestamp per segment + [num_flags, flag_bytes_len, ...flag_bytes, original_length].
+    // indices = [num_segments] + one timestamp per segment
+    // + [num_flags, flag_bytes_len, ...flag_bytes, original_length].
     try testing.expect(indices.items.len >= 1 + num_segments_usize + 3);
 }
 
@@ -2100,7 +2225,12 @@ test "rebuild rejects coefficients array that is too short (fewer than 2 entries
 
     try testing.expectError(
         Error.CorruptedCompressedData,
-        rebuild(allocator, &indices, &coefficients, &rebuilt),
+        rebuild(
+            allocator,
+            &indices,
+            &coefficients,
+            &rebuilt,
+        ),
     );
 }
 
@@ -2116,7 +2246,12 @@ test "rebuild rejects indices array that is too short (fewer than 4 entries)" {
 
     try testing.expectError(
         Error.CorruptedCompressedData,
-        rebuild(allocator, &indices, &coefficients, &rebuilt),
+        rebuild(
+            allocator,
+            &indices,
+            &coefficients,
+            &rebuilt,
+        ),
     );
 }
 
@@ -2128,11 +2263,17 @@ test "rebuild rejects num_segments that would require more coefficients than pro
     defer rebuilt.deinit(allocator);
 
     const coefficients = [_]f64{ 0.0, 1.0 }; // only offset and scale, no knot values.
-    const indices = [_]u64{ 1, 0, 0, 0, 4 }; // num_segments=1, t_bits=0.0, num_flags=0, flag_bytes_len=0, original_length=4.
+    const indices = [_]u64{ 1, 0, 0, 0, 4 }; // num_segments=1, t_bits=0.0, num_flags=0,
+    // flag_bytes_len=0, original_length=4.
 
     try testing.expectError(
         Error.CorruptedCompressedData,
-        rebuild(allocator, &indices, &coefficients, &rebuilt),
+        rebuild(
+            allocator,
+            &indices,
+            &coefficients,
+            &rebuilt,
+        ),
     );
 }
 
@@ -2149,7 +2290,12 @@ test "rebuild rejects flag_bytes_len that would require more indices than provid
 
     try testing.expectError(
         Error.CorruptedCompressedData,
-        rebuild(allocator, &indices, &coefficients, &rebuilt),
+        rebuild(
+            allocator,
+            &indices,
+            &coefficients,
+            &rebuilt,
+        ),
     );
 }
 
@@ -2161,11 +2307,17 @@ test "rebuild rejects extra trailing coefficients not accounted for by the struc
     defer rebuilt.deinit(allocator);
 
     const coefficients = [_]f64{ 0.0, 1.0, 99.0 }; // extra 99.0 at the end.
-    const indices = [_]u64{ 0, 0, 0, 4 }; // num_segments=0, num_flags=0, flag_bytes_len=0, original_length=4.
+    const indices = [_]u64{ 0, 0, 0, 4 }; // num_segments=0, num_flags=0, flag_bytes_
+    // len=0, original_length=4.
 
     try testing.expectError(
         Error.CorruptedCompressedData,
-        rebuild(allocator, &indices, &coefficients, &rebuilt),
+        rebuild(
+            allocator,
+            &indices,
+            &coefficients,
+            &rebuilt,
+        ),
     );
 }
 
@@ -2181,6 +2333,11 @@ test "rebuild rejects extra trailing indices not accounted for by the structure"
 
     try testing.expectError(
         Error.CorruptedCompressedData,
-        rebuild(allocator, &indices, &coefficients, &rebuilt),
+        rebuild(
+            allocator,
+            &indices,
+            &coefficients,
+            &rebuilt,
+        ),
     );
 }
