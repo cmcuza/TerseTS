@@ -84,14 +84,14 @@ jobs:
     - name: Rustup Update
       run: rustup update
     - name: Cargo Build
-      run: cargo build --verbose --all-targets
+      run: cargo build --verbose --release --all-targets
       working-directory: bindings/rust
     - name: Cargo Clippy
-      run: cargo clippy --verbose --all-targets
+      run: cargo clippy --verbose --release --all-targets
       working-directory: bindings/rust
     - name: Cargo Doc
-      run: cargo doc --verbose --no-deps
+      run: cargo doc --verbose --release --no-deps
       working-directory: bindings/rust
     - name: Cargo Test
-      run: cargo test --verbose --all-targets -- --nocapture
+      run: cargo test --verbose --release --all-targets -- --nocapture
       working-directory: bindings/rust
