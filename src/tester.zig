@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The following testing procedure has been deprecated as it was not comprehensive enough.
-//! Thus, leading to flaky tests and bugs in the implementation, use tester_v2.zig instead.
-//! tester.zig will be replaced with tester_v2.zig when all of the tests have been updated.
+//! The following testing functions have been deprecated as they where not comprehensive enough.
+//! Thus, leading to flaky tests and bugs in the implementation, use tester/runners.zig instead.
+//! tester.zig will be deleted when all tests have been ported to use tester/runners.zig instead.
 //!
 //! Provides methods for testing TerseTS.
 //!
