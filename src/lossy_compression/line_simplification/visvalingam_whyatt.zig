@@ -20,7 +20,6 @@
 const std = @import("std");
 const mem = std.mem;
 const math = std.math;
-const time = std.time;
 const testing = std.testing;
 const ArrayList = std.ArrayList;
 const Allocator = mem.Allocator;
@@ -371,7 +370,7 @@ pub fn testAreaWithinErrorBound(
 
 test "vw compress and decompress with zero error bound" {
     // Initialize a random number generator.
-    const seed: u64 = @bitCast(time.milliTimestamp());
+    const seed: u64 = @bitCast(tester.milliTimestamp());
     var prng = std.Random.DefaultPrng.init(seed);
     const random = prng.random();
 

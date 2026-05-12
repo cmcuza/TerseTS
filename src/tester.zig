@@ -61,11 +61,12 @@
 
 const std = @import("std");
 const ArrayList = std.ArrayList;
+const Clock = std.Io.Clock;
 const Random = std.Random;
 const Allocator = std.mem.Allocator;
 const Error = std.mem.Allocator.Error;
+const Threaded = std.Io.Threaded;
 const math = std.math;
-const time = std.time;
 const testing = std.testing;
 const debug = std.debug;
 
@@ -1101,7 +1102,7 @@ pub fn generateNumberOfValues(random: Random) usize {
 /// pseudo-random number generator unless the seed is reset.
 pub fn getDefaultRandomGenerator() Random {
     if (default_seed == 0) {
-        default_seed = @bitCast(time.milliTimestamp());
+        default_seed = @bitCast(milliTimestamp());
         default_prng = std.Random.DefaultPrng.init(default_seed);
     }
     return default_prng.random();
@@ -1111,6 +1112,14 @@ pub fn getDefaultRandomGenerator() Random {
 /// this function returns the default `Random` instance.
 pub fn resolveRandom(random_optional: ?Random) Random {
     return random_optional orelse getDefaultRandomGenerator();
+}
+
+/// Return a timestamp in milliseconds relative to UTC 1970-01-01.
+pub fn milliTimestamp() i64 {
+    var threaded: Threaded = .init_single_threaded;
+    const timestamp = Clock.real.now(threaded.io());
+    threaded.deinit();
+    return timestamp.toMilliseconds();
 }
 
 /// Adds noise to a given value based on `noise_scale`. This ensures that the noise is proportional

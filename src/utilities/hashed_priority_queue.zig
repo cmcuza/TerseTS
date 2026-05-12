@@ -24,7 +24,6 @@
 const std = @import("std");
 const rand = std.Random;
 const math = std.math;
-const time = std.time;
 const Order = std.math.Order;
 const testing = std.testing;
 const HashMap = std.HashMap;
@@ -36,6 +35,7 @@ const expectError = testing.expectError;
 
 const tersets = @import("../tersets.zig");
 const Error = tersets.Error;
+const tester = @import("../tester.zig");
 
 /// A generic priority queue for storing generic data with hashed indexing for fast updates.
 /// Similar as with Zig's std.PriorityQueue, initialize with `init`. Provide `compareFn` that
@@ -274,7 +274,7 @@ test "add and remove min keys of simple values in HashedPriorityQueue" {
     defer list.deinit(allocator);
 
     // Initialize a random number generator.
-    const seed: u64 = @bitCast(time.milliTimestamp());
+    const seed: u64 = @bitCast(tester.milliTimestamp());
     var rnd = std.Random.DefaultPrng.init(seed);
 
     for (0..100) |_| {
@@ -346,10 +346,12 @@ test "add and remove min key of custom struct in HashedPriorityQueue" {
     };
 
     const HashContext = struct {
-        pub fn hash(_: @This(), s: S) u64 {
+        const Self = @This();
+
+        pub fn hash(_: Self, s: S) u64 {
             return @as(u64, @bitCast(s.key));
         }
-        pub fn eql(_: @This(), s_one: S, s_two: S) bool {
+        pub fn eql(_: Self, s_one: S, s_two: S) bool {
             return s_one.key == s_two.key;
         }
     };
@@ -395,10 +397,12 @@ test "add, remove and element position for key of structs in HashedPriorityQueue
     };
 
     const HashContext = struct {
-        pub fn hash(_: @This(), s: S) u64 {
+        const Self = @This();
+
+        pub fn hash(_: Self, s: S) u64 {
             return @as(u64, @bitCast(s.key));
         }
-        pub fn eql(_: @This(), s_one: S, s_two: S) bool {
+        pub fn eql(_: Self, s_one: S, s_two: S) bool {
             return s_one.key == s_two.key;
         }
     };
