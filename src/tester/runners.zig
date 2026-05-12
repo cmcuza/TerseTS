@@ -1,4 +1,4 @@
-// Copyright 2024 TerseTS Contributors
+// Copyright 2026 TerseTS Contributors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The following testing functions have been deprecated as they where not comprehensive enough.
-//! Thus, leading to flaky tests and bugs in the implementation, use tester/runners.zig instead.
-//! tester.zig will be deleted when all tests have been ported to use tester/runners.zig instead.
+//! TODO: Tester real data in repository or downloaded? Maybe script for downloading data sets in repository?
+//! Provides methods for testing TerseTS.
+//!
+//! The two main functions for testing the compression methods are `` and `` which automatically tests a compression method using sequences of values within `@floatMin(f64)` and `@floatMax(f64)` to ensure all compression methods works with any combination of `f64` values. `` asserts that all values are within the error bound when decompressed, thus tests fail if the decompressed values are outside the error bound or an error is raised. `` asserts that all values are within the error bound when decompressed, thus tests only fail if the decompressed values are outside the error bound. `` is preferred as it provides a stronger guarantee, but some compression method inherently cannot compress arbitrary sequences of `f64` values, so in some cases they may return an error.
 //!
 //! Provides methods for testing TerseTS.
 //!
@@ -65,12 +66,11 @@
 
 const std = @import("std");
 const ArrayList = std.ArrayList;
-const Clock = std.Io.Clock;
 const Random = std.Random;
 const Allocator = std.mem.Allocator;
 const Error = std.mem.Allocator.Error;
-const Threaded = std.Io.Threaded;
 const math = std.math;
+const time = std.time;
 const testing = std.testing;
 const debug = std.debug;
 
@@ -117,6 +117,8 @@ pub var default_prng: std.Random.DefaultPrng = undefined;
 
 /// Default noise scale used when generating test data with noise.
 const noise_scale: f64 = 0.005; // 0.5%
+
+// TODO: Add only
 
 /// Different data distributions used for testing.
 pub const DataDistribution = enum {
@@ -1106,7 +1108,7 @@ pub fn generateNumberOfValues(random: Random) usize {
 /// pseudo-random number generator unless the seed is reset.
 pub fn getDefaultRandomGenerator() Random {
     if (default_seed == 0) {
-        default_seed = @bitCast(milliTimestamp());
+        default_seed = @bitCast(time.milliTimestamp());
         default_prng = std.Random.DefaultPrng.init(default_seed);
     }
     return default_prng.random();
@@ -1116,14 +1118,6 @@ pub fn getDefaultRandomGenerator() Random {
 /// this function returns the default `Random` instance.
 pub fn resolveRandom(random_optional: ?Random) Random {
     return random_optional orelse getDefaultRandomGenerator();
-}
-
-/// Return a timestamp in milliseconds relative to UTC 1970-01-01.
-pub fn milliTimestamp() i64 {
-    var threaded: Threaded = .init_single_threaded;
-    const timestamp = Clock.real.now(threaded.io());
-    threaded.deinit();
-    return timestamp.toMilliseconds();
 }
 
 /// Adds noise to a given value based on `noise_scale`. This ensures that the noise is proportional
