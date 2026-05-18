@@ -44,6 +44,7 @@ pub enum Method {
     RunLengthEncoding,
     NonLinearApproximation,
     SerfQT,
+    Chimp64,
 }
 
 /// Compress a slice of [`f64`] in `uncompressed_values` to a [`Vec`] of [`u8`] with a TerseTS
