@@ -45,6 +45,7 @@ pub enum Method {
     NonLinearApproximation,
     SerfQT,
     Chimp64,
+    Chimp128,
 }
 
 /// Compress a slice of [`f64`] in `uncompressed_values` to a [`Vec`] of [`u8`] with a TerseTS

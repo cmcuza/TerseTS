@@ -165,6 +165,7 @@ pub fn defaultConfigurationBuilder(
         // Methods with empty configuration.
         .RunLengthEncoding,
         .Chimp64,
+        .Chimp128,
         => try allocator.dupe(u8, "{}"),
     };
 }
