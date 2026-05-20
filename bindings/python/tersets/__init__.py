@@ -152,6 +152,7 @@ class Method(Enum):
     NonLinearApproximation = 15
     SerfQT = 16
     Chimp64 = 17
+    Chimp128 = 18
 
 
 # Public API.

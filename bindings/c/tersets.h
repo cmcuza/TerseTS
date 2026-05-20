@@ -27,6 +27,7 @@ enum Method {
   NonLinearApproximation        = 15,
   SerfQT                        = 16,
   Chimp64                       = 17,
+  Chimp128                      = 18,
 };
 
 // A pointer to uncompressed values and the number of values.
