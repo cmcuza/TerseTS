@@ -418,7 +418,9 @@ test "check chimp128 configuration parsing" {
     try compress(allocator, uncompressed_values, &compressed_values, "{}");
 
     // A configuration with unexpected fields is rejected.
-    try testing.expectError(Error.InvalidConfiguration, compress(allocator, uncompressed_values, &compressed_values,
-        \\{ "abs_error_bound": 0.1 }
-    ));
+    const invalid_configuration = "{ \"abs_error_bound\": 0.1 }";
+    try testing.expectError(
+        Error.InvalidConfiguration,
+        compress(allocator, uncompressed_values, &compressed_values, invalid_configuration),
+    );
 }
