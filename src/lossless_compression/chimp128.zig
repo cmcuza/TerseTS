@@ -175,6 +175,11 @@ pub fn compress(
     try bit_writer.flushBits();
 }
 
+/// Decompress a Chimp128-encoded stream into `decompressed_values`.
+/// Maintains the same 128-value ring buffer as the encoder so predictor lookups stay in sync.
+/// Reads the `[count: u64][first_value: f64]` header, then per value: marker `00` copies the
+/// stored value at the given 7-bit ring slot, marker `01` XORs that stored value with the
+/// reconstructed meaningful bits, and markers `10`/`11` XOR against the immediately previous value.
 pub fn decompress(
     allocator: Allocator,
     compressed_values: []const u8,
@@ -277,39 +282,25 @@ fn leadingZeroBucketIndex(leading_zeros: u6) u3 {
     return selected_index;
 }
 
-fn expectRoundTrip(uncompressed_values: []const f64) !void {
-    const allocator = testing.allocator;
-    const method_configuration = "{}";
-
-    var compressed_values = ArrayList(u8).empty;
-    defer compressed_values.deinit(allocator);
-
-    try compress(
-        allocator,
-        uncompressed_values,
-        &compressed_values,
-        method_configuration,
-    );
-
-    var decompressed_values = ArrayList(f64).empty;
-    defer decompressed_values.deinit(allocator);
-
-    try decompress(allocator, compressed_values.items, &decompressed_values);
-
-    try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
-    for (uncompressed_values, decompressed_values.items) |expected, actual| {
-        try testing.expectEqual(@as(u64, @bitCast(expected)), @as(u64, @bitCast(actual)));
-    }
-}
-
-test "chimp128 roundtrips generated finite values" {
+test "chimp128 roundtrips generated values across all distributions" {
     const allocator = testing.allocator;
 
-    // Exercise Chimp128 through the public TerseTS dispatcher on bounded finite series.
+    // Chimp128 is bitwise lossless, so it must recover any f64. Test every distribution the tester offers.
     const data_distributions = &[_]tester.DataDistribution{
+        .TightlyBoundedRandomValues,
         .LinearFunctions,
+        .QuadraticFunctions,
+        .ExponentialFunctions,
+        .PowerFunctions,
+        .SqrtFunctions,
         .BoundedRandomValues,
         .SinusoidalFunction,
+        .MixedBoundedValuesFunctions,
+        .FiniteRandomValues,
+        .RandomValuesWithNansAndInfinities,
+        .LinearFunctionsWithNansAndInfinities,
+        .BoundedRandomValuesWithNansAndInfinities,
+        .SinusoidalFunctionWithNansAndInfinities,
     };
 
     for (0..generated_test_rounds) |_| {
@@ -325,28 +316,28 @@ test "chimp128 roundtrips empty input" {
     // Empty input uses only the count header and no bit stream.
     const uncompressed_values = &[_]f64{};
 
-    try expectRoundTrip(uncompressed_values);
+    try tester.expectLosslessRoundTrip(testing.allocator, compress, decompress, uncompressed_values);
 }
 
 test "chimp128 roundtrips single value" {
     // A single value stores the count and first raw value without any XOR markers.
     const uncompressed_values = &[_]f64{42.5};
 
-    try expectRoundTrip(uncompressed_values);
+    try tester.expectLosslessRoundTrip(testing.allocator, compress, decompress, uncompressed_values);
 }
 
 test "chimp128 roundtrips repeated values" {
     // Repeated values should use marker 00 with a ring-buffer slot after the first raw value.
     const uncompressed_values = &[_]f64{ 7.25, 7.25, 7.25, 7.25, 7.25 };
 
-    try expectRoundTrip(uncompressed_values);
+    try tester.expectLosslessRoundTrip(testing.allocator, compress, decompress, uncompressed_values);
 }
 
 test "chimp128 roundtrips changing values" {
     // Changing values cover bucket changes, bucket reuse, and meaningful-bit paths.
     const uncompressed_values = &[_]f64{ 100.0, 100.01, 100.02, 99.99, -3.5, 0.0, 2048.125 };
 
-    try expectRoundTrip(uncompressed_values);
+    try tester.expectLosslessRoundTrip(testing.allocator, compress, decompress, uncompressed_values);
 }
 
 test "chimp128 roundtrips special floating-point values" {
@@ -360,5 +351,76 @@ test "chimp128 roundtrips special floating-point values" {
         -math.floatMax(f64),
     };
 
-    try expectRoundTrip(uncompressed_values);
+    try tester.expectLosslessRoundTrip(testing.allocator, compress, decompress, uncompressed_values);
+}
+
+test "chimp128 roundtrips two values" {
+    // Two values exercise exactly one XOR marker right after the first raw value.
+    const uncompressed_values = &[_]f64{ 3.5, 9.0 };
+
+    try tester.expectLosslessRoundTrip(testing.allocator, compress, decompress, uncompressed_values);
+}
+
+test "chimp128 roundtrips edge floats" {
+    // +0.0 and -0.0 compare numerically equal but differ in the sign bit, so only a bitwise
+    // codec preserves them. Subnormals use a distinct exponent encoding, and `nextAfter` pairs
+    // produce the smallest possible XOR — exercising the maximum-leading-zeros bucket path.
+    const uncompressed_values = &[_]f64{
+        0.0,
+        -0.0,
+        math.floatMin(f64),
+        math.floatTrueMin(f64),
+        1.0,
+        math.nextAfter(f64, 1.0, math.inf(f64)),
+        math.nextAfter(f64, 1.0, -math.inf(f64)),
+    };
+
+    try tester.expectLosslessRoundTrip(testing.allocator, compress, decompress, uncompressed_values);
+}
+
+test "chimp128 roundtrips sequences longer than the ring buffer" {
+    // More than 128 values makes the ring buffer wrap. The repeating pattern means earlier
+    // values get reused as predictors, exercising the ring-buffer marker paths.
+    var uncompressed_values: [400]f64 = undefined;
+    for (&uncompressed_values, 0..) |*value, index| {
+        value.* = @floatFromInt(index % 100);
+    }
+
+    try tester.expectLosslessRoundTrip(testing.allocator, compress, decompress, &uncompressed_values);
+}
+
+test "chimp128 compresses repeated values below raw size" {
+    // A constant signal is maximally compressible: every repeat after the first raw value
+    // collapses to a 9-bit marker, so the byte stream must be far smaller than the raw f64 array.
+    const allocator = testing.allocator;
+
+    var uncompressed_values: [500]f64 = undefined;
+    @memset(&uncompressed_values, 1.0);
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    try compress(allocator, &uncompressed_values, &compressed_values, "{}");
+
+    try testing.expect(compressed_values.items.len < uncompressed_values.len * @sizeOf(f64));
+}
+
+test "check chimp128 configuration parsing" {
+    // Chimp128 takes no parameters: an empty configuration must parse, and a configuration
+    // carrying unexpected fields must be rejected with InvalidConfiguration.
+    const allocator = testing.allocator;
+    const uncompressed_values = &[_]f64{ 1.0, 2.0, 3.0 };
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    // An empty configuration is valid.
+    try compress(allocator, uncompressed_values, &compressed_values, "{}");
+
+    // A configuration with unexpected fields is rejected.
+    const invalid_configuration = "{ \"abs_error_bound\": 0.1 }";
+    try testing.expectError(
+        Error.InvalidConfiguration,
+        compress(allocator, uncompressed_values, &compressed_values, invalid_configuration),
+    );
 }
