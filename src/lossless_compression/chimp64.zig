@@ -174,8 +174,11 @@ pub fn decompress(
             leading_bucket = leading_zero_buckets[leading_bucket_index];
 
             const meaningful_bit_count = bit_reader.readBitsNoEof(u6, 6) catch return Error.ByteStreamError;
-            const trailing_zeros: u6 =
-                @intCast(bits_per_value - @as(u16, leading_bucket) - @as(u16, meaningful_bit_count));
+            // Validate the geometry before casting: leading + meaningful must leave room for
+            // a non-negative trailing-zero count that still fits in u6.
+            const occupied: u16 = @as(u16, leading_bucket) + @as(u16, meaningful_bit_count);
+            if (occupied == 0 or occupied > bits_per_value) return Error.UnsupportedInput;
+            const trailing_zeros: u6 = @intCast(bits_per_value - occupied);
             const meaningful_bits = bit_reader.readBitsNoEof(u64, meaningful_bit_count) catch return Error.ByteStreamError;
 
             xor = meaningful_bits << trailing_zeros;
