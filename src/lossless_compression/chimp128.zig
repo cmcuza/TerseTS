@@ -37,8 +37,9 @@ const Method = tersets.Method;
 const bits_per_value = 64;
 const leading_zero_bucket_bits = 3;
 const previous_values = 128;
+const ring_slot_bits = std.math.log2_int(usize, previous_values);
 // Higher than Chimp64's threshold of 6 because encoding a ring-buffer index costs 7 extra bits.
-const trailing_zero_threshold = 6 + std.math.log2(previous_values);
+const trailing_zero_threshold = 6 + ring_slot_bits;
 const generated_test_rounds = 5;
 
 // 14-bit LSB mask indexes into the fast-lookup table; two values sharing these bits are likely good predictors.
@@ -200,15 +201,13 @@ pub fn decompress(
     defer allocator.free(stored_values);
     @memset(stored_values, 0);
 
-    const indices = try allocator.alloc(usize, 1 << lsb_bits);
-    defer allocator.free(indices);
-    @memset(indices, 0);
+    // The decoder reads ring-slot indices directly from the bitstream (markers `00`/`01`),
+    // so the LSB→slot hash table that the encoder maintains is not needed here.
 
     var current_index: usize = previous_values;
 
     const first_value_bits: u64 = @bitCast(first_value);
     stored_values[current_index % previous_values] = first_value_bits;
-    indices[first_value_bits & lsb_mask] = current_index;
     current_index += 1;
 
     var previous_value_bits: u64 = first_value_bits;
@@ -235,8 +234,11 @@ pub fn decompress(
             const leading_bucket = leading_zero_buckets[leading_bucket_index];
 
             const meaningful_bit_count = bit_reader.readBitsNoEof(u6, 6) catch return Error.ByteStreamError;
-            const trailing_zeros: u6 =
-                @intCast(bits_per_value - @as(u16, leading_bucket) - @as(u16, meaningful_bit_count));
+            // Validate the geometry before casting: leading + meaningful must leave room for
+            // a non-negative trailing-zero count that still fits in u6.
+            const occupied: u16 = @as(u16, leading_bucket) + @as(u16, meaningful_bit_count);
+            if (occupied == 0 or occupied > bits_per_value) return Error.UnsupportedInput;
+            const trailing_zeros: u6 = @intCast(bits_per_value - occupied);
             const meaningful_bits = bit_reader.readBitsNoEof(u64, meaningful_bit_count) catch return Error.ByteStreamError;
             const xor = meaningful_bits << trailing_zeros;
 
@@ -258,9 +260,7 @@ pub fn decompress(
             current_value_bits = previous_value_bits ^ xor;
         }
 
-        const decoded_key = current_value_bits & lsb_mask;
         stored_values[current_index % previous_values] = current_value_bits;
-        indices[decoded_key] = current_index;
         current_index += 1;
         previous_value_bits = current_value_bits;
 
