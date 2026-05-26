@@ -53,6 +53,7 @@ const bottom_up = @import("lossy_compression/line_simplification/bottom_up.zig")
 const rle_enconding = @import("lossless_compression/run_length_encoding.zig");
 const chimp64 = @import("lossless_compression/chimp64.zig");
 const chimp128 = @import("lossless_compression/chimp128.zig");
+const camel = @import("lossless_compression/camel.zig");
 
 const extractors = @import("utilities/extractors.zig");
 const tester = @import("tester.zig");
@@ -94,6 +95,7 @@ pub const Method = enum {
     SerfQT,
     Chimp64,
     Chimp128,
+    Camel,
 };
 
 /// Compress `uncompressed_values` using `method` and its `configuration` and returns the results
@@ -273,6 +275,14 @@ pub fn compress(
                 configuration,
             );
         },
+        .Camel => {
+            try camel.compress(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                configuration,
+            );
+        },
     }
     try compressed_values.append(allocator, @intFromEnum(method));
     return compressed_values;
@@ -354,6 +364,9 @@ pub fn decompress(
         },
         .Chimp128 => {
             try chimp128.decompress(allocator, compressed_values_slice, &decompressed_values);
+        },
+        .Camel => {
+            try camel.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
     }
 
@@ -506,6 +519,9 @@ pub fn extract(
         .Chimp128 => {
             return Error.UnsupportedMethod;
         },
+        .Camel => {
+            return Error.UnsupportedMethod;
+        }
     }
 }
 
@@ -650,6 +666,9 @@ pub fn rebuild(
         .Chimp128 => {
             return Error.UnsupportedMethod;
         },
+        .Camel => {
+            return Error.UnsupportedMethod;
+        },
     }
     try compressed_values.append(allocator, @intFromEnum(method));
     return compressed_values;
@@ -690,7 +709,8 @@ test "extract and rebuild works for any compression method supported" {
             method == Method.SerfQT or
             method == Method.RunLengthEncoding or
             method == Method.Chimp64 or
-            method == Method.Chimp128)
+            method == Method.Chimp128 or
+            method == Method.Camel)
         {
             // These compression methods are not supported for extraction
             // of the coefficients and indices. This is because even small
