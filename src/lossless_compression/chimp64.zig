@@ -174,10 +174,13 @@ pub fn decompress(
             leading_bucket = leading_zero_buckets[leading_bucket_index];
 
             const meaningful_bit_count = bit_reader.readBitsNoEof(u6, 6) catch return Error.ByteStreamError;
+            // The encoder never emits a zero meaningful-bit count for this marker.
+            // Reject corrupted streams explicitly instead of treating them as xor = 0.
+            if (meaningful_bit_count == 0) return Error.UnsupportedInput;
             // Validate the geometry before casting: leading + meaningful must leave room for
             // a non-negative trailing-zero count that still fits in u6.
             const occupied: u16 = @as(u16, leading_bucket) + @as(u16, meaningful_bit_count);
-            if (occupied == 0 or occupied > bits_per_value) return Error.UnsupportedInput;
+            if (occupied > bits_per_value) return Error.UnsupportedInput;
             const trailing_zeros: u6 = @intCast(bits_per_value - occupied);
             const meaningful_bits = bit_reader.readBitsNoEof(u64, meaningful_bit_count) catch return Error.ByteStreamError;
 
@@ -277,9 +280,12 @@ test "chimp64 roundtrips changing values" {
 
 test "chimp64 roundtrips special floating-point values" {
     // Chimp64 is bitwise lossless, so NaN payloads, infinities, and huge finite values are preserved.
+    // The non-canonical NaN below exercises payload preservation explicitly.
+    const payload_nan: f64 = @bitCast(@as(u64, 0x7ff8000000000001));
     const uncompressed_values = &[_]f64{
         1.0,
         math.nan(f64),
+        payload_nan,
         math.inf(f64),
         -math.inf(f64),
         math.floatMax(f64),
