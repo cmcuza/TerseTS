@@ -521,7 +521,7 @@ pub fn extract(
         },
         .Camel => {
             return Error.UnsupportedMethod;
-        }
+        },
     }
 }
 
