@@ -130,6 +130,17 @@ const BitReader = struct {
 
 // Splits a float into integer/fractional parts and metadata.
 pub fn splitNumber(number: f64, fixed_l: ?u8) Parts {
+    // Preserve negative zero as a special case to keep the sign bit.
+    if (number == 0.0 and (@as(u64, @bitCast(number)) & 0x8000_0000_0000_0000) != 0) {
+        return .{
+            .integer = 0,
+            .decimal = 0,
+            .decimal_digits = 0,
+            .special = true,
+            .raw_bits = @as(u64, @bitCast(number)),
+        };
+    }
+
     // Handle special values (NaN, Inf)
     if (!Math.isFinite(number)) {
         return .{
@@ -601,4 +612,102 @@ test "camel round-trip special values" {
     try testing.expect(Math.isNan(decompressed.items[0]));
     try testing.expect(Math.isInf(decompressed.items[1]) and decompressed.items[1] > 0);
     try testing.expect(Math.isInf(decompressed.items[2]) and decompressed.items[2] < 0);
+}
+
+test "camel round-trip empty input" {
+    const allocator = testing.allocator;
+
+    const values = [_]f64{};
+
+    var compressed = ArrayList(u8).empty;
+    defer compressed.deinit(allocator);
+
+    try compress(allocator, values[0..], &compressed, "{}");
+
+    var decompressed = ArrayList(f64).empty;
+    defer decompressed.deinit(allocator);
+
+    try decompress(allocator, compressed.items, &decompressed);
+
+    try testing.expectEqual(values.len, decompressed.items.len);
+}
+
+test "camel round-trip decimal digit branches" {
+    const allocator = testing.allocator;
+
+    const values = [_]f64{
+        1.2, // l=1
+        -3.4, // l=1 (negative)
+        1.23, // l=2
+        -9.87, // l=2 (negative)
+        1.001, // l=3, dec_fraction < 2^-l
+        2.5, // l=1, dec_fraction >= 2^-l
+        1.2345, // l=4
+        -6.54321, // l=5
+    };
+
+    var compressed = ArrayList(u8).empty;
+    defer compressed.deinit(allocator);
+
+    try compress(allocator, values[0..], &compressed, "{}");
+
+    var decompressed = ArrayList(f64).empty;
+    defer decompressed.deinit(allocator);
+
+    try decompress(allocator, compressed.items, &decompressed);
+
+    try testing.expectEqual(values.len, decompressed.items.len);
+    try testing.expect(shared_functions.isWithinErrorBound(
+        values[0..],
+        decompressed.items,
+        1e-9,
+    ));
+}
+
+test "camel decompress corrupted input" {
+    const allocator = testing.allocator;
+
+    const compressed = [_]u8{}; // empty -> missing count
+    var decompressed = ArrayList(f64).empty;
+    defer decompressed.deinit(allocator);
+
+    try testing.expectError(
+        Error.CorruptedCompressedData,
+        decompress(allocator, compressed[0..], &decompressed),
+    );
+}
+
+test "camel round-trip integer-only, the edge cases and negative zero" {
+    const allocator = testing.allocator;
+
+    const values = [_]f64{
+        -65535.0, // the largest negative integer difference that fits in 16 bits
+        0.0,
+        -0.0,
+        5.0,
+        -7.0,
+        65528.0, // maximal integer difference that fits in 16 bits
+    };
+
+    var compressed = ArrayList(u8).empty;
+    defer compressed.deinit(allocator);
+
+    try compress(allocator, values[0..], &compressed, "{}");
+
+    var decompressed = ArrayList(f64).empty;
+    defer decompressed.deinit(allocator);
+
+    try decompress(allocator, compressed.items, &decompressed);
+
+    try testing.expectEqual(values.len, decompressed.items.len);
+    try testing.expect(shared_functions.isWithinErrorBound(
+        values[0..],
+        decompressed.items,
+        0.0,
+    ));
+
+    // Preserve -0.0 sign bit
+    try testing.expect(
+        @as(u64, @bitCast(values[1])) == @as(u64, @bitCast(decompressed.items[1])),
+    );
 }
