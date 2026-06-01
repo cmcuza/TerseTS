@@ -122,6 +122,7 @@ pub fn defaultConfigurationBuilder(
         .ABCLinearApproximation,
         .NonLinearApproximation,
         .SerfQT,
+        .MixedTypePLA,
         .BitPackedQuantization,
         => blk: {
             const error_bound: f32 = 0.1; // Simple default value.
