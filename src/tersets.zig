@@ -71,6 +71,7 @@ pub const Error = error{
     ByteStreamError,
     UnsupportedMethod,
     OutOfMemory,
+    WriteFailed,
 };
 
 /// The compression methods in TerseTS.
