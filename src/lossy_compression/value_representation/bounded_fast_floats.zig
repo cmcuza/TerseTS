@@ -353,9 +353,8 @@ fn decomposeF64ToFixedPointRepresentation(value: f64) Error!FixedPointRepresenta
     const exponent: u64 = (value_without_sign >> mantissa_bits) & exponent_mask;
     const mantissa: u64 = value_without_sign & mantissa_mask;
 
-    // Reject NaNs, and infinities (exponent all zeros is also used for subnormals).
-    // If exponent is all zeros and mantissa is non-zero, it's a subnormal number.
-    // Otherwise, it is zero which we can handle.
+    // If exponent is all zeros and mantissa is zero, it's zero.
+    // Otherwise, an error is returned for unsupported values (NaN, infinity, and denormals).
     // This can only happen if the compressed values are corrupted.
     // The compression phase checks should prevent this from happening.
     if (exponent == exponent_mask or exponent == 0) {
