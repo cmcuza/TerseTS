@@ -16,6 +16,9 @@
 //! The method is described in:
 //! Liakos et al., "Chimp: Efficient Lossless Floating Point Compression for Time Series Databases", VLDB 2022.
 //! https://doi.org/10.14778/3551793.3551852
+//! The ring-buffer predictor scheme, bit-level layout, and leading-zero bucket boundaries follow
+//! the authors' reference Java implementation in the ELF repository, package
+//! `gr.aueb.delorean.chimp`: https://github.com/Spatio-Temporal-Lab/elf.
 
 const std = @import("std");
 const math = std.math;
@@ -34,25 +37,41 @@ const tester = @import("../tester.zig");
 const Error = tersets.Error;
 const Method = tersets.Method;
 
+/// Number of bits in an IEEE-754 `f64`; the width of every value Chimp128 XOR-encodes.
 const bits_per_value = 64;
+/// Bit width of the leading-zero bucket index written to the stream. 3 bits index the 8 buckets
+/// in `leading_zero_buckets`.
 const leading_zero_bucket_bits = 3;
+/// Size of the ring buffer of recently seen values that serve as XOR predictors. The "128" in
+/// Chimp128 refers to this window length.
 const previous_values = 128;
+/// Bit width of a ring-buffer slot index (`log2(128) = 7`). The ring-buffer marker paths store a
+/// slot of this width so the decoder can address the same stored value.
 const ring_slot_bits = std.math.log2_int(usize, previous_values);
-// Higher than Chimp64's threshold of 6 because encoding a ring-buffer index costs 7 extra bits.
+/// Minimum trailing-zero run that triggers the "store only meaningful bits" path (marker `01`).
+/// Higher than Chimp64's threshold of 6 because this path additionally stores a `ring_slot_bits`
+/// ring-buffer index, so the trailing-zero run must save at least those extra bits to be worth it.
 const trailing_zero_threshold = 6 + ring_slot_bits;
+/// Number of randomized rounds the generated-distribution round-trip test runs.
 const generated_test_rounds = 5;
 
-// 14-bit LSB mask indexes into the fast-lookup table; two values sharing these bits are likely good predictors.
+/// Width of the least-significant-bit key used to index the predictor lookup table. Two values
+/// sharing these `lsb_bits` low bits usually differ only in higher bits, making one a good XOR
+/// predictor for the other; the encoder keys its `indices` table on them to find a recent match.
 const lsb_bits = 14;
+/// Mask selecting the low `lsb_bits` of a value's bit pattern, i.e. its predictor lookup-table key.
 const lsb_mask: u64 = (1 << lsb_bits) - 1;
 
+/// Quantized leading-zero counts from the Chimp paper. `@clz(xor)` is rounded down to one of these
+/// eight boundaries so the chosen bucket index fits in `leading_zero_bucket_bits`.
 const leading_zero_buckets = [_]u6{ 0, 8, 12, 16, 18, 20, 22, 24 };
 
-/// Compress `uncompressed_values` using Chimp128's value codec.
-/// The stream stores `[count: u64][first_value: f64][xor marker bits...]`.
-/// Later values are XOR-encoded against the best predictor from a 128-value ring buffer.
-/// When the ring-buffer predictor is used, the 7-bit ring slot is stored so the decoder can look it up.
-/// When no good ring-buffer predictor is found, the immediately previous value is used instead (markers 10/11).
+/// Compress `uncompressed_values` into `compressed_values` using Chimp128's value codec.
+/// `allocator` backs the configuration parser, the ring buffer and predictor lookup table, and the
+/// bit writer's scratch buffer. `method_configuration` must be an empty configuration; any field
+/// makes the call return `Error.InvalidConfiguration`. On success `compressed_values` holds
+/// `[count: u64][first_value: f64][XOR marker bits...]`. If an error occurs it is returned. The
+/// predictor selection and per-marker encoding logic is described inline in the function body.
 pub fn compress(
     allocator: Allocator,
     uncompressed_values: []const f64,
@@ -177,11 +196,12 @@ pub fn compress(
     try bit_writer.flushBits();
 }
 
-/// Decompress a Chimp128-encoded stream into `decompressed_values`.
-/// Maintains the same 128-value ring buffer as the encoder so predictor lookups stay in sync.
-/// Reads the `[count: u64][first_value: f64]` header, then per value: marker `00` copies the
-/// stored value at the given 7-bit ring slot, marker `01` XORs that stored value with the
-/// reconstructed meaningful bits, and markers `10`/`11` XOR against the immediately previous value.
+/// Decompress a Chimp128-encoded `compressed_values` stream into `decompressed_values`.
+/// `allocator` grows `decompressed_values` and backs the ring buffer that mirrors the encoder's so
+/// predictor lookups stay in sync. `compressed_values` must start with the
+/// `[count: u64][first_value: f64]` header written by `compress`; malformed or truncated streams
+/// return `Error.ByteStreamError` or `Error.UnsupportedInput` rather than trapping. If an error
+/// occurs it is returned. The per-marker decoding logic is described inline in the function body.
 pub fn decompress(
     allocator: Allocator,
     compressed_values: []const u8,
@@ -273,7 +293,9 @@ pub fn decompress(
     }
 }
 
-/// Map exact leading zeros to a Chimp128 bucket index.
+/// Map an exact leading-zero count `leading_zeros` (as returned by `@clz`) to the index of the
+/// largest `leading_zero_buckets` boundary that does not exceed it. The returned `u3` is the value
+/// written to the stream so the decoder can recover the same bucket.
 fn leadingZeroBucketIndex(leading_zeros: u6) u3 {
     var selected_index: u3 = 0;
 

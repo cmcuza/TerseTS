@@ -419,7 +419,9 @@ pub fn testGeneratedLosslessCompression(
 
 /// Round-trip helper for lossless codecs. Compresses `uncompressed_values` with `compressFn`,
 /// decompresses with `decompressFn`, and asserts the recovered values match the originals
-/// bit-for-bit (via u64 bit-cast so NaN payloads and ±0 are compared exactly).
+/// bit-for-bit: each value is reinterpreted as a `u64` and compared exactly. Because the bit-cast
+/// keeps the sign bit, +0.0 (`0x0000…`) and -0.0 (`0x8000…`) map to different integers and are
+/// distinguished, and NaN payloads are preserved — neither survives a plain `f64` equality check.
 /// Calls the codec functions directly rather than going through the public dispatcher so that
 /// edge cases like empty and single-value inputs can be exercised.
 pub fn expectLosslessRoundTrip(
