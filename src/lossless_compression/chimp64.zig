@@ -16,6 +16,9 @@
 //! The method is described in:
 //! Liakos et al., "Chimp: Efficient Lossless Floating Point Compression for Time Series Databases", VLDB 2022.
 //! https://doi.org/10.14778/3551793.3551852
+//! The bit-level layout and leading-zero bucket boundaries follow the authors' reference Java
+//! implementation in the ELF repository, package `gr.aueb.delorean.chimp`:
+//! https://github.com/Spatio-Temporal-Lab/elf.
 
 const std = @import("std");
 const math = std.math;
@@ -34,17 +37,28 @@ const tester = @import("../tester.zig");
 const Error = tersets.Error;
 const Method = tersets.Method;
 
+/// Number of bits in an IEEE-754 `f64`; the width of every value Chimp64 XOR-encodes.
 const bits_per_value = 64;
+/// Bit width of the leading-zero bucket index written to the stream. 3 bits index the 8 buckets
+/// in `leading_zero_buckets`.
 const leading_zero_bucket_bits = 3;
+/// Minimum trailing-zero run that triggers the "store only meaningful bits" path (marker `01`).
+/// At or below this many zeros, encoding the trailing-zero count costs more than the zeros would
+/// save, so the full non-leading XOR is written instead.
 const trailing_zero_threshold = 6;
+/// Number of randomized rounds the generated-distribution round-trip test runs.
 const generated_test_rounds = 5;
 
+/// Quantized leading-zero counts from the Chimp paper. `@clz(xor)` is rounded down to one of these
+/// eight boundaries so the chosen bucket index fits in `leading_zero_bucket_bits`.
 const leading_zero_buckets = [_]u6{ 0, 8, 12, 16, 18, 20, 22, 24 };
 
-/// Compress `uncompressed_values` using Chimp64's value codec.
-/// The stream stores `[count: u64][first_value: f64][xor marker bits...]`.
-/// Later values are encoded as XORs against the previous value with Chimp's
-/// 3-bit leading-zero buckets and 6-bit trailing-zero threshold.
+/// Compress `uncompressed_values` into `compressed_values` using Chimp64's value codec. `allocator`
+/// backs the configuration parser and the bit writer's scratch buffer. `method_configuration` must
+/// be an empty configuration; any field makes the call return `Error.InvalidConfiguration`. On
+/// success `compressed_values` holds `[count: u64][first_value: f64][XOR marker bits...]`. If an
+/// error occurs it is returned. The XOR-prediction and per-marker encoding logic is described
+/// inline in the function body.
 pub fn compress(
     allocator: Allocator,
     uncompressed_values: []const f64,
@@ -90,7 +104,7 @@ pub fn compress(
         // Like Gorilla, this path stores only the meaningful bits when the XOR has enough trailing zeros.
         // Chimp64 differs by using leading-zero buckets and a fixed trailing-zero threshold.
         if (trailing_zeros > trailing_zero_threshold) {
-            // Marker `01`: store a leading-zero bucket, meaningful-bit count, and meaningful bits
+            // Marker `01`: store a leading-zero bucket, meaningful-bit count, and meaningful bits.
             try bit_writer.writeBits(@as(u2, 0b01), 2);
             try bit_writer.writeBits(leading_bucket_index, leading_zero_bucket_bits);
 
@@ -126,11 +140,11 @@ pub fn compress(
     try bit_writer.flushBits();
 }
 
-/// Decompress a Chimp64-encoded stream into `decompressed_values`.
-/// Reads the `[count: u64][first_value: f64]` header, then reconstructs each later value by
-/// applying its XOR delta against the previous value: marker `00` repeats it, marker `01` reads
-/// a leading-zero bucket plus meaningful-bit count and bits, marker `10` reuses the previous
-/// leading-zero bucket, and marker `11` reads a new bucket before the non-leading XOR bits.
+/// Decompress a Chimp64-encoded `compressed_values` stream into `decompressed_values`. `allocator`
+/// grows `decompressed_values` as values are recovered. `compressed_values` must start with the
+/// `[count: u64][first_value: f64]` header written by `compress`; malformed or truncated streams
+/// return `Error.ByteStreamError` or `Error.UnsupportedInput` rather than trapping. If an error
+/// occurs it is returned. The per-marker decoding logic is described inline in the function body.
 pub fn decompress(
     allocator: Allocator,
     compressed_values: []const u8,
@@ -207,7 +221,9 @@ pub fn decompress(
     }
 }
 
-/// Map exact leading zeros to a Chimp64 bucket index.
+/// Map an exact leading-zero count `leading_zeros` (as returned by `@clz`) to the index of the
+/// largest `leading_zero_buckets` boundary that does not exceed it. The returned `u3` is the value
+/// written to the stream so the decoder can recover the same bucket.
 fn leadingZeroBucketIndex(leading_zeros: u6) u3 {
     var selected_index: u3 = 0;
 
