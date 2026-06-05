@@ -347,7 +347,7 @@ pub fn ensureEnoughBytesAreAvailable(total_bytes_available: []const u8, offset: 
 pub fn bitpackU64(
     comptime WriterType: type,
     value: u64,
-    bit_writer: *BitWriter(.little, WriterType),
+    bit_writer: *shared_structs.BitWriter(.little, WriterType),
 ) !void {
     if (value <= 0xFF) { // 8-bits.
         // Header: 00.

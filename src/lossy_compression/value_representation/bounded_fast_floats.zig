@@ -34,7 +34,7 @@
 
 const std = @import("std");
 const math = std.math;
-const io = std.io;
+const Io = std.Io;
 const testing = std.testing;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
@@ -220,8 +220,7 @@ pub fn compressBitPackedBUFF(
 
     // Prepare the bit writer for compressed output. From now on, we write using only the bit writer
     // instead of the shared_functions.appendValue.
-    const writer = compressed_values.writer(allocator);
-    var bit_writer = shared_structs.bitWriter(.little, writer);
+    var bit_writer = try shared_structs.BitWriter.init(allocator, compressed_values);
 
     // Write the first value's fractional part and sign.
     try bit_writer.writeBits(
@@ -280,8 +279,8 @@ pub fn decompressBitPackedBUFF(
 
     // Read the first value's integer part from the fixed-point representation.
     var integer_part: u64 = @bitCast(compressed_values[14..22].*);
-    var stream = io.fixedBufferStream(compressed_values[22..]);
-    var bit_reader = shared_structs.bitReader(.little, stream.reader());
+    const reader = Io.Reader.fixed(compressed_values[22..]);
+    var bit_reader = shared_structs.BitReader.init(reader);
 
     // Read the first value's fractional part and sign.
     var fractional_part: u64 = bit_reader.readBitsNoEof(
