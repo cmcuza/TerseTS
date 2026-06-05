@@ -167,14 +167,15 @@ pub fn decompress(
         current_index = next_metadata_start_index;
     }
 
-    const current_metadata = segments_metadata.getLast();
-    try decompressSegment(
-        allocator,
-        current_metadata,
-        current_index,
-        last_index,
-        decompressed_values,
-    );
+    if (segments_metadata.getLast()) |current_metadata| {
+        try decompressSegment(
+            allocator,
+            current_metadata,
+            current_index,
+            last_index,
+            decompressed_values,
+        );
+    }
 }
 
 /// Extracts `indices` and `coefficients` from SimPiece's `compressed_values`.
