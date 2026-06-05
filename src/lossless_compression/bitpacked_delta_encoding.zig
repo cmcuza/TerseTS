@@ -239,19 +239,13 @@ fn compressAllAsIntegers(
     );
 
     // Step 4: Bit-pack quantized deltas (delta - min_delta).
-    var bit_writer = shared_structs.bitWriter(
-        .little,
-        compressed_values.writer(allocator),
-    );
+    var bit_writer = try shared_structs.BitWriter.init(allocator, compressed_values);
+
     for (1..scaled_values.items.len) |i| {
         const delta = scaled_values.items[i] - scaled_values.items[i - 1];
         const quantized: u64 = @intCast(delta - min_delta);
 
-        try bitpackU64(
-            @TypeOf(compressed_values.writer(allocator)),
-            quantized,
-            &bit_writer,
-        );
+        try bitpackU64(quantized, &bit_writer);
     }
 
     try bit_writer.flushBits();
@@ -352,14 +346,14 @@ fn compressMixedEncoding(
         try shared_functions.appendValue(allocator, i64, min_delta, compressed_values);
 
         // Bit-pack delta values using fixed-length prefix scheme.
-        var bit_writer = shared_structs.bitWriter(
-            .little,
-            compressed_values.writer(allocator),
+        var bit_writer = try shared_structs.BitWriter.init(
+            allocator,
+            compressed_values,
         );
 
         for (deltas.items) |d| {
             const val: u64 = @intCast(d - min_delta);
-            try bitpackU64(@TypeOf(compressed_values.writer(allocator)), val, &bit_writer);
+            try bitpackU64(val, &bit_writer);
         }
 
         try bit_writer.flushBits();
@@ -403,8 +397,8 @@ fn decompressAllAsIntegers(
     try decompressed_values.append(allocator, first_decompressed_value);
 
     // Step 2: Set up a bit reader for the packed deltas.
-    var stream = std.io.fixedBufferStream(compressed_values[cursor..]);
-    var bit_reader = shared_structs.bitReader(.little, stream.reader());
+    const reader = std.Io.Reader.fixed(compressed_values[cursor..]);
+    var bit_reader = shared_structs.BitReader.init(reader);
 
     // Step 3: Read and decode each delta using the 2-bit length prefix.
     for (1..count) |_| {
@@ -483,8 +477,8 @@ pub fn decompressMixedEncoding(
         try scaled.append(allocator, first);
 
         // Use a bit reader to parse delta values from compressed stream.
-        var stream = std.io.fixedBufferStream(compressed_values[cursor..]);
-        var bit_reader = shared_structs.bitReader(.little, stream.reader());
+        const reader = std.Io.Reader.fixed(compressed_values[cursor..]);
+        var bit_reader = shared_structs.BitReader.init(reader);
 
         for (1..n_scaled) |_| {
             const header_1: u8 = bit_reader.readBitsNoEof(u8, 1) catch break;
@@ -554,9 +548,8 @@ pub fn decompressMixedEncoding(
 /// used by `bit_writer`. `bit_writer` is a pointer to the initialized `BitWriter` that receives the
 /// encoded bits. The function returns an error if any occurs.
 fn bitpackU64(
-    comptime WriterType: type,
     value: u64,
-    bit_writer: *shared_structs.BitWriter(.little, WriterType),
+    bit_writer: *shared_structs.BitWriter,
 ) !void {
     if (value <= 0xFF) { // 8-bits.
         // Header: 00.
