@@ -16,16 +16,16 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const io = std.io;
 const math = std.math;
 const ArrayList = std.ArrayList;
+const Reader = std.Io.Reader;
+const Writer = std.Io.Writer;
 const tersets = @import("../tersets.zig");
 const tester = @import("../tester.zig");
 const Error = tersets.Error;
 const testing = std.testing;
 
 const shared_structs = @import("shared_structs.zig");
-const BitWriter = shared_structs.BitWriter;
 
 /// Computes the Root-Mean-Squared-Errors (RMSE) for a segment of the `uncompressed_values`.
 /// This function calculates the error between the actual values and the predicted values
@@ -219,8 +219,7 @@ pub fn decodeZigZag(value: u64) i64 {
 /// encoded data. The function returns an `ArrayList(u8)` containing the encoded data, or an error
 /// if the input is unsupported or if memory allocation fails.
 pub fn encodeEliasGamma(allocator: Allocator, values: []const u64, encoded_values: *ArrayList(u8)) !void {
-    const writer = encoded_values.writer(allocator);
-    var bit_writer = shared_structs.bitWriter(.big, writer);
+    var bit_writer = try shared_structs.BitWriter.init(allocator, encoded_values);
 
     for (values) |value| {
         if (value == 0) {
@@ -250,8 +249,8 @@ pub fn decodeEliasGamma(
     decoded_values: *ArrayList(u64),
 ) !void {
     // Create bit reader over full byte slice.
-    var stream = io.fixedBufferStream(compressed_values);
-    var bit_reader = shared_structs.bitReader(.big, stream.reader());
+    const reader = Reader.fixed(compressed_values);
+    var bit_reader = shared_structs.BitReader.init(reader);
 
     while (true) {
         // Count leading zeros.
