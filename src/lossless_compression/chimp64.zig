@@ -83,7 +83,7 @@ pub fn compress(
     var previous_value_bits: u64 = @bitCast(first_value);
     var previous_leading_zeros: u6 = leading_zero_buckets[0];
 
-    var bit_writer = try shared_structs.BitWriter.init(allocator, compressed_values);
+    var bit_writer = try shared_structs.BulkBitWriter.init(allocator, compressed_values);
 
     for (uncompressed_values[1..]) |value| {
         const current_value_bits: u64 = @bitCast(value);

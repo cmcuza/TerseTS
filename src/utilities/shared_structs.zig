@@ -182,6 +182,64 @@ pub const BitWriter = struct {
     }
 };
 
+/// A `BitWriter` variant for hot encoders: it buffers bits in a 64-bit accumulator and flushes eight
+/// bytes at a time with a single big-endian store, rather than appending one byte at a time. Output
+/// is byte-identical to `BitWriter` (Big Endian, MSB first) and the API is the same.
+pub const BulkBitWriter = struct {
+    allocator: Allocator,
+    bytes: *ArrayList(u8),
+    // Buffered bits in MSB-first order, occupying the low `count` positions of `acc`.
+    acc: u64 = 0,
+    count: u6 = 0,
+
+    const Self = @This();
+
+    /// Initialize an empty `BulkBitWriter`.
+    pub fn init(allocator: Allocator, bytes: *ArrayList(u8)) !Self {
+        return .{ .allocator = allocator, .bytes = bytes };
+    }
+
+    /// Write the `num` least-significant bits of `value`, most-significant first.
+    pub fn writeBits(self: *Self, value: anytype, num: u16) !void {
+        const unsigned = std.meta.Int(.unsigned, @bitSizeOf(@TypeOf(value)));
+        const n: u32 = num;
+        const bits: u64 = @as(u64, @as(unsigned, @bitCast(value))) & lowMask(n);
+        const room = 64 - @as(u32, self.count); // free positions before `acc` is full
+        if (n < room) {
+            self.acc = (self.acc << @intCast(n)) | bits;
+            self.count += @intCast(n);
+            return;
+        }
+        // Fill `acc` with the top `room` bits of `value`, flush 8 bytes, keep the remainder.
+        const rest = n - room;
+        self.acc = if (room == 64) bits else (self.acc << @intCast(room)) | (bits >> @intCast(rest));
+        var buffer: [8]u8 = undefined;
+        std.mem.writeInt(u64, &buffer, self.acc, .big);
+        try self.bytes.appendSlice(self.allocator, &buffer);
+        self.acc = if (rest == 0) 0 else bits & lowMask(rest);
+        self.count = @intCast(rest);
+    }
+
+    /// Flush any buffered bits, padding the final byte with trailing zeros.
+    pub fn flushBits(self: *Self) !void {
+        if (self.count == 0) return;
+        const num_bytes = (@as(u32, self.count) + 7) / 8;
+        const aligned = self.acc << @intCast(num_bytes * 8 - self.count);
+        var index = num_bytes;
+        while (index > 0) {
+            index -= 1;
+            try self.bytes.append(self.allocator, @truncate(aligned >> @intCast(index * 8)));
+        }
+        self.acc = 0;
+        self.count = 0;
+    }
+
+    /// Mask selecting the low `n` bits, for `n` in 0..64.
+    fn lowMask(n: u32) u64 {
+        return if (n >= 64) ~@as(u64, 0) else (@as(u64, 1) << @intCast(n)) - 1;
+    }
+};
+
 /// Creates a `BitReader` which allows for reading bits in Big Endian. The code for `BitReader` was
 /// originally copied from Zig's MIT licensed standard library as suggested in GitHub PR 24614 since
 /// it was removed in Zig 0.15.1. The code has since been modified to simplify its use in TerseTS.
