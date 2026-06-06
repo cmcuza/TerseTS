@@ -66,6 +66,17 @@ const lsb_mask: u64 = (1 << lsb_bits) - 1;
 /// eight boundaries so the chosen bucket index fits in `leading_zero_bucket_bits`.
 const leading_zero_buckets = [_]u6{ 0, 8, 12, 16, 18, 20, 22, 24 };
 
+/// Per-thread scratch for the predictor lookup table. Allocating and zeroing the 64 KB `indices`
+/// table on every block dominated compress time, so it is reused across calls: zeroed once, then kept
+/// clean by resetting only the slots a block dirtied (recorded in `dirty`) instead of wiping all
+/// 64 KB. Thread-local so concurrent encoders never share state; the allocation is retained until the
+/// thread exits.
+const Scratch = struct {
+    indices: []usize,
+    dirty: ArrayList(usize),
+};
+threadlocal var scratch: ?Scratch = null;
+
 /// Compress `uncompressed_values` into `compressed_values` using Chimp128's value codec.
 /// `allocator` backs the configuration parser, the ring buffer and predictor lookup table, and the
 /// bit writer's scratch buffer. `method_configuration` must be an empty configuration; any field
@@ -98,17 +109,32 @@ pub fn compress(
     @memset(stored_values, 0);
 
     // Fast lookup: maps 14 LSBs of any value to the global index of the last value with those LSBs.
-    // Initialized to 0; `current_index` starts at `previous_values` so that unseen keys (index 0)
-    // fail the staleness check `current_index - indices[key] < previous_values`.
-    const indices = try allocator.alloc(usize, 1 << lsb_bits);
-    defer allocator.free(indices);
-    @memset(indices, 0);
+    // Reused across calls via the per-thread `scratch`: the table is zeroed once, then kept clean by
+    // resetting only the slots dirtied by the previous call. `current_index` starts at
+    // `previous_values` so unseen keys (index 0) fail the staleness check
+    // `current_index - indices[key] < previous_values`. `dirty` has room for every possible key, so
+    // tracking and resetting touched slots never allocates.
+    if (scratch == null) {
+        // The scratch outlives any single call, so it is owned by a process-lifetime allocator rather
+        // than the caller's (which may be transient); it is intentionally never freed.
+        const scratch_allocator = std.heap.page_allocator;
+        const table = try scratch_allocator.alloc(usize, 1 << lsb_bits);
+        @memset(table, 0);
+        var dirty = ArrayList(usize).empty;
+        try dirty.ensureTotalCapacity(scratch_allocator, 1 << lsb_bits);
+        scratch = .{ .indices = table, .dirty = dirty };
+    }
+    const indices = scratch.?.indices;
+    const dirty = &scratch.?.dirty;
+    for (dirty.items) |slot| indices[slot] = 0;
+    dirty.clearRetainingCapacity();
 
     var current_index: usize = previous_values;
 
     const first_value_bits: u64 = @bitCast(first_value);
     const first_value_key: usize = @intCast(first_value_bits & lsb_mask);
     stored_values[current_index % previous_values] = first_value_bits;
+    dirty.appendAssumeCapacity(first_value_key);
     indices[first_value_key] = current_index;
     current_index += 1;
 
@@ -135,6 +161,7 @@ pub fn compress(
                 try bit_writer.writeBits(ring_slot, 7);
 
                 stored_values[current_index % previous_values] = current_value_bits;
+                if (indices[key] == 0) dirty.appendAssumeCapacity(key);
                 indices[key] = current_index;
                 current_index += 1;
                 previous_value_bits = current_value_bits;
@@ -160,6 +187,7 @@ pub fn compress(
 
                 previous_leading_zeros = leading_bucket;
                 stored_values[current_index % previous_values] = current_value_bits;
+                if (indices[key] == 0) dirty.appendAssumeCapacity(key);
                 indices[key] = current_index;
                 current_index += 1;
                 previous_value_bits = current_value_bits;
@@ -188,6 +216,7 @@ pub fn compress(
 
         previous_leading_zeros = leading_bucket;
         stored_values[current_index % previous_values] = current_value_bits;
+        if (indices[key] == 0) dirty.appendAssumeCapacity(key);
         indices[key] = current_index;
         current_index += 1;
         previous_value_bits = current_value_bits;
