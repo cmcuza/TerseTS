@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Implementation of a delta encoding scheme followed by fixed-length bit-packing to compress
-//! floating-point time series. This method guarantees lossless recovery for all values.
-//! If all values are "effectively" integers (i.e., have no meaningful fractional part), the
-//! sequence is scaled and stored as delta-encoded integers. Otherwise, values are split into
-//! parts. Those recoverable after scaling are stored as delta-encoded integers. Others are stored
-//! in raw `f64` format. A bitmask tracks which encoding is used per element. This hybrid format
-//! ensures full fidelity for all values while improving compression when possible. Bit-packing
-//! follows common techniques for efficient integer encoding, as seen in:
+//! Lossless floating-point time series compression using delta encoding and a
+//! fixed-length bit-packing scheme. If all values have a zero fractional part
+//! ("effectively" integers), the sequence is scaled and stored entirely as delta-encoded
+//! integers. Otherwise, a mixed encoding is used: values recoverable via scaling are stored
+//! as delta integers, while the rest are stored in raw `f64` format. A bitmask tracks the
+//! encoding format used for each element, ensuring lossless coompression.
+//! Bit-packing techniques are based on:
 //! Lemire et al., "SIMD Compression and the Intersection of Sorted Integers", 2016.
 //! https://doi.org/10.1002/spe.2326.
 
@@ -42,8 +41,7 @@ const Error = tersets.Error;
 /// The function writes the result to `compressed_values`. The `compressed_values` includes
 /// all necessary metadata enabling correct decompression. The `allocator` is used for memory
 /// management of intermediates containers. The `method_configuration` is expected to be
-/// `EmptyConfiguration`,otherwise an error is returned instead of ignoring the configuration.
-/// If an error occurs it is returned.
+/// `EmptyConfiguration`, otherwise an error is returned.
 pub fn compress(
     allocator: mem.Allocator,
     uncompressed_values: []const f64,
@@ -58,53 +56,53 @@ pub fn compress(
         method_configuration,
     );
 
-    // The first bit of the encoded `count` marks the encoding mode:
+    // The first bit of the compressed representation marks the encoding mode:
     // 1 = all values are "effectively" integers, 0 = some values require fallback
     // The remaining 31 bits store the length of the time series.
     // Max supported input length: 2^31 - 1 (≈ 2.14B values ~ 16GB memory).
     // Although a realistic upper bound, we check to avoid miss behaviour.
-    const maximum_len: usize = 0x7FFF_FFFF; // 2,147,483,647
-    if (uncompressed_values.len > maximum_len)
+    const maximum_length: usize = 0x7FFF_FFFF; // 2,147,483,647
+    if (uncompressed_values.len > maximum_length)
         return Error.UnsupportedInput;
 
-    // To ensure lossless recovery and good compression ratio, values are scaled using a precision
-    // factor (`scale`) large enough to preserve their decimal digits. The highest such scale is
-    // chosen only if all values remain within the i64 range after scaling. Otherwise, the minimum
-    // scale that preserves some values is used as fallback. Without scaling, compressing floats
-    // directly using their u64 bit pattern (via @bitCast) can be extremely inefficient. Tiny float
-    // differences (e.g., 0.00001) may cause large differences in the u64 representation, defeating
-    // the purpose of delta encoding. Therefore, we attempt to preserve a representation where deltas
-    // between scaled integers are small, enabling better compression.
+    // Step 1: To ensure lossless compression and good compression ratio, values are scaled using a
+    // precision factor (`scale`) large enough to preserve their decimal digits. The highest such
+    // scale is chosen only if all values remain within the i64 range after scaling. Otherwise, the
+    // minimum scale that preserves some values is used as fallback. Without scaling, compressing
+    // floats directly using their u64 bit pattern (via @bitCast) can be extremely inefficient. Tiny
+    // float differences (e.g., 0.00001) may cause large differences in the u64 representation,
+    // defeating the purpose of delta encoding. Therefore, we attempt to preserve a representation
+    // where deltas between scaled integers are small, enabling better compression.
     var all_effective_ints = true;
-    var min_scale: f64 = math.floatMax(f64); // minimum required precision.
-    var max_scale: f64 = 1.0; // maximum required precision.
-    for (uncompressed_values) |val| {
-        if (!math.isFinite(val) or val > 1e15)
+    var minimum_scale: f64 = math.floatMax(f64); // minimum required precision.
+    var maximum_scale: f64 = 1.0; // maximum required precision.
+    for (uncompressed_values) |value| {
+        if (!math.isFinite(value) or value > 1e15)
             return Error.UnsupportedInput;
 
-        if (!isEffectivelyInteger(val)) {
-            const current_scale = try detectScaleFromPrecision(allocator, val);
-            if (current_scale < min_scale) min_scale = current_scale;
-            if (current_scale > max_scale) max_scale = current_scale;
+        if (!isEffectivelyInteger(value)) {
+            const current_scale = try detectScaleFromPrecision(allocator, value);
+            if (current_scale < minimum_scale) minimum_scale = current_scale;
+            if (current_scale > maximum_scale) maximum_scale = current_scale;
             all_effective_ints = false;
         }
     }
 
-    // Choose final scale. If all values can be directly cast to integers without losing precision,
-    // then the `final_scale` is 1.0.
-    var final_scale = min_scale;
+    // Step 2: Choose final scale. If all values can be directly cast to integers without
+    // losing precision, then the `final_scale` is 1.0.
+    var final_scale = minimum_scale;
     if (!all_effective_ints) {
-        // Check if max_scale can safely be used without overflow.
-        var safe = true;
-        for (uncompressed_values) |val| {
-            const scaled = @abs(val * max_scale);
-            if (scaled > @as(f64, @floatFromInt(std.math.maxInt(i64)))) {
-                safe = false;
+        // Check if maximum_scale can safely be used without overflow.
+        var is_without_overflow = true;
+        for (uncompressed_values) |value| {
+            const scaled = @abs(value * maximum_scale);
+            if (scaled > @as(f64, @floatFromInt(math.maxInt(i64)))) {
+                is_without_overflow = false;
                 break;
             }
         }
-        if (safe) {
-            final_scale = max_scale;
+        if (is_without_overflow) {
+            final_scale = maximum_scale;
             all_effective_ints = true;
         }
     } else {
@@ -139,7 +137,7 @@ pub fn compress(
             final_scale,
         );
     } else {
-        // Mix of scalable and raw values: fallback stream + bitmask.
+        // Mix of scalable and raw values: fallback stream and bitmask.
         try compressMixedEncoding(
             allocator,
             uncompressed_values,
@@ -163,20 +161,20 @@ pub fn decompress(
     if (compressed_values.len < 9)
         return Error.UnsupportedInput;
 
-    var cursor: usize = 0;
+    var index: usize = 0;
 
     // Step 1: Read mode bit + count from header.
     const count_packed: u32 = try shared_functions.readOffsetValue(
         u32,
         compressed_values,
-        &cursor,
+        &index,
     );
-    const mode_bit: u1 = @intCast(count_packed >> 31); // all-as-integers.
+    const mode: u1 = @intCast(count_packed >> 31); // all-as-integers.
     const count: u32 = count_packed & 0x7FFFFFFF;
-    const scale: f64 = try shared_functions.readOffsetValue(f64, compressed_values, &cursor);
+    const scale: f64 = try shared_functions.readOffsetValue(f64, compressed_values, &index);
 
     // Step 2: Dispatch to appropriate decoder.
-    if (mode_bit == 1) {
+    if (mode == 1) {
         try decompressAllAsIntegers(
             allocator,
             compressed_values,
@@ -196,56 +194,45 @@ pub fn decompress(
     }
 }
 
-/// Compress a time series where all `uncompressed_values` are effectively integers (no precision
-/// loss on scaling). The function applies a delta encoding and bit-packing to scaled i64 values.
-/// The `scale` is used to bring the values back to their original precision level.
-/// The `allocator` is used for intermediate values. If an error occurs it is returned.
+/// Compresses a floating-point time series into `compressed_values` by multiplying `uncompressed_values`
+/// by `scale` to store them as exact `i64` integers via delta encoding and bit-packing. The `scale` acts
+/// as a multiplier (e.g., 100.0) to convert fractional values into integers without truncation, allowing
+/// exact lossless compression. Temporary memory for the bit-packing process is managed via the `allocator`.
+/// Returns an error if memory allocation fails.
 fn compressAllAsIntegers(
     allocator: mem.Allocator,
     uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
     scale: f64,
 ) Error!void {
-    var scaled_values = ArrayList(i64).empty;
-    defer scaled_values.deinit(allocator);
+    // Step 1: Compute the first scaled value and find minimum_delta in a single pass.
+    const first: i64 = @intFromFloat(@round(uncompressed_values[0] * scale));
 
-    // Step 1: Scale and convert to i64.
-    for (uncompressed_values) |val| {
-        const scaled: i64 = @intFromFloat(@round(val * scale));
-        try scaled_values.append(allocator, scaled);
+    var minimum_delta: i64 = math.maxInt(i64);
+    var previous: i64 = first;
+    for (uncompressed_values[1..]) |val| {
+        const current: i64 = @intFromFloat(@round(val * scale));
+        const delta = current - previous;
+        if (delta < minimum_delta) minimum_delta = delta;
+        previous = current;
     }
 
     // Step 2: Store first value.
-    try shared_functions.appendValue(
-        allocator,
-        i64,
-        scaled_values.items[0],
-        compressed_values,
-    );
+    try shared_functions.appendValue(allocator, i64, first, compressed_values);
 
-    // Step 3: Find min_delta.
-    var min_delta: i64 = std.math.maxInt(i64);
-    for (1..scaled_values.items.len) |i| {
-        const delta = scaled_values.items[i] - scaled_values.items[i - 1];
-        if (delta < min_delta) min_delta = delta;
-    }
+    // Step 3: Store minimum_delta.
+    try shared_functions.appendValue(allocator, i64, minimum_delta, compressed_values);
 
-    // Store min_delta.
-    try shared_functions.appendValue(
-        allocator,
-        i64,
-        min_delta,
-        compressed_values,
-    );
-
-    // Step 4: Bit-pack quantized deltas (delta - min_delta).
+    // Step 4: Bit-pack quantized deltas (delta - minimum_delta).
     var bit_writer = try shared_structs.BitWriter.init(allocator, compressed_values);
 
-    for (1..scaled_values.items.len) |i| {
-        const delta = scaled_values.items[i] - scaled_values.items[i - 1];
-        const quantized: u64 = @intCast(delta - min_delta);
-
+    previous = first;
+    for (uncompressed_values[1..]) |val| {
+        const current: i64 = @intFromFloat(@round(val * scale));
+        const delta = current - previous;
+        const quantized: u64 = @intCast(delta - minimum_delta);
         try bitpackU64(quantized, &bit_writer);
+        previous = current;
     }
 
     try bit_writer.flushBits();
@@ -256,7 +243,7 @@ fn compressAllAsIntegers(
 /// checking if it can be exactly recovered (losslessly). If so, it is stored as an integer and
 /// delta-encoded in `compressed_values`. Otherwise, the original floating-point value is bit-cast
 /// and stored separately in `compressed_values`. A bitmask is written to track which encoding was
-/// used per element (0 = scaled int, 1 = fallback). This hybrid strategy ensures full lossless
+/// used per element (0 = scaled int, 1 = fallback). This mixed encoding ensures full lossless
 /// reconstruction while enabling compression opportunities on recoverable values. The memory
 /// `allocator` is used for intermediate results. If an error occurs it is returned.
 fn compressMixedEncoding(
@@ -265,36 +252,40 @@ fn compressMixedEncoding(
     compressed_values: *ArrayList(u8),
     scale: f64,
 ) Error!void {
-    // Step 1: Separate values into "recoverable as scaled integers" vs fallback bit-cast.
-    var mask = ArrayList(u8).empty; // Bitmask: 1 bit per value.
+    // Step 1: First pass — build bitmask, count scaled values, and find the first scaled value
+    // and minimum_delta. This avoids allocating separate scaled_values, deltas, and fallback_bits
+    // arrays, at the cost of re-classifying each value in two additional passes below.
+    var mask = ArrayList(u8).empty;
     defer mask.deinit(allocator);
-
-    var scaled_values = ArrayList(i64).empty; // Holds scaled and rounded integers.
-    defer scaled_values.deinit(allocator);
-
-    var fallback_bits = ArrayList(u64).empty; // Holds bit-casted fallback values.
-    defer fallback_bits.deinit(allocator);
 
     var current_byte: u8 = 0;
     var bit_index: u3 = 0;
+    var n_scaled: u32 = 0;
+    var first_scaled: i64 = 0;
+    var minimum_delta: i64 = math.maxInt(i64);
+    var prev_scaled: i64 = 0;
+    var found_first_scaled = false;
 
-    for (uncompressed_values) |val| {
-        const scaled_f64 = @round(val * scale);
+    for (uncompressed_values) |value| {
+        const scaled_f64 = @round(value * scale);
         const recovered = scaled_f64 / scale;
 
-        if (recovered == val) {
-            // Value can be stored as an integer after scaling.
+        if (recovered == value) {
             const scaled_i: i64 = @intFromFloat(scaled_f64);
-            try scaled_values.append(allocator, scaled_i);
-            // Bit = 0.
+            if (!found_first_scaled) {
+                first_scaled = scaled_i;
+                prev_scaled = scaled_i;
+                found_first_scaled = true;
+            } else {
+                const delta = scaled_i - prev_scaled;
+                if (delta < minimum_delta) minimum_delta = delta;
+                prev_scaled = scaled_i;
+            }
+            n_scaled += 1;
         } else {
-            // Value cannot be losslessly recovered, store bit-cast f64.
-            const raw_bits: u64 = @bitCast(val);
-            try fallback_bits.append(allocator, raw_bits);
-            current_byte |= (@as(u8, 1) << bit_index); // Bit = 1.
+            current_byte |= (@as(u8, 1) << bit_index); // Bit for fallback.
         }
 
-        // Write current_byte if full (8 bits), else keep accumulating.
         if (bit_index == 7) {
             try mask.append(allocator, current_byte);
             current_byte = 0;
@@ -304,64 +295,50 @@ fn compressMixedEncoding(
         }
     }
 
-    // Flush any remaining bits not written yet.
     if (bit_index != 0) {
         try mask.append(allocator, current_byte);
     }
 
-    // Step 2: Store the count of scaled values.
-    try shared_functions.appendValue(
-        allocator,
-        u32,
-        @intCast(scaled_values.items.len),
-        compressed_values,
-    );
-
-    // Step 3: Write bitmask for value encoding types.
+    // Step 2: Write n_scaled and bitmask.
+    try shared_functions.appendValue(allocator, u32, n_scaled, compressed_values);
     try compressed_values.appendSlice(allocator, mask.items);
 
-    // Step 4: Store scaled values using delta encoding.
-    if (scaled_values.items.len > 0) {
-        try shared_functions.appendValue(
-            allocator,
-            i64,
-            scaled_values.items[0],
-            compressed_values,
-        ); // First value.
+    // Step 3: Write first scaled value and minimum_delta, then second pass to bit-pack deltas.
+    if (n_scaled > 0) {
+        try shared_functions.appendValue(allocator, i64, first_scaled, compressed_values);
+        try shared_functions.appendValue(allocator, i64, minimum_delta, compressed_values);
 
-        // Compute deltas and track minimum.
-        var deltas = ArrayList(i64).empty;
-        defer deltas.deinit(allocator);
+        var bit_writer = try shared_structs.BitWriter.init(allocator, compressed_values);
+        var previous: i64 = first_scaled;
+        var is_first = true;
 
-        var prev: i64 = scaled_values.items[0];
-        var min_delta: i64 = std.math.maxInt(i64);
-        for (scaled_values.items[1..]) |curr| {
-            const delta = curr - prev;
-            if (delta < min_delta) min_delta = delta;
-            try deltas.append(allocator, delta);
-            prev = curr;
-        }
-
-        // Write min_delta to reconstruct deltas later.
-        try shared_functions.appendValue(allocator, i64, min_delta, compressed_values);
-
-        // Bit-pack delta values using fixed-length prefix scheme.
-        var bit_writer = try shared_structs.BitWriter.init(
-            allocator,
-            compressed_values,
-        );
-
-        for (deltas.items) |d| {
-            const val: u64 = @intCast(d - min_delta);
-            try bitpackU64(val, &bit_writer);
+        for (uncompressed_values) |val| {
+            const scaled_f64 = @round(val * scale);
+            const recovered = scaled_f64 / scale;
+            if (recovered == val) {
+                if (is_first) {
+                    is_first = false;
+                    continue; // First value already stored above.
+                }
+                const current: i64 = @intFromFloat(scaled_f64);
+                const delta = current - previous;
+                const quantized: u64 = @intCast(delta - minimum_delta);
+                try bitpackU64(quantized, &bit_writer);
+                previous = current;
+            }
         }
 
         try bit_writer.flushBits();
     }
 
-    // Step 5: Append raw fallback values to the end.
-    for (fallback_bits.items) |bits| {
-        try shared_functions.appendValue(allocator, u64, bits, compressed_values);
+    // Step 4: Third pass — write fallback values directly, avoiding a fallback_bits array.
+    for (uncompressed_values) |value| {
+        const scaled_f64 = @round(value * scale);
+        const recovered = scaled_f64 / scale;
+        if (recovered != value) {
+            const raw_bits: u64 = @bitCast(value);
+            try shared_functions.appendValue(allocator, u64, raw_bits, compressed_values);
+        }
     }
 }
 
@@ -377,19 +354,19 @@ fn decompressAllAsIntegers(
     count: usize,
     scale: f64,
 ) Error!void {
-    // Initialize the cursor at 12 to skip the header containing a u32 and a f64.
-    var cursor: usize = 12;
+    // Initialize the index at 12 to skip the header containing a u32 and a f64.
+    var index: usize = 12;
 
-    // Step 1: Read the first scaled value and the min_delta used in delta encoding.
+    // Step 1: Read the first scaled value and the minimum_delta used in delta encoding.
     const first: i64 = try shared_functions.readOffsetValue(
         i64,
         compressed_values,
-        &cursor,
+        &index,
     );
-    const min_delta: i64 = try shared_functions.readOffsetValue(
+    const minimum_delta: i64 = try shared_functions.readOffsetValue(
         i64,
         compressed_values,
-        &cursor,
+        &index,
     );
 
     var current: i64 = first;
@@ -397,39 +374,39 @@ fn decompressAllAsIntegers(
     try decompressed_values.append(allocator, first_decompressed_value);
 
     // Step 2: Set up a bit reader for the packed deltas.
-    const reader = std.Io.Reader.fixed(compressed_values[cursor..]);
+    const reader = std.Io.Reader.fixed(compressed_values[index..]);
     var bit_reader = shared_structs.BitReader.init(reader);
 
     // Step 3: Read and decode each delta using the 2-bit length prefix.
     for (1..count) |_| {
-        const len1 = bit_reader.readBitsNoEof(u1, 1) catch break;
-        const len2 = bit_reader.readBitsNoEof(u1, 1) catch return Error.ByteStreamError;
+        const length_1 = bit_reader.readBitsNoEof(u1, 1) catch break;
+        const length_2 = bit_reader.readBitsNoEof(u1, 1) catch return Error.CorruptedCompressedData;
 
-        var val: u64 = 0;
-        if (len1 == 0) {
-            if (len2 == 0) {
-                val = bit_reader.readBitsNoEof(u8, 8) catch return Error.ByteStreamError;
+        var value: u64 = 0;
+        if (length_1 == 0) {
+            if (length_2 == 0) {
+                value = bit_reader.readBitsNoEof(u8, 8) catch return Error.CorruptedCompressedData;
             } else {
-                val = bit_reader.readBitsNoEof(u16, 16) catch return Error.ByteStreamError;
+                value = bit_reader.readBitsNoEof(u16, 16) catch return Error.CorruptedCompressedData;
             }
         } else {
-            if (len2 == 0) {
-                val = bit_reader.readBitsNoEof(u32, 32) catch return Error.ByteStreamError;
+            if (length_2 == 0) {
+                value = bit_reader.readBitsNoEof(u32, 32) catch return Error.CorruptedCompressedData;
             } else {
-                val = bit_reader.readBitsNoEof(u64, 64) catch return Error.ByteStreamError;
+                value = bit_reader.readBitsNoEof(u64, 64) catch return Error.CorruptedCompressedData;
             }
         }
 
         // Step 4: Reconstruct and append the original value.
-        const delta = @as(i64, @intCast(val)) + min_delta;
+        const delta = @as(i64, @intCast(value)) + minimum_delta;
         current += delta;
         const decompressed_value: f64 = @as(f64, @floatFromInt(current)) / scale;
         try decompressed_values.append(allocator, decompressed_value);
     }
 }
 
-/// Decompress a total of `count` values stored in `compressed_values` encoded using a hybrid
-/// (mixed) strategy. The function stores the final decompressed results in `decompressed_values`.
+/// Decompress a total of `count` values stored in `compressed_values` using a mixed encoding.
+/// The function stores the final decompressed results in `decompressed_values`.
 /// The function uses the `scale` factor used during compression to transform f64 to i64.
 /// The `allocator` is used for allocating temporary buffers for scaled and fallback values.
 /// If an error occurs it is returned.
@@ -440,23 +417,23 @@ pub fn decompressMixedEncoding(
     count: u32,
     scale: f64,
 ) Error!void {
-    // Initialize the cursor at 12 to skip the header containing a u32 and a f64.
-    var cursor: usize = 12;
+    // Initialize the index at 12 to skip the header containing a u32 and a f64.
+    var index: usize = 12;
 
     // Step 1: Read number of scaled values (rest are fallback).
-    if (cursor + 4 > compressed_values.len)
+    if (index + 4 > compressed_values.len)
         return Error.UnsupportedInput;
 
-    const n_scaled: u32 = try shared_functions.readOffsetValue(u32, compressed_values, &cursor);
+    const n_scaled: u32 = try shared_functions.readOffsetValue(u32, compressed_values, &index);
     const n_fallback = count - n_scaled;
 
     // Step 2: Read the bitmask indicating fallback positions.
     const mask_bytes: u32 = (count + 7) / 8;
-    if (compressed_values.len < cursor + mask_bytes)
+    if (compressed_values.len < index + mask_bytes)
         return Error.UnsupportedInput;
 
-    const mask = compressed_values[cursor .. cursor + mask_bytes];
-    cursor += mask_bytes;
+    const mask = compressed_values[index .. index + mask_bytes];
+    index += mask_bytes;
 
     // Step 3: Read and reconstruct scaled values using delta encoding.
     var scaled = ArrayList(i64).empty;
@@ -467,17 +444,17 @@ pub fn decompressMixedEncoding(
         const first: i64 = try shared_functions.readOffsetValue(
             i64,
             compressed_values,
-            &cursor,
+            &index,
         );
-        const min_delta: i64 = try shared_functions.readOffsetValue(
+        const minimum_delta: i64 = try shared_functions.readOffsetValue(
             i64,
             compressed_values,
-            &cursor,
+            &index,
         );
         try scaled.append(allocator, first);
 
         // Use a bit reader to parse delta values from compressed stream.
-        const reader = std.Io.Reader.fixed(compressed_values[cursor..]);
+        const reader = std.Io.Reader.fixed(compressed_values[index..]);
         var bit_reader = shared_structs.BitReader.init(reader);
 
         for (1..n_scaled) |_| {
@@ -487,19 +464,19 @@ pub fn decompressMixedEncoding(
             var quantized: u64 = 0;
             if (header_1 == 0) {
                 if (header_2 == 0) {
-                    quantized = bit_reader.readBitsNoEof(u8, 8) catch return Error.ByteStreamError;
+                    quantized = bit_reader.readBitsNoEof(u8, 8) catch return Error.CorruptedCompressedData;
                 } else {
-                    quantized = bit_reader.readBitsNoEof(u16, 16) catch return Error.ByteStreamError;
+                    quantized = bit_reader.readBitsNoEof(u16, 16) catch return Error.CorruptedCompressedData;
                 }
             } else {
                 if (header_2 == 0) {
-                    quantized = bit_reader.readBitsNoEof(u32, 32) catch return Error.ByteStreamError;
+                    quantized = bit_reader.readBitsNoEof(u32, 32) catch return Error.CorruptedCompressedData;
                 } else {
-                    quantized = bit_reader.readBitsNoEof(u64, 64) catch return Error.ByteStreamError;
+                    quantized = bit_reader.readBitsNoEof(u64, 64) catch return Error.CorruptedCompressedData;
                 }
             }
 
-            const delta = @as(i64, @intCast(quantized)) + min_delta;
+            const delta = @as(i64, @intCast(quantized)) + minimum_delta;
             try scaled.append(allocator, scaled.items[scaled.items.len - 1] + delta);
         }
     }
@@ -513,11 +490,11 @@ pub fn decompressMixedEncoding(
 
     for (0..n_fallback) |i| {
         const offset = i * @sizeOf(u64);
-        cursor = offset;
+        index = offset;
         const bits: u64 = try shared_functions.readOffsetValue(
             u64,
             fallback_bytes,
-            &cursor,
+            &index,
         );
         try fallback.append(allocator, @bitCast(bits));
     }
@@ -630,7 +607,7 @@ fn detectScaleFromPrecision(allocator: mem.Allocator, value: f64) !f64 {
         if (digits > max_precision) max_precision = digits;
     }
 
-    return std.math.pow(f64, 10.0, @floatFromInt(max_precision));
+    return math.pow(f64, 10.0, @floatFromInt(max_precision));
 }
 
 test "bitpacked delta encoding can compress and decompress bounded values" {
@@ -695,7 +672,11 @@ test "bitpacked delta encoding can compress and decompress bounded values" {
 
 test "bitpacked delta encoding can compress and decompress monotonically increasing values" {
     // This test validates that if the input values are all monotonically increasing values
-    // the delta encoding can achieve high compression.
+    // the delta encoding can achieve high compression. Monotonically increasing values are
+    // common in time series data, where timestamps or cumulative metrics often increase over time.
+    // The test generates a sequence of 100 values that start from a random timestamp and increase
+    // by random deltas. After compression, the test checks that the compressed size is smaller
+    // than the original size, which is expected due to the efficiency of delta encoding on such data.
     const allocator = testing.allocator;
 
     var uncompressed_values = ArrayList(f64).empty;
@@ -729,13 +710,20 @@ test "bitpacked delta encoding can compress and decompress monotonically increas
 }
 
 test "bitpacked delta encoding can compress and decompress integers at different scales" {
+    // This test validates that the bitpacked delta encoding can effectively compress and decompress
+    // integer values at different scales. The test generates 100 random integer values at various
+    // scales (e.g., 1, 10, 100, 1000, etc.) and compresses them using the `compress` function.
+    // After decompression, the test checks that the decompressed values match the original
+    // uncompressed values, ensuring that the scaling and delta encoding processes work correctly
+    // across a range of magnitudes. This is important for time series data that may contain values
+    // with varying orders of magnitude, such as financial data, sensor readings, or cumulative metrics.
     const allocator = testing.allocator;
 
     var uncompressed_values = ArrayList(f64).empty;
     defer uncompressed_values.deinit(allocator);
 
     for (2..6) |i| {
-        const at_most = std.math.pow(usize, 10, i * 2);
+        const at_most = math.pow(usize, 10, i * 2);
         for (0..100) |_| {
             const random_value: f64 = @floatFromInt(tester.generateBoundRandomInteger(
                 usize,
@@ -778,8 +766,11 @@ test "bitpacked delta encoding can compress and decompress floating points of mi
     var uncompressed_values = ArrayList(f64).empty;
     defer uncompressed_values.deinit(allocator);
 
-    // Generating bounded precision f64 automatically is not possible
-    // thus we insert them manually.
+    // We hardcode f64 values because generating random base-10 bounded floats (e.g., 0.3)
+    // introduces sub-normal binary noise (0.2999999...) that trips up our automated scale finder.
+    // These inputs explicitly test mixed decimal precision depths ranging from 1 to 5 places.
+    // This is not an exhaustive test of all possible precision
+    // combinations, but it serves as a sanity check for the scaling logic.
     try uncompressed_values.append(allocator, 3.4);
     try uncompressed_values.append(allocator, 1.80);
     try uncompressed_values.append(allocator, 5.48);
