@@ -37,8 +37,13 @@ Mirror TerseTS Method Enum.
     RunLengthEncoding = 14
     NonLinearApproximation = 15
     SerfQT = 16
+<<<<<<< HEAD
     MacaqueS = 17
     MacaqueV = 18
+=======
+    Chimp64 = 17
+    Chimp128 = 18
+>>>>>>> main
 end
 
 """

@@ -1,10 +1,10 @@
-<h1 align="center">
+<h1 align="center"> 
   <img src="docs/tersets.svg" alt="TerseTS", width="400">
 </h1>
 
 :warning: **The current version of TerseTS is beta software and not yet ready for production use.**
 
-TerseTS is a library that provides methods for lossless and lossy compressing time series. To match existing literature, the lossy compression methods are organized in the hierarchy below based on [Time Series Compression Survey](https://dl.acm.org/doi/10.1145/3560814). Each category represents a distinct approach to time series compression. The library is implemented in Zig and provides a Zig-API and C-API with [bindings](#usage) for other languages.
+TerseTS is a library that provides methods for lossless and lossy compression of time series. To match existing literature, the lossy compression methods are organized in the hierarchy below based on [Time Series Compression Survey](https://dl.acm.org/doi/10.1145/3560814). Each category represents a distinct approach to time series compression. The library is implemented in Zig and provides a Zig-API and C-API with [bindings](#usage) for other languages.
 
 <p align="center">
    <img src="docs/figure.svg" alt="Compression Techniques Hierarchy" width="600">
@@ -98,7 +98,7 @@ pub fn main() void {
 <details>
 <summary><strong>C Usage Example</strong></summary>
 
-TerseTS provides `bindings/c/tersets.h` as API for C which should be included in the source code, i.e., `#include "tersets.h"`. The TerseTS library must also be [linked](#linking) to the project. The two main functions `compress()` and `decompress()` are exposed as follows:
+TerseTS provides `bindings/c/tersets.h` as API for C, which should be included in the source code, i.e., `#include "tersets.h"`. The TerseTS library must also be [linked](#linking) to the project. The two main functions `compress()` and `decompress()` are exposed as follows:
 
 - **`int32_t compress(struct UncompressedValues uncompressed_values, struct CompressedValues *compressed_values, uint8_t method, const char *configuration)`:**
    - **Parameters:**
@@ -329,6 +329,26 @@ fn main() -> Result<()> {
 
 # Contributing:  
 Please read our [contributing guidelines](.github/CONTRIBUTING.md) before submitting an [issue](https://github.com/cmcuza/TerseTS/issues/new/choose) or a [pull request](https://github.com/cmcuza/TerseTS/compare).
+
+# Citing
+If TerseTS is used in a project that leads to a publication, please acknowledge this by citing our [open-access demo paper](https://openproceedings.org/2026/conf/edbt/paper-286.pdf). The demo was presented at EDBT 2026 in Tampere and was an Honorable Mention for the Best Demo Award.
+
+```bibtex
+@inproceedings{TerseTS:Demo:2026,
+  author       = {Carlos Enrique Mu{\~{n}}iz{-}Cuza and
+                  S{\o}ren Kejser Jensen and
+                  Tom Louis Klein and
+                  Sabina Bakhtiiarova and
+                  Matthias Boehm and
+                  Torben Bach Pedersen},
+  title        = {TerseTS: {A} Framework for Time Series Compression},
+  booktitle    = {Proceedings 29th International Conference on Extending Database Technology (EDBT)},
+  pages        = {760--763},
+  publisher    = {OpenProceedings.org},
+  year         = {2026},
+  doi          = {10.48786/EDBT.2026.74}
+}
+```
 
 # License
 TerseTS is licensed under version 2.0 of the Apache License and a copy of the license is bundled with the program.
