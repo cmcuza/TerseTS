@@ -57,8 +57,6 @@ const default_decimal_places = 4;
 /// enough bits to round-trip any value up to `max_decimal_places`.
 const decimal_count_bits: u6 = 5;
 
-
-
 /// Convert a double to its 64-bit bitwise representation.
 /// Parameters:
 /// - `x`: the floating-point value to reinterpret.
@@ -186,8 +184,6 @@ fn compressIntegerPart(prev_int: ?i64, int_part: i64, writer: *shared_structs.Bu
     }
 }
 
-
-
 // ----------------------------------------------------------------------------
 //  Integer part decompression
 // ----------------------------------------------------------------------------
@@ -248,7 +244,7 @@ fn writeDxorPrime(dxor_prime: u64, l: u8, writer: *shared_structs.BulkBitWriter)
         try writer.writeBits(dxor_prime, bits_needed);
     } else {
         const max_val = @ceil(math.log2(math.pow(f64, 2.0, -@as(f64, @floatFromInt(l))) *
-                                     math.pow(f64, 10.0, @as(f64, @floatFromInt(l)))));
+            math.pow(f64, 10.0, @as(f64, @floatFromInt(l)))));
         const max = @as(u64, @intFromFloat(max_val));
         const t1 = @as(u64, @intFromFloat(@exp2(@as(f64, @floatFromInt(max)) * 0.25)));
         const t2 = @as(u64, @intFromFloat(@exp2(@as(f64, @floatFromInt(max)) * 0.5)));
@@ -284,7 +280,7 @@ fn readDxorPrime(l: u8, reader: *shared_structs.BulkBitReader) Error!u64 {
         return reader.readBitsNoEof(u64, bits_needed) catch return Error.ByteStreamError;
     } else {
         const max_val = @ceil(math.log2(math.pow(f64, 2.0, -@as(f64, @floatFromInt(l))) *
-                                     math.pow(f64, 10.0, @as(f64, @floatFromInt(l)))));
+            math.pow(f64, 10.0, @as(f64, @floatFromInt(l)))));
         const max = @as(u64, @intFromFloat(max_val));
         const idx = reader.readBitsNoEof(u2, 2) catch return Error.ByteStreamError;
         const bits_to_read = @as(u6, @intCast((@as(u64, idx) + 1) * max / 4));
@@ -397,7 +393,6 @@ fn decompressDecimalPart(reader: *shared_structs.BulkBitReader) Error!f64 {
     }
     return if (is_negative == 1) -magnitude else magnitude;
 }
-
 
 /// Compress an array of double-precision floats using Camel.
 /// Parameters:
@@ -556,7 +551,6 @@ test "camel round-trip fixed values" {
     ));
 }
 
-
 test "camel roundtrips empty input" {
     const uncompressed_values = &[_]f64{};
     try tester.expectLosslessRoundTrip(testing.allocator, compress, decompress, uncompressed_values);
@@ -601,7 +595,6 @@ test "camel roundtrips special floating-point values" {
     try tester.expectLosslessRoundTrip(testing.allocator, compress, decompress, uncompressed_values);
 }
 
-
 test "camel round-trip integer-only, the edge cases and negative zero" {
     const uncompressed_values = &[_]f64{
         -65535.0, // the largest negative integer difference that fits in 16 bits
@@ -613,4 +606,3 @@ test "camel round-trip integer-only, the edge cases and negative zero" {
     };
     try tester.expectLosslessRoundTrip(testing.allocator, compress, decompress, uncompressed_values);
 }
-
