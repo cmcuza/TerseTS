@@ -71,9 +71,11 @@ const leading_zero_buckets = [_]u6{ 0, 8, 12, 16, 18, 20, 22, 24 };
 /// clean by resetting only the slots a block dirtied (recorded in `dirty`) instead of wiping all
 /// 64 KB. Thread-local so concurrent encoders never share state; the allocation is retained until the
 /// thread exits.
+// `u32` slots (not `usize`) halve the table to 64 KB and the `dirty` list with it; this caps a single
+// compress call at ~4.3 billion values, far beyond any realistic block.
 const Scratch = struct {
-    indices: []usize,
-    dirty: ArrayList(usize),
+    indices: []u32,
+    dirty: ArrayList(u32),
 };
 threadlocal var scratch: ?Scratch = null;
 
@@ -118,9 +120,9 @@ pub fn compress(
         // The scratch outlives any single call, so it is owned by a process-lifetime allocator rather
         // than the caller's (which may be transient); it is intentionally never freed.
         const scratch_allocator = std.heap.page_allocator;
-        const table = try scratch_allocator.alloc(usize, 1 << lsb_bits);
+        const table = try scratch_allocator.alloc(u32, 1 << lsb_bits);
         @memset(table, 0);
-        var dirty = ArrayList(usize).empty;
+        var dirty = ArrayList(u32).empty;
         try dirty.ensureTotalCapacity(scratch_allocator, 1 << lsb_bits);
         scratch = .{ .indices = table, .dirty = dirty };
     }
@@ -134,8 +136,8 @@ pub fn compress(
     const first_value_bits: u64 = @bitCast(first_value);
     const first_value_key: usize = @intCast(first_value_bits & lsb_mask);
     stored_values[current_index % previous_values] = first_value_bits;
-    dirty.appendAssumeCapacity(first_value_key);
-    indices[first_value_key] = current_index;
+    dirty.appendAssumeCapacity(@intCast(first_value_key));
+    indices[first_value_key] = @intCast(current_index);
     current_index += 1;
 
     var previous_value_bits: u64 = first_value_bits;
@@ -146,7 +148,7 @@ pub fn compress(
     for (uncompressed_values[1..]) |value| {
         const current_value_bits: u64 = @bitCast(value);
         const key: usize = @intCast(current_value_bits & lsb_mask);
-        const prev_index = indices[key];
+        const prev_index: usize = indices[key];
 
         // Check if the LSB-matched ring-buffer entry is still within the active window.
         if (current_index - prev_index < previous_values) {
@@ -161,8 +163,8 @@ pub fn compress(
                 try bit_writer.writeBits(ring_slot, 7);
 
                 stored_values[current_index % previous_values] = current_value_bits;
-                if (indices[key] == 0) dirty.appendAssumeCapacity(key);
-                indices[key] = current_index;
+                if (indices[key] == 0) dirty.appendAssumeCapacity(@intCast(key));
+                indices[key] = @intCast(current_index);
                 current_index += 1;
                 previous_value_bits = current_value_bits;
                 continue;
@@ -187,8 +189,8 @@ pub fn compress(
 
                 previous_leading_zeros = leading_bucket;
                 stored_values[current_index % previous_values] = current_value_bits;
-                if (indices[key] == 0) dirty.appendAssumeCapacity(key);
-                indices[key] = current_index;
+                if (indices[key] == 0) dirty.appendAssumeCapacity(@intCast(key));
+                indices[key] = @intCast(current_index);
                 current_index += 1;
                 previous_value_bits = current_value_bits;
                 continue;
@@ -216,8 +218,8 @@ pub fn compress(
 
         previous_leading_zeros = leading_bucket;
         stored_values[current_index % previous_values] = current_value_bits;
-        if (indices[key] == 0) dirty.appendAssumeCapacity(key);
-        indices[key] = current_index;
+        if (indices[key] == 0) dirty.appendAssumeCapacity(@intCast(key));
+        indices[key] = @intCast(current_index);
         current_index += 1;
         previous_value_bits = current_value_bits;
     }
