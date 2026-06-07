@@ -17,14 +17,13 @@
 //! Liakos et al., "Chimp: Efficient Lossless Floating Point Compression for Time Series Databases", VLDB 2022.
 //! https://doi.org/10.14778/3551793.3551852
 //! The ring-buffer predictor scheme, bit-level layout, and leading-zero bucket boundaries follow
-//! the authors' reference Java implementation in the ELF repository, package
-//! `gr.aueb.delorean.chimp`: https://github.com/Spatio-Temporal-Lab/elf.
+//! the official Java implementation (`ChimpN`) published by the paper's authors, package
+//! `gr.aueb.delorean.chimp`: https://github.com/panagiotisl/chimp.
 
 const std = @import("std");
 const math = std.math;
 const mem = std.mem;
 const testing = std.testing;
-const Reader = std.Io.Reader;
 const ArrayList = std.ArrayList;
 const Allocator = mem.Allocator;
 
@@ -66,6 +65,21 @@ const lsb_mask: u64 = (1 << lsb_bits) - 1;
 /// eight boundaries so the chosen bucket index fits in `leading_zero_bucket_bits`.
 const leading_zero_buckets = [_]u6{ 0, 8, 12, 16, 18, 20, 22, 24 };
 
+/// Per-thread scratch for the predictor lookup table. Allocating and zeroing the 64 KB `indices`
+/// table on every block dominated compress time, so it is reused across calls: zeroed once, then
+/// kept clean by resetting only the slots a block dirtied (recorded in `dirty`) instead of wiping
+/// all 64 KB. Thread-local so concurrent encoders never share state; the allocation is retained
+/// until the thread exits. `u32` slots (not `usize`) keep this table at 64 KB rather than 128 KB
+/// and shrink the `dirty` list likewise. Each slot holds a value's position within the current
+/// call, so the only limit is one `compress` call encoding fewer than 2^32 (~4.3 billion) values,
+/// far above the 1000-value blocks it is used with. The reference `ChimpN` stores this index in a
+/// signed `int`, so `u32` here matches upstream (and slightly relaxes its ~2^31 cap).
+const Scratch = struct {
+    indices: []u32,
+    dirty: ArrayList(u32),
+};
+threadlocal var scratch: ?Scratch = null;
+
 /// Compress `uncompressed_values` into `compressed_values` using Chimp128's value codec.
 /// `allocator` backs the configuration parser, the ring buffer and predictor lookup table, and the
 /// bit writer's scratch buffer. `method_configuration` must be an empty configuration; any field
@@ -98,29 +112,44 @@ pub fn compress(
     @memset(stored_values, 0);
 
     // Fast lookup: maps 14 LSBs of any value to the global index of the last value with those LSBs.
-    // Initialized to 0; `current_index` starts at `previous_values` so that unseen keys (index 0)
-    // fail the staleness check `current_index - indices[key] < previous_values`.
-    const indices = try allocator.alloc(usize, 1 << lsb_bits);
-    defer allocator.free(indices);
-    @memset(indices, 0);
+    // Reused across calls via the per-thread `scratch`: the table is zeroed once, then kept clean
+    // by resetting only the slots dirtied by the previous call. `current_index` starts at
+    // `previous_values` so unseen keys (index 0) fail the staleness check
+    // `current_index - indices[key] < previous_values`. `dirty` has room for every possible key,
+    // so tracking and resetting touched slots never allocates.
+    if (scratch == null) {
+        // The scratch outlives any single call, so it is owned by a process-lifetime allocator
+        // rather than the caller's (which may be transient); it is intentionally never freed.
+        const scratch_allocator = std.heap.page_allocator;
+        const table = try scratch_allocator.alloc(u32, 1 << lsb_bits);
+        @memset(table, 0);
+        var dirty = ArrayList(u32).empty;
+        try dirty.ensureTotalCapacity(scratch_allocator, 1 << lsb_bits);
+        scratch = .{ .indices = table, .dirty = dirty };
+    }
+    const indices = scratch.?.indices;
+    const dirty = &scratch.?.dirty;
+    for (dirty.items) |slot| indices[slot] = 0;
+    dirty.clearRetainingCapacity();
 
     var current_index: usize = previous_values;
 
     const first_value_bits: u64 = @bitCast(first_value);
     const first_value_key: usize = @intCast(first_value_bits & lsb_mask);
     stored_values[current_index % previous_values] = first_value_bits;
-    indices[first_value_key] = current_index;
+    dirty.appendAssumeCapacity(@intCast(first_value_key));
+    indices[first_value_key] = @intCast(current_index);
     current_index += 1;
 
     var previous_value_bits: u64 = first_value_bits;
     var previous_leading_zeros: u6 = leading_zero_buckets[0];
 
-    var bit_writer = try shared_structs.BitWriter.init(allocator, compressed_values);
+    var bit_writer = try shared_structs.BulkBitWriter.init(allocator, compressed_values);
 
     for (uncompressed_values[1..]) |value| {
         const current_value_bits: u64 = @bitCast(value);
         const key: usize = @intCast(current_value_bits & lsb_mask);
-        const prev_index = indices[key];
+        const prev_index: usize = indices[key];
 
         // Check if the LSB-matched ring-buffer entry is still within the active window.
         if (current_index - prev_index < previous_values) {
@@ -135,7 +164,8 @@ pub fn compress(
                 try bit_writer.writeBits(ring_slot, 7);
 
                 stored_values[current_index % previous_values] = current_value_bits;
-                indices[key] = current_index;
+                if (indices[key] == 0) dirty.appendAssumeCapacity(@intCast(key));
+                indices[key] = @intCast(current_index);
                 current_index += 1;
                 previous_value_bits = current_value_bits;
                 continue;
@@ -160,7 +190,8 @@ pub fn compress(
 
                 previous_leading_zeros = leading_bucket;
                 stored_values[current_index % previous_values] = current_value_bits;
-                indices[key] = current_index;
+                if (indices[key] == 0) dirty.appendAssumeCapacity(@intCast(key));
+                indices[key] = @intCast(current_index);
                 current_index += 1;
                 previous_value_bits = current_value_bits;
                 continue;
@@ -188,7 +219,8 @@ pub fn compress(
 
         previous_leading_zeros = leading_bucket;
         stored_values[current_index % previous_values] = current_value_bits;
-        indices[key] = current_index;
+        if (indices[key] == 0) dirty.appendAssumeCapacity(@intCast(key));
+        indices[key] = @intCast(current_index);
         current_index += 1;
         previous_value_bits = current_value_bits;
     }
@@ -215,8 +247,11 @@ pub fn decompress(
     // Every non-empty Chimp128 stream must contain the count header and first raw value.
     if (compressed_values.len < 16) return Error.UnsupportedInput;
 
+    // The header gives the exact output length, so reserve it once and append without growth checks.
+    try decompressed_values.ensureTotalCapacity(allocator, @intCast(value_count));
+
     const first_value = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
-    try decompressed_values.append(allocator, first_value);
+    decompressed_values.appendAssumeCapacity(first_value);
 
     const stored_values = try allocator.alloc(u64, previous_values);
     defer allocator.free(stored_values);
@@ -234,9 +269,8 @@ pub fn decompress(
     var previous_value_bits: u64 = first_value_bits;
     var previous_leading_zeros: u6 = leading_zero_buckets[0];
 
-    // BitReader expects a reader interface, so wrap the remaining bytes in a stream.
-    const reader = Reader.fixed(compressed_values[offset..]);
-    var bit_reader = shared_structs.BitReader.init(reader);
+    // Read the bit stream straight from the remaining bytes with a buffered, byte-slice reader.
+    var bit_reader = shared_structs.BulkBitReader.init(compressed_values[offset..]);
 
     while (decompressed_values.items.len < value_count) {
         const first_marker_bit = bit_reader.readBitsNoEof(u1, 1) catch return Error.ByteStreamError;
@@ -289,7 +323,7 @@ pub fn decompress(
         previous_value_bits = current_value_bits;
 
         const value: f64 = @bitCast(current_value_bits);
-        try decompressed_values.append(allocator, value);
+        decompressed_values.appendAssumeCapacity(value);
     }
 }
 
