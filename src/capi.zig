@@ -300,6 +300,8 @@ test "method enum must match method constants" {
     try testing.expectEqual(@intFromEnum(tersets.Method.RunLengthEncoding), 14);
     try testing.expectEqual(@intFromEnum(tersets.Method.NonLinearApproximation), 15);
     try testing.expectEqual(@intFromEnum(tersets.Method.SerfQT), 16);
+    try testing.expectEqual(@intFromEnum(tersets.Method.Chimp64), 17);
+    try testing.expectEqual(@intFromEnum(tersets.Method.Chimp128), 18);
 }
 
 test "error for unknown compression method" {

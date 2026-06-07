@@ -51,6 +51,8 @@ const vw = @import("lossy_compression/line_simplification/visvalingam_whyatt.zig
 const sliding_window = @import("lossy_compression/line_simplification/sliding_window.zig");
 const bottom_up = @import("lossy_compression/line_simplification/bottom_up.zig");
 const rle_enconding = @import("lossless_compression/run_length_encoding.zig");
+const chimp64 = @import("lossless_compression/chimp64.zig");
+const chimp128 = @import("lossless_compression/chimp128.zig");
 
 const extractors = @import("utilities/extractors.zig");
 const tester = @import("tester.zig");
@@ -90,6 +92,8 @@ pub const Method = enum {
     RunLengthEncoding,
     NonLinearApproximation,
     SerfQT,
+    Chimp64,
+    Chimp128,
 };
 
 /// Compress `uncompressed_values` using `method` and its `configuration` and returns the results
@@ -253,6 +257,22 @@ pub fn compress(
                 configuration,
             );
         },
+        .Chimp64 => {
+            try chimp64.compress(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                configuration,
+            );
+        },
+        .Chimp128 => {
+            try chimp128.compress(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                configuration,
+            );
+        },
     }
     try compressed_values.append(allocator, @intFromEnum(method));
     return compressed_values;
@@ -328,6 +348,12 @@ pub fn decompress(
         },
         .SerfQT => {
             try serfqt.decompress(allocator, compressed_values_slice, &decompressed_values);
+        },
+        .Chimp64 => {
+            try chimp64.decompress(allocator, compressed_values_slice, &decompressed_values);
+        },
+        .Chimp128 => {
+            try chimp128.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
     }
 
@@ -474,6 +500,12 @@ pub fn extract(
         .SerfQT => {
             return Error.UnsupportedMethod;
         },
+        .Chimp64 => {
+            return Error.UnsupportedMethod;
+        },
+        .Chimp128 => {
+            return Error.UnsupportedMethod;
+        },
     }
 }
 
@@ -612,6 +644,12 @@ pub fn rebuild(
         .SerfQT => {
             return Error.UnsupportedMethod;
         },
+        .Chimp64 => {
+            return Error.UnsupportedMethod;
+        },
+        .Chimp128 => {
+            return Error.UnsupportedMethod;
+        },
     }
     try compressed_values.append(allocator, @intFromEnum(method));
     return compressed_values;
@@ -650,7 +688,9 @@ test "extract and rebuild works for any compression method supported" {
 
         if (method == Method.BitPackedQuantization or
             method == Method.SerfQT or
-            method == Method.RunLengthEncoding)
+            method == Method.RunLengthEncoding or
+            method == Method.Chimp64 or
+            method == Method.Chimp128)
         {
             // These compression methods are not supported for extraction
             // of the coefficients and indices. This is because even small
