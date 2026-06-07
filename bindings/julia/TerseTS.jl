@@ -39,6 +39,7 @@ Mirror TerseTS Method Enum.
     SerfQT = 16
     Chimp64 = 17
     Chimp128 = 18
+    Camel = 19
 end
 
 """
