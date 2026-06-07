@@ -17,8 +17,8 @@
 //! Liakos et al., "Chimp: Efficient Lossless Floating Point Compression for Time Series Databases", VLDB 2022.
 //! https://doi.org/10.14778/3551793.3551852
 //! The ring-buffer predictor scheme, bit-level layout, and leading-zero bucket boundaries follow
-//! the authors' reference Java implementation in the ELF repository, package
-//! `gr.aueb.delorean.chimp`: https://github.com/Spatio-Temporal-Lab/elf.
+//! the official Java implementation (`ChimpN`) published by the paper's authors, package
+//! `gr.aueb.delorean.chimp`: https://github.com/panagiotisl/chimp.
 
 const std = @import("std");
 const math = std.math;
