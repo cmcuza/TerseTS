@@ -14,8 +14,9 @@
 
 //! Implementation of the CAMEL lossless floating-point time series compression method.
 //! The method is described in:
-//! Messaoudi et al., "CAMEL: Efficient Lossless Floating Point Compression for Time Series Databases", 2022.
-//! https://doi.org/10.1109/ICDE53745.2022.00135
+//! Yuanyuan Yao, Lu Chen, Ziquan Fang, Yunjun Gao, Christian S. Jensen and Tianyi Li et al.,
+//!  "Camel: Efficient Compression of Floating-Point Time Series", 2022.
+//! https://dl.acm.org/doi/epdf/10.1145/3698802
 
 const std = @import("std");
 const ArrayList = std.ArrayList;
@@ -24,7 +25,6 @@ const Print = std.debug.print;
 const Math = std.math;
 const testing = std.testing;
 
-const tester = @import("../tester.zig");
 const tersets = @import("../tersets.zig");
 const shared_functions = @import("../utilities/shared_functions.zig");
 const Method = tersets.Method;
@@ -45,7 +45,14 @@ const BitWriter = struct {
     bit_buffer: u8 = 0,
     bit_count: u8 = 0,
 
-    // Initializes a bit writer over a byte buffer.
+    // Initialize a BitWriter for sequential bit-level writes into a byte buffer.
+    // Parameters:
+    // - `allocator`: allocator used when the underlying `ArrayList(u8)` needs to grow.
+    // - `buffer`: pointer to the `ArrayList(u8)` that will receive completed bytes.
+    // Behavior:
+    // The BitWriter accumulates written bits in `bit_buffer` (LSB-first). Once
+    // a full byte is accumulated it is appended to `buffer`. This allows writing
+    // non-byte-aligned quantities (variable-length fields) efficiently.
     fn init(allocator: Allocator, buffer: *ArrayList(u8)) BitWriter {
         return .{
             .allocator = allocator,
@@ -53,7 +60,15 @@ const BitWriter = struct {
         };
     }
 
-    // Writes `bits` least-significant bits of `value` to the stream.
+    // Write the `bits` least-significant bits of `value` to the stream (LSB-first).
+    // Parameters:
+    // - `value`: an integer value (any integer-compatible type) from which the
+    //    least-significant `bits` are taken.
+    // - `bits`: number of bits to write (0..64).
+    // Implementation details:
+    // The method shifts out chunks that fit into the current partial byte,
+    // updates `bit_buffer` and `bit_count`, and appends full bytes to `buffer`.
+    // Use `finish()` to flush a remaining partial byte.
     fn writeBits(self: *BitWriter, value: anytype, bits: u8) !void {
         var v = @as(u64, @intCast(value));
         var remaining = bits;
@@ -74,12 +89,14 @@ const BitWriter = struct {
         }
     }
 
-    // Writes a single bit to the stream.
+    // Write a single bit to the stream. Convenience wrapper around `writeBits(bit,1)`.
+    // Accepts `0` or `1` as `bit` and appends to the current partial byte.
     fn writeBit(self: *BitWriter, bit: u1) !void {
         try self.writeBits(bit, 1);
     }
 
-    // Flushes the remaining partial byte to the buffer.
+    // Finish writing: flush any remaining partial byte into `buffer`.
+    // After this call all previously written bits will be present in `buffer`.
     fn finish(self: *BitWriter) !void {
         if (self.bit_count > 0) {
             try self.buffer.append(self.allocator, self.bit_buffer);
@@ -92,12 +109,17 @@ const BitReader = struct {
     byte_index: usize = 0,
     bit_pos: u3 = 0,
 
-    // Initializes a bit reader over a byte slice.
+    // Initialize a BitReader for sequential bit-level reads from a byte slice.
+    // The reader maintains `byte_index` and `bit_pos` to track the current bit
+    // position. Bits are read LSB-first within each byte.
     fn init(buffer: []const u8) BitReader {
         return .{ .buffer = buffer };
     }
 
-    // Reads `bits` bits from the stream (LSB-first).
+    // Read `bits` bits from the stream and return as a `u64` (LSB-first).
+    // Returns `Error.CorruptedCompressedData` if the input ends before the
+    // requested number of bits can be read.
+    // Note: `bits` must be <= 64.
     fn readBits(self: *BitReader, bits: u8) Error!u64 {
         if (bits > 64) return Error.CorruptedCompressedData;
         var result: u64 = 0;
@@ -122,13 +144,25 @@ const BitReader = struct {
         return result;
     }
 
-    // Reads a single bit from the stream.
+    // Read a single bit (convenience wrapper around `readBits(1)`).
+    // Returns `0` or `1` or `Error.CorruptedCompressedData` when truncated.
     fn readBit(self: *BitReader) Error!u1 {
         return @as(u1, @intCast(try self.readBits(1)));
     }
 };
 
-// Splits a float into integer/fractional parts and metadata.
+// Split a floating-point value into integer/fractional components and metadata
+// used by the CAMEL encoder.
+// Returned `Parts` fields:
+// - `integer`: signed integer part (i64) when representable.
+// - `decimal`: fractional part scaled to an integer in range [0, 10^l - 1].
+// - `decimal_digits`: number of decimal digits `l` used to scale the fraction.
+// - `special`: true for NaN, +/-Inf, negative zero, or values that cannot be
+//    represented with the chosen `l` or that overflow i64 when scaled.
+// - `raw_bits`: raw IEEE-754 bit pattern, used for `special` cases so sign
+//    and NaN/Inf payloads are preserved exactly.
+// The optional `fixed_l` parameter forces a specific decimal digit count; when
+// omitted an heuristic `computeDecimalDigits` is used.
 pub fn splitNumber(number: f64, fixed_l: ?u8) Parts {
     // Preserve negative zero as a special case to keep the sign bit.
     if (number == 0.0 and (@as(u64, @bitCast(number)) & 0x8000_0000_0000_0000) != 0) {
@@ -223,12 +257,15 @@ pub fn splitNumber(number: f64, fixed_l: ?u8) Parts {
     };
 }
 
-// Computes the number of decimal digits to keep.
+// Compute how many decimal digits should be preserved for `value`.
+// This delegates to `calculateDecimalCount`, which implements a small heuristic.
 fn computeDecimalDigits(value: f64) u8 {
     return calculateDecimalCount(value);
 }
 
-// Calculates decimal digit count up to a fixed precision.
+// Heuristic to determine the number of significant decimal digits in the
+// fractional part of `value`. We iterate up to 6 digits (configurable here)
+// and stop when the remaining fractional part becomes smaller than `eps`.
 fn calculateDecimalCount(value: f64) u8 {
     const eps = 1e-12;
     const abs_val = @abs(value);
@@ -247,9 +284,12 @@ fn calculateDecimalCount(value: f64) u8 {
     return count;
 }
 
-// Computes dxor for the decimal fraction (Algorithm 2).
+// Compute the `dxor` value for the decimal fraction according to Algorithm 2.
+// Conceptually the fractional interval is partitioned into steps of size 2^-l
+// and `dxor` is the offset of `dec_fraction` within the corresponding step.
+// The result is used to build an XOR-friendly representation of the fraction.
 fn calculateDxor(dec_fraction: f64, l: u8) f64 {
-    // Eq. 3: dxor.dec = v.dec - 2^-l * floor(v.dec / 2^-l)  (при v.dec != 2^-l)
+    // Eq. 3: dxor.dec = v.dec - 2^-l * floor(v.dec / 2^-l)  (when v.dec != 2^-l)
     const step = Math.pow(f64, 2.0, -@as(f64, @floatFromInt(l)));
     const eps = 1e-15;
 
@@ -261,7 +301,13 @@ fn calculateDxor(dec_fraction: f64, l: u8) f64 {
     return dec_fraction - step * t;
 }
 
-// Encodes an integer with delta compression.
+// Encode the integer part using delta compression optimized for small deltas.
+// Strategy:
+// - For the first value (`index == 1`), write the full 64-bit integer.
+// - For subsequent values, if the delta is -1,0,+1 encode it using 2 bits.
+// - Otherwise write a `11` prefix, then a sign bit, a range flag and the
+//   absolute delta in either 3 or 16 bits depending on magnitude.
+// This yields compact encodings for typical smoothly varying integer sequences.
 pub fn compressInteger(writer: *BitWriter, int_part: i64, prev_int: i64, index: usize) !void {
     if (index == 1) {
         try writer.writeBits(@as(u64, @bitCast(int_part)), 64);
@@ -289,7 +335,10 @@ pub fn compressInteger(writer: *BitWriter, int_part: i64, prev_int: i64, index: 
     }
 }
 
-// Decodes an integer with delta compression.
+// Decode an integer previously encoded by `compressInteger`.
+// For `index == 1` the function reads a 64-bit signed integer. Otherwise it
+// reads the 2-bit prefix and reconstructs the delta according to the encoding
+// scheme (2-bit small deltas or `11`+sign+range+value), returning `prev_int+diff`.
 fn decompressInteger(reader: *BitReader, prev_int: i64, index: usize) !i64 {
     if (index == 1) {
         const raw = try reader.readBits(64);
@@ -312,7 +361,15 @@ fn decompressInteger(reader: *BitReader, prev_int: i64, index: usize) !i64 {
     return prev_int + diff;
 }
 
-// Encodes the decimal fraction using CAMEL rules.
+// Encode the decimal fraction following CAMEL rules (Algorithm 2):
+// - Compare the decimal fraction `dec_fraction` against a threshold 2^-l.
+// - If it is >= threshold, the encoder computes a `dxor` value and writes a
+//   small `l`-bit fingerprint derived from the XOR of 1.x representations,
+//   followed by a variable-length remainder encoding of `dxor' = dxor * 10^l`.
+// - If it is < threshold, the encoder emits a 0 flag and directly encodes
+//   `dxor' = dec_fraction * 10^l` with an appropriately sized field.
+// The remainder is stored in a compact variable-length format so small
+// fractional values cost very few bits.
 fn compressDecimal(writer: *BitWriter, dec_fraction: f64, l: u8) !void {
     // extended encoding of l (3 bits)
     // try writer.writeBits(@as(u3, @intCast(l)), 3);
@@ -377,7 +434,10 @@ fn compressDecimal(writer: *BitWriter, dec_fraction: f64, l: u8) !void {
     }
 }
 
-// Decodes the decimal fraction (expects `l` encoded in stream).
+// Decode the decimal fraction. This function expects that `l` (3 bits)
+// is encoded in the stream and reads it first. It then mirrors the logic of
+// `compressDecimal` to reconstruct the original fractional part as `f64`.
+// Returns `Error.CorruptedCompressedData` on truncated input.
 fn decompressDecimal(reader: *BitReader) Error!f64 {
     const l = @as(u8, @intCast(reader.readBits(3) catch return Error.CorruptedCompressedData));
     const flag = reader.readBit() catch return Error.CorruptedCompressedData;
@@ -402,7 +462,10 @@ fn decompressDecimal(reader: *BitReader) Error!f64 {
     }
 }
 
-// Restores the variable-length decimal payload.
+// Restore the variable-length encoded integer `dxor'` that represents the
+// fractional remainder scaled by 10^l. The encoding uses different bit
+// lengths depending on `l` to be space efficient for small `l` while still
+// supporting larger fractional precisions.
 fn restore(reader: *BitReader, l: u8) Error!u64 {
     if (l <= 1) {
         const bits_count: u8 = if (l == 0) 1 else 4;
@@ -422,7 +485,9 @@ fn restore(reader: *BitReader, l: u8) Error!u64 {
     }
 }
 
-// Decodes the decimal fraction given `l` from the caller.
+// Decode the fractional part when the caller supplies `l` (number of decimal
+// digits). This avoids reading the 3-bit `l` field and otherwise mirrors
+// `decompressDecimal` behaviour to reconstruct a `f64` fractional value.
 fn decompressDecimalWithL(reader: *BitReader, l: u8) Error!f64 {
     const flag = reader.readBit() catch return Error.CorruptedCompressedData;
 
@@ -444,7 +509,21 @@ fn decompressDecimalWithL(reader: *BitReader, l: u8) Error!f64 {
     }
 }
 
-// Compresses a series of values using CAMEL.
+// CAMEL compression function.
+// This function encodes an array of `f64` values into a compact byte stream
+// and appends the result to `compressed_values`. The produced format is:
+// 1) 64-bit little-endian count of values
+// 2) for each value:
+//    - 5-bit `l` (number of decimal digits), or the marker value 31 to indicate
+//      a special value (NaN/Inf/neg-zero/overflow). If marker 31 is used, a
+//      following 1-bit flag (must be 0) and the 64-bit raw IEEE-754 bits are
+//      written.
+//    - delta-encoded integer part (see `compressInteger`)
+//    - encoded fractional part (see `compressDecimal`)
+//
+// The `method_configuration` parameter is parsed but not used by this
+// implementation beyond compatibility with the generic interface; `allocator`
+// is used for intermediate list growth.
 pub fn compress(
     allocator: Allocator,
     uncompressed_values: []const f64,
@@ -487,7 +566,13 @@ pub fn compress(
     try writer.finish();
 }
 
-// Decompresses a CAMEL-compressed byte stream.
+// CAMEL decompression function.
+// Reconstructs an array of `f64` values from `compressed_values` and appends
+// them to `decompressed_values`. It expects the format produced by `compress`:
+// first a 64-bit count, then for each entry the 5-bit `l` or marker 31, followed
+// by the encoded integer and fractional parts. The function validates stream
+// bounds and returns `Error.CorruptedCompressedData` on truncated or invalid
+// input, or `Error.UnsupportedInput` for unsupported markers.
 pub fn decompress(
     allocator: Allocator,
     compressed_values: []const u8,
@@ -630,6 +715,27 @@ test "camel round-trip empty input" {
     try decompress(allocator, compressed.items, &decompressed);
 
     try testing.expectEqual(values.len, decompressed.items.len);
+}
+
+test "camel round-trip single value" {
+    const allocator = testing.allocator;
+
+    // A single value should round-trip through the full CAMEL encode/decode path.
+    // This verifies that the header count, the first raw integer part, and the
+    // fractional payload are all handled correctly even when there is only one item.
+    const uncompressed_values = &[_]f64{56.5};
+
+    var compressed = ArrayList(u8).empty;
+    defer compressed.deinit(allocator);
+
+    try compress(allocator, uncompressed_values, &compressed, "{}");
+
+    var decompressed = ArrayList(f64).empty;
+    defer decompressed.deinit(allocator);
+
+    try decompress(allocator, compressed.items, &decompressed);
+
+    try testing.expectEqual(uncompressed_values.len, decompressed.items.len);
 }
 
 test "camel round-trip decimal digit branches" {
