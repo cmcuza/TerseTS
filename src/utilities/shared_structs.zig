@@ -182,9 +182,9 @@ pub const BitWriter = struct {
     }
 };
 
-/// A `BitWriter` variant for hot encoders: it buffers bits in a 64-bit accumulator and flushes eight
-/// bytes at a time with a single big-endian store, rather than appending one byte at a time. Output
-/// is byte-identical to `BitWriter` (Big Endian, MSB first) and the API is the same.
+/// A `BitWriter` variant for hot encoders: it buffers bits in a 64-bit accumulator and flushes
+/// eight bytes at a time with a single big-endian store, rather than appending one byte at a time.
+/// Output is byte-identical to `BitWriter` (Big Endian, MSB first) and the API is the same.
 pub const BulkBitWriter = struct {
     allocator: Allocator,
     bytes: *ArrayList(u8),

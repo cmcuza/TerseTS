@@ -67,12 +67,14 @@ const lsb_mask: u64 = (1 << lsb_bits) - 1;
 const leading_zero_buckets = [_]u6{ 0, 8, 12, 16, 18, 20, 22, 24 };
 
 /// Per-thread scratch for the predictor lookup table. Allocating and zeroing the 64 KB `indices`
-/// table on every block dominated compress time, so it is reused across calls: zeroed once, then kept
-/// clean by resetting only the slots a block dirtied (recorded in `dirty`) instead of wiping all
-/// 64 KB. Thread-local so concurrent encoders never share state; the allocation is retained until the
-/// thread exits.
-// `u32` slots (not `usize`) halve the table to 64 KB and the `dirty` list with it; this caps a single
-// compress call at ~4.3 billion values, far beyond any realistic block.
+/// table on every block dominated compress time, so it is reused across calls: zeroed once, then
+/// kept clean by resetting only the slots a block dirtied (recorded in `dirty`) instead of wiping
+/// all 64 KB. Thread-local so concurrent encoders never share state; the allocation is retained
+/// until the thread exits. `u32` slots (not `usize`) keep this table at 64 KB rather than 128 KB
+/// and shrink the `dirty` list likewise. Each slot holds a value's position within the current
+/// call, so the only limit is one `compress` call encoding fewer than 2^32 (~4.3 billion) values,
+/// far above the 1000-value blocks it is used with. The reference `ChimpN` stores this index in a
+/// signed `int`, so `u32` here matches upstream (and slightly relaxes its ~2^31 cap).
 const Scratch = struct {
     indices: []u32,
     dirty: ArrayList(u32),
@@ -111,14 +113,14 @@ pub fn compress(
     @memset(stored_values, 0);
 
     // Fast lookup: maps 14 LSBs of any value to the global index of the last value with those LSBs.
-    // Reused across calls via the per-thread `scratch`: the table is zeroed once, then kept clean by
-    // resetting only the slots dirtied by the previous call. `current_index` starts at
+    // Reused across calls via the per-thread `scratch`: the table is zeroed once, then kept clean
+    // by resetting only the slots dirtied by the previous call. `current_index` starts at
     // `previous_values` so unseen keys (index 0) fail the staleness check
-    // `current_index - indices[key] < previous_values`. `dirty` has room for every possible key, so
-    // tracking and resetting touched slots never allocates.
+    // `current_index - indices[key] < previous_values`. `dirty` has room for every possible key,
+    // so tracking and resetting touched slots never allocates.
     if (scratch == null) {
-        // The scratch outlives any single call, so it is owned by a process-lifetime allocator rather
-        // than the caller's (which may be transient); it is intentionally never freed.
+        // The scratch outlives any single call, so it is owned by a process-lifetime allocator
+        // rather than the caller's (which may be transient); it is intentionally never freed.
         const scratch_allocator = std.heap.page_allocator;
         const table = try scratch_allocator.alloc(u32, 1 << lsb_bits);
         @memset(table, 0);
