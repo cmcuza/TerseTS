@@ -24,7 +24,6 @@ const std = @import("std");
 const math = std.math;
 const mem = std.mem;
 const testing = std.testing;
-const Reader = std.Io.Reader;
 const ArrayList = std.ArrayList;
 const Allocator = mem.Allocator;
 
@@ -248,8 +247,11 @@ pub fn decompress(
     // Every non-empty Chimp128 stream must contain the count header and first raw value.
     if (compressed_values.len < 16) return Error.UnsupportedInput;
 
+    // The header gives the exact output length, so reserve it once and append without growth checks.
+    try decompressed_values.ensureTotalCapacity(allocator, @intCast(value_count));
+
     const first_value = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
-    try decompressed_values.append(allocator, first_value);
+    decompressed_values.appendAssumeCapacity(first_value);
 
     const stored_values = try allocator.alloc(u64, previous_values);
     defer allocator.free(stored_values);
@@ -267,9 +269,8 @@ pub fn decompress(
     var previous_value_bits: u64 = first_value_bits;
     var previous_leading_zeros: u6 = leading_zero_buckets[0];
 
-    // BitReader expects a reader interface, so wrap the remaining bytes in a stream.
-    const reader = Reader.fixed(compressed_values[offset..]);
-    var bit_reader = shared_structs.BitReader.init(reader);
+    // Read the bit stream straight from the remaining bytes with a buffered, byte-slice reader.
+    var bit_reader = shared_structs.BulkBitReader.init(compressed_values[offset..]);
 
     while (decompressed_values.items.len < value_count) {
         const first_marker_bit = bit_reader.readBitsNoEof(u1, 1) catch return Error.ByteStreamError;
@@ -322,7 +323,7 @@ pub fn decompress(
         previous_value_bits = current_value_bits;
 
         const value: f64 = @bitCast(current_value_bits);
-        try decompressed_values.append(allocator, value);
+        decompressed_values.appendAssumeCapacity(value);
     }
 }
 
