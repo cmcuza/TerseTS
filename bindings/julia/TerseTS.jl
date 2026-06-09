@@ -37,7 +37,10 @@ Mirror TerseTS Method Enum.
     RunLengthEncoding = 14
     NonLinearApproximation = 15
     SerfQT = 16
-    BitPackedDeltaEncoding = 17
+    BitPackedBUFF = 17
+    Chimp64 = 18
+    Chimp128 = 19
+    BitPackedDeltaEncoding = 20
 end
 
 """
