@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Implementation of two variations of the MACHAQUE algorithm from the paper
+//! Implementation of two variations of the Macaque algorithm from the paper
 //! "Abduvoris Abduvakhobov, Søren Kejser Jensen, Christian Thomsen, Torben Bach Pedersen".
 //! Compressing High-Frequency Time Series Through Multiple Models and Stealing from Residuals.
 //! ICDE 2026.
@@ -24,9 +24,9 @@
 const std = @import("std");
 const math = std.math;
 const mem = std.mem;
-const io = std.io;
+const Io = std.Io;
 const testing = std.testing;
-const Writer = std.io.Writer;
+const Writer = Io.Writer;
 const ArrayList = std.ArrayList;
 const Allocator = mem.Allocator;
 
@@ -84,8 +84,7 @@ pub fn compressMacaqueS(
         compressed_values,
     );
 
-    const writer = compressed_values.writer(allocator);
-    var bit_writer = shared_structs.bitWriter(.little, writer);
+    var bit_writer = try shared_structs.BitWriter.init(allocator, compressed_values);
 
     // Step 1: For each value, rewrite bits based on the error bound and calculate the maximum number of bits rewritten.
     for (uncompressed_values) |value| {
@@ -136,8 +135,7 @@ pub fn compressMacaqueV(
         compressed_values,
     );
 
-    const writer = compressed_values.writer(allocator);
-    var bit_writer = shared_structs.bitWriter(.little, writer);
+    var bit_writer = try shared_structs.BitWriter.init(allocator, compressed_values);
 
     const first_value: f64 = uncompressed_values[0];
 
@@ -238,8 +236,8 @@ pub fn decompressMacaqueS(
 
     const number_of_values: usize = @intCast(@as(u32, @bitCast(compressed_values[0..4].*)));
 
-    var stream = io.fixedBufferStream(compressed_values[4..]);
-    var bit_reader = shared_structs.bitReader(.little, stream.reader());
+    const stream = Io.Reader.fixed(compressed_values[4..]);
+    var bit_reader = shared_structs.BitReader.init(stream);
 
     try decompressed_values.ensureTotalCapacity(allocator, number_of_values);
 
@@ -272,8 +270,10 @@ pub fn decompressMacaqueV(
 
     const number_of_values: usize = @intCast(@as(u32, @bitCast(compressed_values[0..4].*)));
 
-    var stream = io.fixedBufferStream(compressed_values[4..]);
-    var bit_reader = shared_structs.bitReader(.little, stream.reader());
+    const reader = std.Io.Reader.fixed(compressed_values[4..]);
+    var bit_reader = shared_structs.BitReader.init(reader);
+
+
 
     try decompressed_values.ensureTotalCapacity(allocator, number_of_values);
 
@@ -406,7 +406,7 @@ fn getExponentU64(value: u64) i16 {
 /// and the `value` in a bit-packed format. The `bits_needed` is written using 6 bits, and the `value`
 /// is written using the number of bits specified by `bits_needed` plus 12 bits for the sign and
 /// exponent. If an error occurs during writing, it is returned.
-fn writeCompressedMacaqueValue(bit_writer: anytype, bits_needed: u6, value: u64) !void {
+fn writeCompressedMacaqueValue(bit_writer: *shared_structs.BitWriter, bits_needed: u6, value: u64) !void {
     try bit_writer.writeBits(bits_needed, 6);
     const most_significant_bits: u16 = @as(u16, bits_needed) + 12; // 12 bits for sign and exponent.
     const shift: u6 = @intCast(64 - most_significant_bits);
