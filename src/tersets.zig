@@ -660,7 +660,7 @@ pub fn getMaxMethodIndex() usize {
     const method_info = @typeInfo(Method).@"enum";
 
     var max_index: usize = 0;
-    for (method_info.fields, 0..) |_, i| {
+    for (method_info.field_names, 0..) |_, i| {
         max_index = if (i > max_index) i else max_index;
     }
 

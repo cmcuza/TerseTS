@@ -123,7 +123,7 @@ pub const BitWriter = struct {
     /// input `value`. Bits will only be written to the writer when there are enough to fill a byte.
     pub fn writeBits(self: *Self, value: anytype, num: u16) !void {
         const T = @TypeOf(value);
-        const UT = std.meta.Int(.unsigned, @bitSizeOf(T));
+        const UT = @Int(.unsigned, @bitSizeOf(T));
         const U = if (@bitSizeOf(T) < 8) u8 else UT;
 
         const in: U = @as(UT, @bitCast(value));
@@ -201,7 +201,7 @@ pub const BulkBitWriter = struct {
 
     /// Write the `num` least-significant bits of `value`, most-significant first.
     pub fn writeBits(self: *Self, value: anytype, num: u16) !void {
-        const unsigned = std.meta.Int(.unsigned, @bitSizeOf(@TypeOf(value)));
+        const unsigned = @Int(.unsigned, @bitSizeOf(@TypeOf(value)));
         const n: u32 = num;
         const bits: u64 = @as(u64, @as(unsigned, @bitCast(value))) & lowMask(n);
         const room = 64 - @as(u32, self.count); // free positions before `acc` is full
@@ -270,7 +270,7 @@ pub const BitReader = struct {
     }
 
     fn initBits(comptime T: type, out: anytype, num: u16) Bits(T) {
-        const UT = std.meta.Int(.unsigned, @bitSizeOf(T));
+        const UT = @Int(.unsigned, @bitSizeOf(T));
         return .{
             @bitCast(@as(UT, @intCast(out))),
             num,
@@ -304,7 +304,7 @@ pub const BitReader = struct {
     /// containing them in the least significant end, and the number of bits successfully
     /// read. Reaching the end of the stream is not an error.
     pub fn readBitsTuple(self: *Self, comptime T: type, num: u16) !Bits(T) {
-        const UT = std.meta.Int(.unsigned, @bitSizeOf(T));
+        const UT = @Int(.unsigned, @bitSizeOf(T));
         const U = if (@bitSizeOf(T) < 8) u8 else UT; //it is a pain to work with <u8
 
         // Dump any bits in our buffer first.
