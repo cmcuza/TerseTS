@@ -215,6 +215,7 @@ pub fn defaultConfigurationBuilder(
         .Chimp64,
         .Chimp128,
         .BitPackedDeltaEncoding,
+        .Elf,
         => try allocator.dupe(u8, "{}"),
     };
 }
