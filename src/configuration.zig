@@ -66,6 +66,12 @@ pub const DomainTransformation = struct {
     number_of_coefficients: u32,
 };
 
+/// Configuration for methods that restrict the precision of floating-point values.
+/// Example: { "decimal_precision": 4 }, this means 4 decimal digits of precision.
+pub const DecimalPrecision = struct {
+    decimal_precision: u8,
+};
+
 /// Empty configuration for methods that do not require any parameters.
 pub const EmptyConfiguration = struct {};
 
@@ -106,6 +112,10 @@ pub fn parse(
         },
         AggregateError => {
             if (parsed_value.aggregate_error_bound < 0)
+                return error.InvalidConfiguration;
+        },
+        DecimalPrecision => {
+            if (parsed_value.decimal_precision <= 0 or parsed_value.decimal_precision >= 64)
                 return error.InvalidConfiguration;
         },
         EmptyConfiguration => {},
@@ -181,8 +191,22 @@ pub fn defaultConfigurationBuilder(
             );
         },
 
+        // Methods using target precision.
+        .BitPackedBUFF => blk: {
+            const precision: u8 = 4; // Simple default value.
+            break :blk try std.fmt.allocPrint(
+                allocator,
+                "{{\"target_precision\": {d}}}",
+                .{precision},
+            );
+        },
+
         // Methods with empty configuration.
-        .RunLengthEncoding => try allocator.dupe(u8, "{}"),
+        .RunLengthEncoding,
+        .Chimp64,
+        .Chimp128,
+        .BitPackedDeltaEncoding,
+        => try allocator.dupe(u8, "{}"),
     };
 }
 

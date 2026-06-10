@@ -61,11 +61,12 @@
 
 const std = @import("std");
 const ArrayList = std.ArrayList;
+const Clock = std.Io.Clock;
 const Random = std.Random;
 const Allocator = std.mem.Allocator;
 const Error = std.mem.Allocator.Error;
+const Threaded = std.Io.Threaded;
 const math = std.math;
-const time = std.time;
 const testing = std.testing;
 const debug = std.debug;
 
@@ -413,6 +414,35 @@ pub fn testGeneratedLosslessCompression(
             );
             return;
         }
+    }
+}
+
+/// Round-trip helper for lossless codecs. Compresses `uncompressed_values` with `compressFn`,
+/// decompresses with `decompressFn`, and asserts the recovered values match the originals
+/// bit-for-bit: each value is reinterpreted as a `u64` and compared exactly. Because the bit-cast
+/// keeps the sign bit, +0.0 (`0x0000…`) and -0.0 (`0x8000…`) map to different integers and are
+/// distinguished, and NaN payloads are preserved — neither survives a plain `f64` equality check.
+/// Calls the codec functions directly rather than going through the public dispatcher so that
+/// edge cases like empty and single-value inputs can be exercised.
+pub fn expectLosslessRoundTrip(
+    allocator: Allocator,
+    compressFn: *const fn (Allocator, []const f64, *ArrayList(u8), []const u8) tersets.Error!void,
+    decompressFn: *const fn (Allocator, []const u8, *ArrayList(f64)) tersets.Error!void,
+    uncompressed_values: []const f64,
+) !void {
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    try compressFn(allocator, uncompressed_values, &compressed_values, "{}");
+
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
+
+    try decompressFn(allocator, compressed_values.items, &decompressed_values);
+
+    try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
+    for (uncompressed_values, decompressed_values.items) |expected, actual| {
+        try testing.expectEqual(@as(u64, @bitCast(expected)), @as(u64, @bitCast(actual)));
     }
 }
 
@@ -861,7 +891,6 @@ pub fn generateBoundedRandomValues(
         try uncompressed_values.append(allocator, bounded_value);
     }
 }
-
 /// Generate a random number of `f64` values following a linear function with random slope
 /// and intercept, and add them to `uncompressed_values`. The noise added to each value is
 /// a random value in the range [-0.5%, 0.5%] times the absolute value. The generated
@@ -1101,7 +1130,7 @@ pub fn generateNumberOfValues(random: Random) usize {
 /// pseudo-random number generator unless the seed is reset.
 pub fn getDefaultRandomGenerator() Random {
     if (default_seed == 0) {
-        default_seed = @bitCast(time.milliTimestamp());
+        default_seed = @bitCast(milliTimestamp());
         default_prng = std.Random.DefaultPrng.init(default_seed);
     }
     return default_prng.random();
@@ -1111,6 +1140,14 @@ pub fn getDefaultRandomGenerator() Random {
 /// this function returns the default `Random` instance.
 pub fn resolveRandom(random_optional: ?Random) Random {
     return random_optional orelse getDefaultRandomGenerator();
+}
+
+/// Return a timestamp in milliseconds relative to UTC 1970-01-01.
+pub fn milliTimestamp() i64 {
+    var threaded: Threaded = .init_single_threaded;
+    const timestamp = Clock.real.now(threaded.io());
+    threaded.deinit();
+    return timestamp.toMilliseconds();
 }
 
 /// Adds noise to a given value based on `noise_scale`. This ensures that the noise is proportional

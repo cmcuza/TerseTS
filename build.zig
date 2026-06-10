@@ -33,14 +33,19 @@ pub fn build(b: *std.Build) void {
     // Paths to external libraries.
     const pocketfft_path = b.path("lib/pocketfft");
     const pocketfft_c_path = b.path("lib/pocketfft/pocketfft.c");
+    const optimize = b.standardOptimizeOption(.{});
 
     // Create root module.
     const root_module = b.createModule(.{
         .root_source_file = b.path("src/capi.zig"),
         .target = target,
-        .optimize = b.standardOptimizeOption(.{}),
+        .optimize = optimize,
         .pic = pic,
     });
+
+    root_module.addIncludePath(pocketfft_path);
+    root_module.addCSourceFile(.{ .file = pocketfft_c_path, .flags = &.{"-std=c99"} });
+    root_module.link_libc = true;
 
     // Task for compilation.
     const library = b.addLibrary(.{
@@ -53,10 +58,6 @@ pub fn build(b: *std.Build) void {
     if (linking == LinkMode.static) {
         library.bundle_compiler_rt = true;
     }
-
-    library.addIncludePath(pocketfft_path);
-    library.addCSourceFile(.{ .file = pocketfft_c_path, .flags = &.{"-std=c99"} });
-    library.linkLibC();
 
     b.installArtifact(library);
 

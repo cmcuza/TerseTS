@@ -151,10 +151,14 @@ class Method(Enum):
     RunLengthEncoding = 14
     NonLinearApproximation = 15
     SerfQT = 16
-    DiscreteFourierTransform = 17
+    BitPackedBUFF = 17
+    Chimp64 = 18
+    Chimp128 = 19
+    BitPackedDeltaEncoding = 20
+    DiscreteFourierTransform = 21
 
 
-# Public API. 
+# Public API.
 def compress(
     uncompressed_values: Union["numpy.ndarray", List[float], Tuple[float, ...]],
     method: Method,
