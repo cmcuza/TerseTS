@@ -23,128 +23,68 @@ from setuptools.command.build_ext import build_ext
 from setuptools.command.bdist_wheel import bdist_wheel
 
 
-def copy_src_if_repository():
-    """Copies the Zig source code to the current directory if in the repository."""
+def copy_if_repository(relative_path):
+    """Copies a file or directory at `relative_path` to the current directory if in the repository."""
     cwd = Path.cwd()
-
-    target_src_folder = cwd / "src"
-    if target_src_folder.exists():
+    target = cwd / relative_path
+    if target.exists():
         return
 
     repository_root = cwd.parent.parent
-    git_folder = repository_root / ".git"
-    if git_folder.exists():
-        input_src_folder = repository_root / "src"
-        shutil.copytree(input_src_folder, target_src_folder)
-        return
+    if not (repository_root / ".git").exists():
+        raise FileNotFoundError(f"Failed to locate {relative_path}.")
 
-    raise FileNotFoundError("Failed to locate Zig source code.")
+    source = repository_root / relative_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if source.is_dir():
+        shutil.copytree(source, target)
+    else:
+        shutil.copy2(source, target)
 
 
-def copy_pocketfft_if_repository():
-    """Copies PocketFFT C source code to the current directory if in the repository."""
+def delete_if_repository(relative_path):
+    """Deletes a file or directory at `relative_path` in the current directory if in the repository."""
     cwd = Path.cwd()
-
-    target_pocketfft_folder = cwd / "lib" / "pocketfft"
-    if target_pocketfft_folder.exists():
-        return False
-
-    repository_root = cwd.parent.parent
-    git_folder = repository_root / ".git"
-    if git_folder.exists():
-        input_pocketfft_folder = repository_root / "lib" / "pocketfft"
-        target_pocketfft_folder.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(input_pocketfft_folder, target_pocketfft_folder)
-        return 
-
-    raise FileNotFoundError("Failed to locate PocketFFT source code.")
-
-def copy_build_zig_if_repository():
-    """Copies build.zig to the current directory if in the repository."""
-    cwd = Path.cwd()
-
-    target_build_file = cwd / "build.zig"
-    if target_build_file.exists():
+    target = cwd / relative_path
+    if not target.exists():
         return
 
-    repository_root = cwd.parent.parent
-    git_folder = repository_root / ".git"
-    if git_folder.exists():
-        input_build_file = repository_root / "build.zig"
-        shutil.copy2(input_build_file, target_build_file)
+    if not (cwd.parent.parent / ".git").exists():
         return
 
-    raise FileNotFoundError("Failed to locate build.zig.")
-
-
-def delete_src_if_repository():
-    """Deletes the Zig source code in the current directory if in the repository."""
-    cwd = Path.cwd()
-
-    src_folder = cwd / "src"
-    if not src_folder.exists():
-        return
-
-    repository_root = cwd.parent.parent
-    git_folder = repository_root / ".git"
-    if git_folder.exists():
-        shutil.rmtree(src_folder)
-
-
-def delete_pocketfft_if_repository():
-    """Deletes the PocketFFT source code in the current directory if in the repository."""
-    cwd = Path.cwd()
-
-    pocketfft_folder = cwd / "lib" / "pocketfft"
-    if not pocketfft_folder.exists():
-        return
-
-    repository_root = cwd.parent.parent
-    git_folder = repository_root / ".git"
-    if git_folder.exists():
-        shutil.rmtree(pocketfft_folder)
-        lib_folder = cwd / "lib"
-        if lib_folder.exists() and not any(lib_folder.iterdir()):
-            lib_folder.rmdir()
-
-def delete_build_zig_if_repository():
-    """Deletes build.zig in the current directory if in the repository."""
-    cwd = Path.cwd()
-
-    build_file = cwd / "build.zig"
-    if not build_file.exists():
-        return
-
-    repository_root = cwd.parent.parent
-    git_folder = repository_root / ".git"
-    if git_folder.exists():
-        build_file.unlink()
+    if target.is_dir():
+        shutil.rmtree(target)
+        parent = target.parent
+        if parent != cwd and parent.exists() and not any(parent.iterdir()):
+            parent.rmdir()
+    else:
+        target.unlink()
 
 
 class ZigSDist(sdist):
     def run(self):
-        copy_src_if_repository()
-        copy_pocketfft_if_repository()
-        copy_build_zig_if_repository()
+        copy_if_repository("src")
+        copy_if_repository("lib/pocketfft")
+        copy_if_repository("build.zig")
         try:
             super().run()
         finally:
-            delete_src_if_repository()
-            delete_pocketfft_if_repository()
-            delete_build_zig_if_repository()
+            delete_if_repository("src")
+            delete_if_repository("lib/pocketfft")
+            delete_if_repository("build.zig")
 
 
 class ZigBDistWheel(bdist_wheel):
     def run(self):
-        copy_src_if_repository()
-        copy_pocketfft_if_repository()
-        copy_build_zig_if_repository()
+        copy_if_repository("src")
+        copy_if_repository("lib/pocketfft")
+        copy_if_repository("build.zig")
         try:
             super().run()
         finally:
-            delete_src_if_repository()
-            delete_pocketfft_if_repository()
-            delete_build_zig_if_repository()
+            delete_if_repository("src")
+            delete_if_repository("lib/pocketfft")
+            delete_if_repository("build.zig")
 
     def get_tag(self):
         python, abi, plat = super().get_tag()

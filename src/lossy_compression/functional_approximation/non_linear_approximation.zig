@@ -350,8 +350,8 @@ pub fn rebuild(
         return Error.CorruptedCompressedData;
 
     // Coefficients and indices must have same length:
-    // coefficients = [shift_amount, slope0, intercept0, slope1, intercept1, ...]
     // indices = [number_of_segments, type0, type1, ..., end0, end1, ...]
+    // coefficients = [shift_amount, slope0, intercept0, slope1, intercept1, ...]
     if (coefficients.len != indices.len)
         return Error.CorruptedCompressedData;
 

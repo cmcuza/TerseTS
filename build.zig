@@ -30,9 +30,7 @@ pub fn build(b: *std.Build) void {
         "pic",
         "Use Position Independent Code (PIC)",
     ) orelse null;
-    // Paths to external libraries.
-    const pocketfft_path = b.path("lib/pocketfft");
-    const pocketfft_c_path = b.path("lib/pocketfft/pocketfft.c");
+
     const optimize = b.standardOptimizeOption(.{});
 
     // Create root module.
@@ -43,8 +41,13 @@ pub fn build(b: *std.Build) void {
         .pic = pic,
     });
 
+    // Paths to external libraries. Include the PocketFFT source file directly in the build,
+    // as it's a single C file with no dependencies.
+    const pocketfft_path = b.path("lib/pocketfft");
+    const pocketfft_c_path = b.path("lib/pocketfft/pocketfft.c");
+
     root_module.addIncludePath(pocketfft_path);
-    root_module.addCSourceFile(.{ .file = pocketfft_c_path, .flags = &.{"-std=c99"} });
+    root_module.addCSourceFile(.{.file = pocketfft_c_path});
     root_module.link_libc = true;
 
     // Task for compilation.

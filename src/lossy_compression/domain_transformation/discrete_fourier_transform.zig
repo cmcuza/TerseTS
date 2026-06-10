@@ -48,7 +48,7 @@ extern "c" fn rfft_length(plan: rfft_plan) usize;
 /// Compresses the `uncompressed_values` using Discrete Fourier Transform (DFT) retaining
 /// `number_of_coefficients` largest magnitude coefficients as specified in the
 /// `method_configuration`. The compressed data is composed of the number of coefficients,
-/// original length, DC coefficient, and the selected frequency coefficients. If an error
+/// original length, direct coefficient (DC), and the selected frequency coefficients. If an error
 /// occurs, it is returned.
 pub fn compress(
     allocator: Allocator,
@@ -56,10 +56,8 @@ pub fn compress(
     compressed_values: *ArrayList(u8),
     method_configuration: []const u8,
 ) Error!void {
-    const number_of_bins: usize = uncompressed_values.len / 2 + 1;
-
     // Validate input length. The maximum length is constrained by the header format.
-    // This is a practical limit to ~ 4 billion samples, which should be sufficient.
+    // This is a practical limit to 4_294_967_295 values.
     if (uncompressed_values.len > 0xFFFFFFFF)
         return Error.UnsupportedInput;
 
@@ -68,12 +66,14 @@ pub fn compress(
         configuration.DomainTransformation,
         method_configuration,
     );
+
     const number_of_coefficients: u32 = parsed_configuration.number_of_coefficients;
+    const number_of_bins: usize = uncompressed_values.len / 2 + 1;
 
     if (number_of_coefficients > number_of_bins)
         return Error.InvalidConfiguration;
 
-    // PocketFFT works in-place.
+    // PocketFFT modifies receives the output buffer as parameter and modifies.
     const pocketfft_buffer = try allocator.alloc(f64, uncompressed_values.len);
     defer allocator.free(pocketfft_buffer);
 
@@ -187,7 +187,7 @@ pub fn compress(
 }
 
 /// Decompresses the `compressed_values` using Discrete Fourier Transform (DFT),
-/// reconstructing the original signal approximately by retaining only the
+/// reconstructing the original signal approximately by using only the
 /// specified number of frequency coefficients. The decompressed values are
 /// appended to `decompressed_values`. If an error occurs, it is returned.
 pub fn decompress(
@@ -203,15 +203,10 @@ pub fn decompress(
     // Read header information.
     const preserve_top_coefficients =
         try shared_functions.readOffsetValue(u32, compressed_values, &offset);
-    const N: u32 =
+    const size: u32 =
         try shared_functions.readOffsetValue(u32, compressed_values, &offset);
 
-    // Just in case, validate N. TerseTS API should prevent any array with length less than 2
-    // from being compressed, but we check here to be safe.
-    if (N < 2)
-        return Error.CorruptedCompressedData;
-
-    const number_of_bins: usize = @intCast(N / 2 + 1);
+    const number_of_bins: usize = @intCast(size / 2 + 1);
 
     // Validate number of coefficients to preserve.
     if (preserve_top_coefficients == 0 or preserve_top_coefficients > number_of_bins)
@@ -222,12 +217,12 @@ pub fn decompress(
         try shared_functions.readOffsetValue(f64, compressed_values, &offset);
 
     // Prepare PocketFFT buffer.
-    var pocketfft_buffer = try allocator.alloc(f64, N);
+    var pocketfft_buffer = try allocator.alloc(f64, size);
     defer allocator.free(pocketfft_buffer);
     @memset(pocketfft_buffer, 0.0);
 
-    pocketfft_buffer[0] = dc_real;
     // Read preserved coefficients.
+    pocketfft_buffer[0] = dc_real;
     for (0..preserve_top_coefficients - 1) |_| {
         const index =
             try shared_functions.readOffsetValue(u64, compressed_values, &offset);
@@ -239,9 +234,9 @@ pub fn decompress(
         if (index == 0 or index >= number_of_bins)
             return Error.CorruptedCompressedData;
 
-        if ((N % 2 == 0) and (index == number_of_bins - 1)) {
+        if ((size % 2 == 0) and (index == number_of_bins - 1)) {
             // Nyquist: real-only.
-            pocketfft_buffer[N - 1] = real;
+            pocketfft_buffer[size - 1] = real;
         } else {
             pocketfft_buffer[2 * index - 1] = real;
             pocketfft_buffer[2 * index] = imaginary;
@@ -249,18 +244,18 @@ pub fn decompress(
     }
 
     // Create FFT plan.
-    const plan = make_rfft_plan(N);
+    const plan = make_rfft_plan(size);
     if (plan == null) return Error.UnsupportedInput;
     defer destroy_rfft_plan(plan);
 
     // Perform inverse FFT.
-    const scale: f64 = 1.0 / @as(f64, @floatFromInt(N));
+    const scale: f64 = 1.0 / @as(f64, @floatFromInt(size));
     if (rfft_backward(plan, pocketfft_buffer.ptr, scale) != 0)
         return Error.UnsupportedInput;
 
     // Append decompressed values.
-    try decompressed_values.ensureTotalCapacity(allocator, N);
-    for (0..N) |i_val| {
+    try decompressed_values.ensureTotalCapacity(allocator, size);
+    for (0..size) |i_val| {
         try decompressed_values.append(allocator, pocketfft_buffer[i_val]);
     }
 }
@@ -291,12 +286,12 @@ pub fn extract(
     // Read header information.
     const preserve_top_coefficients: u64 =
         @intCast(try shared_functions.readOffsetValue(u32, compressed_values, &offset));
-    const N: u64 =
+    const size: u64 =
         @intCast(try shared_functions.readOffsetValue(u32, compressed_values, &offset));
 
     // Store header information in the indices array for reference during reconstruction.
     try indices.append(allocator, preserve_top_coefficients);
-    try indices.append(allocator, N);
+    try indices.append(allocator, size);
 
     // Read DC coefficient and store it in the coefficients array for reference during reconstruction.
     const dc_real: f64 =
@@ -306,10 +301,10 @@ pub fn extract(
 
     // Just in case, validate N. TerseTS API should prevent any array with length less than 2
     // from being compressed, but we check here to be safe.
-    if (N < 2)
+    if (size < 2)
         return Error.CorruptedCompressedData;
 
-    const number_of_bins: usize = @intCast(N / 2 + 1);
+    const number_of_bins: usize = @intCast(size / 2 + 1);
 
     // Validate number of coefficients to preserve.
     if (preserve_top_coefficients == 0 or preserve_top_coefficients > number_of_bins)
@@ -441,10 +436,10 @@ test "fft compression round-trip full reconstruction with all coefficients prese
         1e3,
         null,
     );
-    const N = uncompressed.items.len;
+    const size = uncompressed.items.len;
 
     // Preserve all coefficients for this test to validate the round-trip reconstruction.
-    const preserve_top_coefficients = N / 2 + 1; // number_of_coefficients.
+    const preserve_top_coefficients = size / 2 + 1; // number_of_coefficients.
 
     var compressed_values = std.ArrayList(u8).empty;
     defer compressed_values.deinit(allocator);
@@ -481,7 +476,7 @@ test "fft compression round-trip full reconstruction with all coefficients prese
     // Thus, 1e-8 is an empirically chosen value that balances the need to account for
     // floating-point precision issues while still ensuring that the decompressed values are very
     // close to the original values.
-    for (0..N) |i| {
+    for (0..size) |i| {
         try std.testing.expectApproxEqRel(
             decompressed.items[i],
             uncompressed.items[i],
@@ -517,10 +512,10 @@ test "fft compression round-trip full reconstruction with all coefficients prese
         1,
         null,
     );
-    const N = uncompressed.items.len;
+    const size = uncompressed.items.len;
 
     // Preserve all coefficients for this test to validate the round-trip reconstruction.
-    const preserve_top_coefficients = N / 2 + 1; // number_of_bins + 1.
+    const preserve_top_coefficients = size / 2 + 1; // number_of_bins + 1.
 
     var compressed_values = std.ArrayList(u8).empty;
     defer compressed_values.deinit(allocator);
@@ -557,7 +552,7 @@ test "fft compression round-trip full reconstruction with all coefficients prese
     // Thus, 1e-10 is an empirically chosen value that balances the need to account for
     // floating-point precision issues while still ensuring that the decompressed values are very
     // close to the original values.
-    for (0..N) |i| {
+    for (0..size) |i| {
         try std.testing.expectApproxEqRel(
             decompressed.items[i],
             uncompressed.items[i],
@@ -581,7 +576,7 @@ test "fft compression partial reconstruction preserves mean error" {
         null,
     );
 
-    const N: usize = uncompressed.items.len;
+    const size: usize = uncompressed.items.len;
 
     var compressed = std.ArrayList(u8).empty;
     defer compressed.deinit(allocator);
@@ -589,7 +584,7 @@ test "fft compression partial reconstruction preserves mean error" {
     const preserve_top_coefficients: usize = tester.generateBoundRandomInteger(
         usize,
         3,
-        N / 2 - 1,
+        size / 2 - 1,
         null,
     );
 
@@ -619,10 +614,10 @@ test "fft compression partial reconstruction preserves mean error" {
     try std.testing.expectEqual(uncompressed.items.len, decompressed.items.len);
 
     var mean_error: f64 = 0;
-    const size: f64 = @floatFromInt(N);
+    const size_f64: f64 = @floatFromInt(size);
     for (uncompressed.items, 0..) |original_value, i| {
         const decompressed_value = decompressed.items[i];
-        mean_error += @abs(original_value - decompressed_value) / size;
+        mean_error += @abs(original_value - decompressed_value) / size_f64;
     }
 
     // Since all values are between -1 and 1, the mean_error should be less than 1.
@@ -633,7 +628,7 @@ test "fft compression only returns known mean value" {
     const allocator = std.testing.allocator;
 
     const uncompressed = [_]f64{ 3, 6, 9, 12, 15, 18 };
-    const N = uncompressed.len;
+    const size = uncompressed.len;
     const mean = 10.5; // Known value given the input.
 
     var compressed = std.ArrayList(u8).empty;
@@ -649,7 +644,7 @@ test "fft compression only returns known mean value" {
 
     try decompress(allocator, compressed.items, &decompressed);
 
-    try std.testing.expectEqual(N, decompressed.items.len);
+    try std.testing.expectEqual(size, decompressed.items.len);
 
     for (decompressed.items) |value| {
         try std.testing.expectEqual(value, mean);
