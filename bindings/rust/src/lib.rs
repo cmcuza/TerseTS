@@ -46,6 +46,7 @@ pub enum Method {
     SerfQT,
     Chimp64,
     Chimp128,
+    BitPackedDeltaEncoding,
     Camel,
 }
 

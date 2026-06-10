@@ -151,9 +151,11 @@ class Method(Enum):
     RunLengthEncoding = 14
     NonLinearApproximation = 15
     SerfQT = 16
-    Chimp64 = 17
-    Chimp128 = 18
-    Camel = 19
+    BitPackedBUFF = 17
+    Chimp64 = 18
+    Chimp128 = 19
+    BitPackedDeltaEncoding = 20
+    Camel = 21
 
 
 # Public API.
