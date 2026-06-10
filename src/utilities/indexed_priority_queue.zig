@@ -140,6 +140,7 @@ pub fn IndexedPriorityQueue(
         }
 
         /// Inserts `index` with `priority`, maintaining the heap property.
+        /// Returns `Error.ItemNotFound` if `index` is out of range or already present in the queue.
         pub fn add(self: *Self, index: usize, priority: T) Error!void {
             if (index >= self.capacity()) return Error.ItemNotFound;
             if (self.is_active[index]) return Error.ItemNotFound;

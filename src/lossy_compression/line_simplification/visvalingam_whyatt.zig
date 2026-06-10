@@ -129,7 +129,7 @@ pub fn compress(
         );
     }
 
-    // Output compressed series: first point, then (index, value) pairs.
+    // Output compressed series: first point, then (value, index) pairs.
     try compressed_values.ensureTotalCapacity(allocator, compressed_values.items.len + 8 + (remaining_points - 1) * 16);
     try shared_functions.appendValue(allocator, f64, uncompressed_values[0], compressed_values);
     var point_index = right_points[0];

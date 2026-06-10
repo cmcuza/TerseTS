@@ -154,7 +154,7 @@ pub fn compress(
         try heap.update(right_segment_index, costs[right_segment_index]);
     }
 
-    // Sort remaining points by original index to preserve order.
+    // Sort remaining segments by original index to preserve order.
     var remaining_segments = ArrayList(SegmentMergeCost).empty;
     defer remaining_segments.deinit(allocator);
     try remaining_segments.ensureTotalCapacity(allocator, heap.count());
