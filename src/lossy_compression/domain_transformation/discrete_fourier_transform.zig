@@ -299,11 +299,6 @@ pub fn extract(
 
     try coefficients.append(allocator, dc_real);
 
-    // Just in case, validate N. TerseTS API should prevent any array with length less than 2
-    // from being compressed, but we check here to be safe.
-    if (size < 2)
-        return Error.CorruptedCompressedData;
-
     const number_of_bins: usize = @intCast(size / 2 + 1);
 
     // Validate number of coefficients to preserve.
