@@ -45,6 +45,8 @@ const bitpacked_quantization = @import(
 const serfqt = @import(
     "lossy_compression/value_representation/serf_qt.zig",
 );
+
+const buff = @import("lossy_compression/value_representation/bounded_fast_floats.zig");
 const macaque = @import(
     "lossy_compression/value_representation/macaque.zig",
 );
@@ -53,7 +55,13 @@ const macaque = @import(
 const vw = @import("lossy_compression/line_simplification/visvalingam_whyatt.zig");
 const sliding_window = @import("lossy_compression/line_simplification/sliding_window.zig");
 const bottom_up = @import("lossy_compression/line_simplification/bottom_up.zig");
-const rle_enconding = @import("lossless_compression/run_length_encoding.zig");
+
+// Import domain transform methods.
+const dft = @import("lossy_compression/domain_transformation/discrete_fourier_transform.zig");
+
+// Import lossless compression methods.
+const rle_encoding = @import("lossless_compression/run_length_encoding.zig");
+const delta_encoding = @import("lossless_compression/bitpacked_delta_encoding.zig");
 const chimp64 = @import("lossless_compression/chimp64.zig");
 const chimp128 = @import("lossless_compression/chimp128.zig");
 
@@ -95,8 +103,11 @@ pub const Method = enum {
     RunLengthEncoding,
     NonLinearApproximation,
     SerfQT,
+    BitPackedBUFF,
     Chimp64,
     Chimp128,
+    BitPackedDeltaEncoding,
+    DiscreteFourierTransform,
     MacaqueS,
     MacaqueV,
 };
@@ -231,7 +242,7 @@ pub fn compress(
             );
         },
         .RunLengthEncoding => {
-            try rle_enconding.compress(
+            try rle_encoding.compress(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
@@ -262,16 +273,24 @@ pub fn compress(
                 configuration,
             );
         },
-        .MacaqueS => {
-            try macaque.compressMacaqueS(
+        .DiscreteFourierTransform => {
+            try dft.compress(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
                 configuration,
             );
         },
-        .MacaqueV => {
-            try macaque.compressMacaqueV(
+        .BitPackedDeltaEncoding => {
+            try delta_encoding.compress(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                configuration,
+            );
+        },
+        .BitPackedBUFF => {
+            try buff.compressBitPackedBUFF(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
@@ -359,7 +378,7 @@ pub fn decompress(
             try bottom_up.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .RunLengthEncoding => {
-            try rle_enconding.decompress(allocator, compressed_values_slice, &decompressed_values);
+            try rle_encoding.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .BitPackedQuantization => {
             try bitpacked_quantization.decompress(allocator, compressed_values_slice, &decompressed_values);
@@ -369,6 +388,15 @@ pub fn decompress(
         },
         .SerfQT => {
             try serfqt.decompress(allocator, compressed_values_slice, &decompressed_values);
+        },
+        .DiscreteFourierTransform => {
+            try dft.decompress(allocator, compressed_values_slice, &decompressed_values);
+        },
+        .BitPackedDeltaEncoding => {
+            try delta_encoding.decompress(allocator, compressed_values_slice, &decompressed_values);
+        },
+        .BitPackedBUFF => {
+            try buff.decompressBitPackedBUFF(allocator, compressed_values_slice, &decompressed_values);
         },
         .Chimp64 => {
             try chimp64.decompress(allocator, compressed_values_slice, &decompressed_values);
@@ -504,6 +532,14 @@ pub fn extract(
                 coefficients,
             );
         },
+        .DiscreteFourierTransform => {
+            try dft.extract(
+                allocator,
+                compressed_values_slice,
+                indices,
+                coefficients,
+            );
+        },
         // For the following three methods, it is not possible to guarantee
         // that the pipeline will work as intended. This is because even small
         // chages in the compressed representation can lead to large differences
@@ -518,22 +554,14 @@ pub fn extract(
         // corrupted streams or misinterpretation of the data during decompression.
         // In case of RLE, modifying the coefficients can disrupt the run-length
         // encoding scheme, also leading to incorrect decompression results.
-        .BitPackedQuantization => {
-            return Error.UnsupportedMethod;
-        },
-        .RunLengthEncoding => {
-            return Error.UnsupportedMethod;
-        },
-        .SerfQT => {
-            return Error.UnsupportedMethod;
-        },
-        .Chimp64 => {
-            return Error.UnsupportedMethod;
-        },
-        .Chimp128 => {
-            return Error.UnsupportedMethod;
-        },
-        .MacaqueS, .MacaqueV => {
+        .BitPackedQuantization,
+        .BitPackedDeltaEncoding,
+        .SerfQT,
+        .RunLengthEncoding,
+        .BitPackedBUFF,
+        .Chimp64,
+        .Chimp128,
+        => {
             return Error.UnsupportedMethod;
         },
     }
@@ -651,6 +679,14 @@ pub fn rebuild(
                 &compressed_values,
             );
         },
+        .DiscreteFourierTransform => {
+            try dft.rebuild(
+                allocator,
+                indices,
+                coefficients,
+                &compressed_values,
+            );
+        },
         // For the following three methods, it is not possible to guarantee
         // that the pipeline will work as intended. This is because even small
         // chages in the compressed representation can lead to large differences
@@ -665,22 +701,14 @@ pub fn rebuild(
         // corrupted streams or misinterpretation of the data during decompression.
         // In case of RLE, modifying the coefficients can disrupt the run-length
         // encoding scheme, also leading to incorrect decompression results.
-        .BitPackedQuantization => {
-            return Error.UnsupportedMethod;
-        },
-        .RunLengthEncoding => {
-            return Error.UnsupportedMethod;
-        },
-        .SerfQT => {
-            return Error.UnsupportedMethod;
-        },
-        .Chimp64 => {
-            return Error.UnsupportedMethod;
-        },
-        .Chimp128 => {
-            return Error.UnsupportedMethod;
-        },
-        .MacaqueS, .MacaqueV => {
+        .BitPackedQuantization,
+        .BitPackedDeltaEncoding,
+        .BitPackedBUFF,
+        .SerfQT,
+        .RunLengthEncoding,
+        .Chimp64,
+        .Chimp128,
+        => {
             return Error.UnsupportedMethod;
         },
     }
@@ -722,6 +750,8 @@ test "extract and rebuild works for any compression method supported" {
         if (method == Method.BitPackedQuantization or
             method == Method.SerfQT or
             method == Method.RunLengthEncoding or
+            method == Method.BitPackedDeltaEncoding or
+            method == Method.BitPackedBUFF or
             method == Method.Chimp64 or
             method == Method.Chimp128 or
             method == Method.MacaqueS or
