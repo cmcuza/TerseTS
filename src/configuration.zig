@@ -45,6 +45,13 @@ pub const HistogramBinsNumber = struct {
     histogram_bins_number: u32,
 };
 
+// Configuration for downsampling methods specifying the number of data
+// points to be returned.
+// Example: { "output_threshold_number": 500 }
+pub const OutputThresholdNumber = struct {
+    output_threshold_number: u32,
+};
+
 /// Configuration for methods that require an aggregate error type and bound.
 /// Example: { "aggregate_error_type": "rmse", "aggregate_error_bound": 5.0 }
 pub const AggregateError = struct {
