@@ -151,9 +151,14 @@ class Method(Enum):
     RunLengthEncoding = 14
     NonLinearApproximation = 15
     SerfQT = 16
+    BitPackedBUFF = 17
+    Chimp64 = 18
+    Chimp128 = 19
+    BitPackedDeltaEncoding = 20
+    DiscreteFourierTransform = 21
 
 
-# Public API. 
+# Public API.
 def compress(
     uncompressed_values: Union["numpy.ndarray", List[float], Tuple[float, ...]],
     method: Method,
@@ -412,7 +417,7 @@ def extract(
     elif isinstance(compressed_values, (bytes, bytearray, memoryview)):
         if _INSTALLED_NUMPY:
             # Zero-copy via NumPy view.
-            view = numpy.frombuffer(values, dtype=numpy.uint8)
+            view = numpy.frombuffer(compressed_values, dtype=numpy.uint8)
             compressed_values_struct.data = view.ctypes.data_as(POINTER(c_ubyte))
             compressed_values_struct.len = view.size
         else:
