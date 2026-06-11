@@ -47,7 +47,7 @@ pub fn build(b: *std.Build) void {
     const pocketfft_c_path = b.path("lib/pocketfft/pocketfft.c");
 
     root_module.addIncludePath(pocketfft_path);
-    root_module.addCSourceFile(.{.file = pocketfft_c_path});
+    root_module.addCSourceFile(.{ .file = pocketfft_c_path });
     root_module.link_libc = true;
 
     // Task for compilation.
