@@ -273,8 +273,6 @@ pub fn decompressMacaqueV(
     const reader = std.Io.Reader.fixed(compressed_values[4..]);
     var bit_reader = shared_structs.BitReader.init(reader);
 
-
-
     try decompressed_values.ensureTotalCapacity(allocator, number_of_values);
 
     const bits_needed: u6 = bit_reader.readBitsNoEof(u6, 6) catch return Error.ByteStreamError;

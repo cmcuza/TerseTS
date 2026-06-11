@@ -36,20 +36,11 @@ const non_linear_approximation = @import(
 );
 
 // Import value approximation methods.
-const piecewise_histogram = @import(
-    "lossy_compression/value_representation/histogram_representation.zig",
-);
-const bitpacked_quantization = @import(
-    "lossy_compression/value_representation/bitpacked_quantization.zig",
-);
-const serfqt = @import(
-    "lossy_compression/value_representation/serf_qt.zig",
-);
-
+const piecewise_histogram = @import("lossy_compression/value_representation/histogram_representation.zig");
+const bitpacked_quantization = @import("lossy_compression/value_representation/bitpacked_quantization.zig");
+const serfqt = @import("lossy_compression/value_representation/serf_qt.zig");
 const buff = @import("lossy_compression/value_representation/bounded_fast_floats.zig");
-const macaque = @import(
-    "lossy_compression/value_representation/macaque.zig",
-);
+const macaque = @import("lossy_compression/value_representation/macaque.zig");
 
 // Import line simplification methods.
 const vw = @import("lossy_compression/line_simplification/visvalingam_whyatt.zig");
@@ -313,6 +304,22 @@ pub fn compress(
                 configuration,
             );
         },
+        .MacaqueS => {
+            try macaque.compressMacaqueS(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                configuration,
+            );
+        },
+        .MacaqueV => {
+            try macaque.compressMacaqueV(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                configuration,
+            );
+        },
     }
     try compressed_values.append(allocator, @intFromEnum(method));
     return compressed_values;
@@ -561,6 +568,8 @@ pub fn extract(
         .BitPackedBUFF,
         .Chimp64,
         .Chimp128,
+        .MacaqueS,
+        .MacaqueV,
         => {
             return Error.UnsupportedMethod;
         },
@@ -708,6 +717,8 @@ pub fn rebuild(
         .RunLengthEncoding,
         .Chimp64,
         .Chimp128,
+        .MacaqueS,
+        .MacaqueV,
         => {
             return Error.UnsupportedMethod;
         },

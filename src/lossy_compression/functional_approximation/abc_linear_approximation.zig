@@ -72,6 +72,11 @@ pub fn compress(
     var convex_hull = try ConvexHull.init(allocator);
     defer convex_hull.deinit();
 
+    // Reused by the ABC side walk for every candidate segment. Keeping this scratch buffer outside
+    // the inner loop avoids allocating a new visited set for each attempted segment extension.
+    var visited_sides = ArrayList(u8).empty;
+    defer visited_sides.deinit(allocator);
+
     var current_segment_start: usize = 0;
     while (current_segment_start < uncompressed_values.len - 1) {
         var last_valid_line: ?LinearFunction = null;
@@ -91,12 +96,15 @@ pub fn compress(
 
             // Section III-A, Step 2-3: Find A, B, C and compute the solution line.
             // Try to compute the best fitting line using current convex hull points.
-            const line = try findABCOptimalSegment(&convex_hull, allocator);
+            const line = try findABCOptimalSegmentWithVisited(
+                &convex_hull,
+                allocator,
+                &visited_sides,
+            );
 
-            // Compute maximum error over current segment.
-            const max_error = try convex_hull.computeMaxError(line);
-
-            if (max_error <= error_bound) {
+            // Only the bound comparison is needed here, so stop evaluating hull points as soon as
+            // one point exceeds the configured error.
+            if (!try exceedsMaxErrorBound(&convex_hull, line, error_bound)) {
                 // If all points are within error_bound, the segment is still valid.
                 last_valid_end = index_over_segment;
                 last_valid_line = line;
@@ -257,11 +265,27 @@ pub fn rebuild(
     );
 }
 
-// Find the optimal segment using ABC structure from the `convex_hull`. Specifically, the
+/// Find the optimal segment using ABC structure from the `convex_hull`. Specifically, the
 /// A and B points form a segment (AB) on the lower or upper hull. The C point is found on
 /// the opposite hull with maximum deviation, projected vertically into the segment AB.
-/// The `allocator` is used to create a AutoHashMap to control which point has been visited.
+/// This public wrapper allocates a temporary scratch list for visited sides. Compression calls the
+/// private scratch-buffer variant directly so repeated segment attempts can reuse that allocation.
 pub fn findABCOptimalSegment(convex_hull: *ConvexHull, allocator: Allocator) Error!LinearFunction {
+    var visited_sides = ArrayList(u8).empty;
+    defer visited_sides.deinit(allocator);
+
+    return findABCOptimalSegmentWithVisited(convex_hull, allocator, &visited_sides);
+}
+
+/// Implementation of `findABCOptimalSegment` that reuses `visited_sides` as caller-owned scratch
+/// space. Each entry marks whether the side starting at the same convex hull index has already been
+/// visited while walking around the hull. The contents are reset on every call, but retained
+/// capacity is preserved to avoid repeated allocation in the compression hot path.
+fn findABCOptimalSegmentWithVisited(
+    convex_hull: *ConvexHull,
+    allocator: Allocator,
+    visited_sides: *ArrayList(u8),
+) Error!LinearFunction {
     const len = convex_hull.len();
 
     // Initialize first side l1 = (p0, p1).
@@ -269,8 +293,8 @@ pub fn findABCOptimalSegment(convex_hull: *ConvexHull, allocator: Allocator) Err
     var point_c_index: usize = 0;
 
     var finished = false;
-    var visited = std.AutoHashMap(usize, void).init(allocator);
-    defer visited.deinit();
+    try visited_sides.resize(allocator, len);
+    @memset(visited_sides.items, 0);
 
     while (!finished) {
         if (point_a_index + 1 >= len) break; // No more sides.
@@ -294,10 +318,10 @@ pub fn findABCOptimalSegment(convex_hull: *ConvexHull, allocator: Allocator) Err
 
         const point_c = convex_hull.at(point_c_index);
 
-        if (visited.contains(point_a_index)) {
+        if (visited_sides.items[point_a_index] != 0) {
             break;
         }
-        try visited.put(point_a_index, {}); // Mark as visited.
+        visited_sides.items[point_a_index] = 1; // Mark as visited.
 
         // Determine relative x-position of pivot to l_i.
         if (point_c.index > point_b.index) {
@@ -336,10 +360,54 @@ pub fn findABCOptimalSegment(convex_hull: *ConvexHull, allocator: Allocator) Err
     return LinearFunction{ .slope = slope, .intercept = intercept };
 }
 
+/// Returns true once any convex hull point is farther than `error_bound` from `linear_function`.
+/// This is equivalent to comparing `computeMaxError(linear_function) > error_bound`, but it avoids
+/// scanning the remaining hull points after the segment is already known to be invalid. The lower
+/// hull contains the shared first and last points, so the upper-hull scan skips both duplicates.
+fn exceedsMaxErrorBound(
+    convex_hull: *ConvexHull,
+    linear_function: LinearFunction,
+    error_bound: f64,
+) Error!bool {
+    const convex_hull_len = convex_hull.len();
+
+    if (convex_hull_len == 0) {
+        return Error.EmptyConvexHull;
+    }
+
+    const bound: f80 = @floatCast(error_bound);
+    const slope: f80 = @floatCast(linear_function.slope);
+    const intercept: f80 = @floatCast(linear_function.intercept);
+
+    for (convex_hull.lower_hull.items) |point| {
+        const predicted_value = slope * @as(f80, @floatFromInt(point.index)) + intercept;
+        if (@abs(predicted_value - point.value) > bound) {
+            return true;
+        }
+    }
+
+    if (convex_hull.upper_hull.items.len > 2) {
+        for (convex_hull.upper_hull.items[1 .. convex_hull.upper_hull.items.len - 1]) |point| {
+            const predicted_value = slope * @as(f80, @floatFromInt(point.index)) + intercept;
+            if (@abs(predicted_value - point.value) > bound) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 /// Find and return the pivot point C in the `convex_hull` based on the `point_a_index`.
 fn findPivotC(convex_hull: *ConvexHull, point_a_index: usize) ?usize {
     const point_a = convex_hull.at(point_a_index);
     const point_b = convex_hull.at(point_a_index + 1);
+
+    // The side AB is fixed for this pivot search, so compute its slope once and reuse it for every
+    // candidate C point instead of rebuilding the same line inside the loop.
+    const delta_time = @as(f64, @floatFromInt(point_b.index - point_a.index));
+    const slope = (point_b.value - point_a.value) / delta_time;
+    const time_point_a = @as(f64, @floatFromInt(point_a.index));
     var max_dev: f64 = -1.0;
     var pivot_idx: ?usize = null;
 
@@ -349,7 +417,9 @@ fn findPivotC(convex_hull: *ConvexHull, point_a_index: usize) ?usize {
         const point_c = convex_hull.at(point_c_index);
         // Explicitly exclude point_a and B from being C.
         if (point_c_index != point_a_index and point_c_index != point_a_index + 1) {
-            const dev = computeDeviation(point_a, point_b, point_c);
+            const time_point_c = @as(f64, @floatFromInt(point_c.index));
+            const pred = slope * (time_point_c - time_point_a) + point_a.value;
+            const dev = @abs(pred - point_c.value);
             if (dev > max_dev) {
                 max_dev = dev;
                 pivot_idx = point_c_index;
