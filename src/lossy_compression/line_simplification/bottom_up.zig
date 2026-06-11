@@ -172,7 +172,7 @@ pub fn compress(
     }
     mem.sort(SegmentMergeCost, remaining_segments.items, {}, SegmentMergeCost.firstThan);
 
-    // Output compressed series: (seg_start, index, end_value) pairs.
+    // Output compressed series: (start_value, end_value, end_index) triples.
     for (remaining_segments.items) |segment| {
         const seg_start = segment.seg_start;
         const seg_end = segment.seg_end;

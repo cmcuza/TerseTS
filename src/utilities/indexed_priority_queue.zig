@@ -145,15 +145,15 @@ pub fn IndexedPriorityQueue(
             if (index >= self.capacity()) return Error.ItemNotFound;
             if (self.is_active[index]) return Error.ItemNotFound;
 
+            try self.pushHeap(.{
+                .index = index,
+                .priority = priority,
+                .version = self.versions[index] + 1,
+            });
             self.is_active[index] = true;
             self.priorities[index] = priority;
             self.versions[index] += 1;
             self.len += 1;
-            try self.pushHeap(.{
-                .index = index,
-                .priority = priority,
-                .version = self.versions[index],
-            });
         }
 
         /// Updates `index` with `priority`.
@@ -162,13 +162,13 @@ pub fn IndexedPriorityQueue(
         pub fn update(self: *Self, index: usize, priority: T) Error!void {
             if (!self.contains(index)) return Error.ItemNotFound;
 
-            self.priorities[index] = priority;
-            self.versions[index] += 1;
             try self.pushHeap(.{
                 .index = index,
                 .priority = priority,
-                .version = self.versions[index],
+                .version = self.versions[index] + 1,
             });
+            self.priorities[index] = priority;
+            self.versions[index] += 1;
         }
 
         /// Removes `index` from the queue.

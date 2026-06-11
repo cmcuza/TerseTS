@@ -263,15 +263,15 @@ fn calculateAreaFromValues(values: []const f64, left_index: usize, center_index:
     return @abs((x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2)) / 2.0);
 }
 
-/// Compare two areas for the priority queue. The function returns `math.Order.Less` if `area_1` is less than `area_2`,
-/// `math.Order.Equal` if they are equal and `math.Order.Greater` if `area_1` is greater than `area_2`.
+/// Compare two areas for the priority queue. The function returns `.lt` if `area_1` is less
+/// than `area_2`, `.eq` if they are equal and `.gt` if `area_1` is greater than `area_2`.
 fn compareArea(area_1: f64, area_2: f64) math.Order {
     return math.order(area_1, area_2);
 }
 
-/// Update the area of the `neighbor` point in the `heap`. The `left_index`, `center_index` and
-/// `right_index` are the indices of the points in the `uncompressed_values` array. The
-/// `uncompressed_values` are needed to calculate the area of the triangles formed by the three points.
+/// Update the area of `neighbor_index` in the `heap` based on its current neighbors.
+/// `left_points` and `right_points` provide the current linked-list style adjacency between points.
+/// `uncompressed_values` are used to compute the triangle area for the updated neighborhood.
 fn updateNeighborArea(
     heap: *IndexedPriorityQueue(f64, compareArea),
     neighbor_index: usize,
