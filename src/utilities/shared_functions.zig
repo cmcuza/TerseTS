@@ -334,6 +334,18 @@ pub fn ensureEnoughBytesAreAvailable(total_bytes_available: []const u8, offset: 
         return Error.CorruptedCompressedData;
 }
 
+/// Return the absolute area of the triangle defined by three points.
+pub fn calculateTriangleArea(left_point: shared_structs.DiscretePoint, central_point: shared_structs.DiscretePoint, right_point: shared_structs.DiscretePoint) f64 {
+    const x1: f64 = @floatFromInt(left_point.index);
+    const y1: f64 = left_point.value;
+    const x2: f64 = @floatFromInt(central_point.index);
+    const y2: f64 = central_point.value;
+    const x3: f64 = @floatFromInt(right_point.index);
+    const y3: f64 = right_point.value;
+
+    return @abs((x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2)) / 2.0);
+}
+
 test "zigzag can encode and decode small signed integers correctly" {
     const default_random = tester.getDefaultRandomGenerator();
     const number_of_tests = tester.generateNumberOfValues(default_random);

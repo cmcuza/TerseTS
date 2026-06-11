@@ -40,6 +40,8 @@ const DiscretePoint = shared_structs.DiscretePoint;
 const LinearFunction = shared_structs.LinearFunction;
 const Segment = shared_structs.Segment;
 
+const calculateArea = shared_functions.calculateTriangleArea;
+
 const tester = @import("../../tester.zig");
 
 const extractors = @import("../../utilities/extractors.zig");
@@ -307,18 +309,6 @@ fn comparePointArea(_: void, point_1: PointArea, point_2: PointArea) math.Order 
     if (point_1.area == point_2.area)
         return math.Order.eq;
     return math.order(point_1.area, point_2.area);
-}
-
-/// Return the absolute area of the triangle defined by three points.
-fn calculateArea(left_point: DiscretePoint, central_point: DiscretePoint, right_point: DiscretePoint) f64 {
-    const x1: f64 = @floatFromInt(left_point.index);
-    const y1: f64 = left_point.value;
-    const x2: f64 = @floatFromInt(central_point.index);
-    const y2: f64 = central_point.value;
-    const x3: f64 = @floatFromInt(right_point.index);
-    const y3: f64 = right_point.value;
-
-    return @abs((x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2)) / 2.0);
 }
 
 /// Update the area of the `neighbor` point in the `heap`. The `left_index`, `center_index` and
