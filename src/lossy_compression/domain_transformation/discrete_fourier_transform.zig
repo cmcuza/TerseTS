@@ -35,15 +35,9 @@ const tester = @import("../../tester.zig");
 
 const Error = tersets.Error;
 
-/// Opaque type for PocketFFT plan.
-pub const rfft_plan = ?*opaque {};
-
-/// FFI declarations for PocketFFT C functions.
-extern "c" fn make_rfft_plan(length: usize) rfft_plan;
-extern "c" fn destroy_rfft_plan(plan: rfft_plan) void;
-extern "c" fn rfft_forward(plan: rfft_plan, values: [*]f64, scale: f64) c_int;
-extern "c" fn rfft_backward(plan: rfft_plan, values: [*]f64, scale: f64) c_int;
-extern "c" fn rfft_length(plan: rfft_plan) usize;
+const pocketfft = @cImport({
+    @cInclude("pocketfft.h");
+});
 
 /// Compresses the `uncompressed_values` using Discrete Fourier Transform (DFT) retaining
 /// `number_of_coefficients` largest magnitude coefficients as specified in the
@@ -81,12 +75,12 @@ pub fn compress(
     @memcpy(pocketfft_buffer, uncompressed_values);
 
     // Create FFT plan.
-    const plan = make_rfft_plan(uncompressed_values.len);
+    const plan = pocketfft.make_rfft_plan(uncompressed_values.len);
     if (plan == null) return Error.UnsupportedInput;
-    defer destroy_rfft_plan(plan);
+    defer pocketfft.destroy_rfft_plan(plan);
 
     // Perform forward FFT.
-    if (rfft_forward(plan, pocketfft_buffer.ptr, 1.0) != 0)
+    if (pocketfft.rfft_forward(plan, pocketfft_buffer.ptr, 1.0) != 0)
         return Error.UnsupportedInput;
 
     // DC coefficient at the first index always stored separately.
@@ -244,13 +238,13 @@ pub fn decompress(
     }
 
     // Create FFT plan.
-    const plan = make_rfft_plan(size);
+    const plan = pocketfft.make_rfft_plan(size);
     if (plan == null) return Error.UnsupportedInput;
-    defer destroy_rfft_plan(plan);
+    defer pocketfft.destroy_rfft_plan(plan);
 
     // Perform inverse FFT.
     const scale: f64 = 1.0 / @as(f64, @floatFromInt(size));
-    if (rfft_backward(plan, pocketfft_buffer.ptr, scale) != 0)
+    if (pocketfft.rfft_backward(plan, pocketfft_buffer.ptr, scale) != 0)
         return Error.UnsupportedInput;
 
     // Append decompressed values.
