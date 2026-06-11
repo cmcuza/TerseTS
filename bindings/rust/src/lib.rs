@@ -44,6 +44,7 @@ pub enum Method {
     RunLengthEncoding,
     NonLinearApproximation,
     SerfQT,
+    BitPackedBUFF,
     Chimp64,
     Chimp128,
     BitPackedDeltaEncoding,
