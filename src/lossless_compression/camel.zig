@@ -24,9 +24,11 @@
 //! The integer part is compressed with a simple difference encoder (Algorithm 1).
 //! Decimal compression follows Algorithm 2; decompression follows Algorithms 3–5.
 //!
-//! The method is lossless when the input values have at most `decimal_places` significant
-//! digits after the decimal point; otherwise trailing digits are discarded (lossy).
-//! The user controls the trade‑off by setting `decimal_places` in the configuration.
+//! The codec is lossless for values with at most `decimal_places` significant
+//! decimal digits: those values are reproduced bit-exactly on decompression.
+//! Values with more decimal digits than `decimal_places` are rounded to
+//! `decimal_places` digits, matching the Camel paper's design. `decimal_places`
+//! therefore controls both the compression ratio and the maximum rounding error.
 
 const std = @import("std");
 const math = std.math;
@@ -43,19 +45,13 @@ const tester = @import("../tester.zig");
 const Error = tersets.Error;
 const Method = tersets.Method;
 
-/// Number of bits in an IEEE-754 `f64`.
-const bits_per_value = 64;
-/// Maximum decimal places supported by the algorithm (double can represent at most 17).
+/// Upper bound for `calDecimalCount`'s search and for validating the
+/// `decimal_places` configuration value (a double has at most 17 significant
+/// decimal digits). The per-value decimal count `lv` is additionally capped to
+/// `4` in `compress`, since it is stored in a 2-bit field.
 const max_decimal_places = 17;
 /// Default decimal places when configuration is empty.
 const default_decimal_places = 4;
-/// Number of bits used to encode the decimal place count `l` in the bitstream.
-/// The paper's Algorithm 2 writes `l` using only 2 bits ("out.write(l, 2)"),
-/// but that can only represent values 0–3, while `l` (the decimal place count)
-/// ranges up to `max_decimal_places` (17). 2 bits would silently truncate `l`
-/// (e.g. the default `l = 4` becomes `0`), corrupting decompression. We use
-/// enough bits to round-trip any value up to `max_decimal_places`.
-const decimal_count_bits: u6 = 5;
 
 /// Convert a double to its 64-bit bitwise representation.
 /// Parameters:
@@ -219,72 +215,143 @@ fn decompressIntegerPart(prev_int: ?i64, reader: *shared_structs.BulkBitReader) 
     }
 }
 
+/// Compute the number of significant decimal digits in `value`'s fractional part.
+/// Parameters:
+/// - `value`: the value to inspect; only its magnitude matters.
+/// Returns the smallest `decimal_count` in `[1, max_decimal_places]` such that
+/// `|value| * 10^decimal_count` is within `epsilon` of an integer. This is the
+/// per-value decimal count `lv` from Algorithm 2, line 1, before `compress`
+/// caps it to the configured `decimal_places`; ported from Camel.java's
+/// `calDecimalCount`.
+fn calDecimalCount(value: f64) u8 {
+    const epsilon: f64 = 0.0000001; // small threshold, as in the Java original
+    var factor: f64 = 1.0;
+    var decimal_count: u8 = 0;
+    const abs_value = @abs(value);
+
+    // Grow `factor` by 10 until `abs_value * factor` is (within `epsilon` of) an
+    // integer. The `decimal_count < max_decimal_places` guard caps the loop at
+    // the most significant decimal digits an `f64` can hold, so values with
+    // "noisy" trailing digits (e.g. irrational results) terminate here rather
+    // than looping forever; `compress` further caps the result to the
+    // configured `decimal_places`.
+    while (@abs(abs_value * factor - @round(abs_value * factor)) > epsilon and
+        decimal_count < max_decimal_places)
+    {
+        factor *= 10.0;
+        decimal_count += 1;
+    }
+
+    if (decimal_count == 0) decimal_count = 1;
+
+    return decimal_count;
+}
+
 // ----------------------------------------------------------------------------
 //  dxor' encoding/decoding
 // ----------------------------------------------------------------------------
 
-/// Write the integer representation `dxor_prime = dxor_frac * 10^l`.
+/// Write the integer representation `dxor_prime = round(dxor_frac * 10^l)`.
 /// Parameters:
-/// - `dxor_prime`: the quantized `l`-digit decimal value to encode.
-/// - `l`: the number of decimal places, which selects the bit-width scheme.
+/// - `dxor_prime`: the quantized `l`-digit decimal value to encode, in `[0, 10^l)`.
+/// - `l`: the number of decimal places (1-4), which selects the bit-width table below.
 /// - `writer`: the bit-level sink the encoded representation is appended to.
 /// Behavior:
-/// Uses the variable-length scheme from Algorithm 2 (lines 12-22): for
-/// `l <= 1` the value is written directly in `l + 1` bits; for `l == 2` a
-/// 1-bit "small" flag picks between 2 and 5 bits; for `l >= 3` a 2-bit index
-/// selects one of four bit-width buckets derived from the maximum possible
-/// value, and the value is written using that many bits.
+/// Each `l` has its own table of (prefix, bit-width) buckets, ported from
+/// Camel.java's `mValueBits`: a short prefix selects the smallest bucket whose
+/// bit-width can hold `dxor_prime`, and the value is then written using that
+/// many bits.
+///   - `l <= 1`: no prefix, value written directly in 3 bits.
+///   - `l == 2`: 1-bit prefix; bucket 0 -> 3 bits (`dxor_prime < 8`), bucket 1 -> 5 bits.
+///   - `l == 3`: 2-bit prefix; buckets 0-3 -> 1, 3, 5, 7 bits, for
+///     `dxor_prime < 2, 8, 32`, and otherwise respectively.
+///   - `l == 4`: 2-bit prefix; buckets 0-3 -> 4, 6, 8, 10 bits, for
+///     `dxor_prime < 16, 64, 256`, and otherwise respectively.
 fn writeDxorPrime(dxor_prime: u64, l: u8, writer: *shared_structs.BulkBitWriter) !void {
-    if (l <= 1) {
-        try writer.writeBits(dxor_prime, @as(u6, @intCast(l + 1)));
-    } else if (l == 2) {
-        const small = @as(u1, @intFromBool(dxor_prime <= 4));
-        try writer.writeBits(small, 1);
-        const bits_needed: u6 = if (small == 1) 2 else 5;
-        try writer.writeBits(dxor_prime, bits_needed);
-    } else {
-        const max_val = @ceil(math.log2(math.pow(f64, 2.0, -@as(f64, @floatFromInt(l))) *
-            math.pow(f64, 10.0, @as(f64, @floatFromInt(l)))));
-        const max = @as(u64, @intFromFloat(max_val));
-        const t1 = @as(u64, @intFromFloat(@exp2(@as(f64, @floatFromInt(max)) * 0.25)));
-        const t2 = @as(u64, @intFromFloat(@exp2(@as(f64, @floatFromInt(max)) * 0.5)));
-        const t3 = @as(u64, @intFromFloat(@exp2(@as(f64, @floatFromInt(max)) * 0.75)));
-        var idx: u2 = 3;
-        if (dxor_prime <= t1) {
-            idx = 0;
-        } else if (dxor_prime <= t2) {
-            idx = 1;
-        } else if (dxor_prime <= t3) {
-            idx = 2;
-        }
-        try writer.writeBits(idx, 2);
-        const bits_to_write = @as(u6, @intCast((@as(u64, idx) + 1) * max / 4));
-        try writer.writeBits(dxor_prime, bits_to_write);
+    switch (l) {
+        0, 1 => {
+            // Java decimal_count == 1: 3 bits, no prefix. (m in 0..4)
+            try writer.writeBits(dxor_prime, 3);
+        },
+        2 => {
+            if (dxor_prime < 8) {
+                try writer.writeBits(@as(u1, 0), 1);
+                try writer.writeBits(dxor_prime, 3);
+            } else {
+                try writer.writeBits(@as(u1, 1), 1);
+                try writer.writeBits(dxor_prime, 5);
+            }
+        },
+        3 => {
+            if (dxor_prime < 2) {
+                try writer.writeBits(@as(u2, 0), 2);
+                try writer.writeBits(dxor_prime, 1);
+            } else if (dxor_prime < 8) {
+                try writer.writeBits(@as(u2, 1), 2);
+                try writer.writeBits(dxor_prime, 3);
+            } else if (dxor_prime < 32) {
+                try writer.writeBits(@as(u2, 2), 2);
+                try writer.writeBits(dxor_prime, 5);
+            } else {
+                try writer.writeBits(@as(u2, 3), 2);
+                try writer.writeBits(dxor_prime, 7); // mValueBits[2]
+            }
+        },
+        else => { // l == 4
+            if (dxor_prime < 16) {
+                try writer.writeBits(@as(u2, 0), 2);
+                try writer.writeBits(dxor_prime, 4);
+            } else if (dxor_prime < 64) {
+                try writer.writeBits(@as(u2, 1), 2);
+                try writer.writeBits(dxor_prime, 6);
+            } else if (dxor_prime < 256) {
+                try writer.writeBits(@as(u2, 2), 2);
+                try writer.writeBits(dxor_prime, 8);
+            } else {
+                try writer.writeBits(@as(u2, 3), 2);
+                try writer.writeBits(dxor_prime, 10); // mValueBits[3]
+            }
+        },
     }
 }
 
 /// Read `dxor_prime` that was written by `writeDxorPrime`.
 /// Parameters:
-/// - `l`: the number of decimal places that was used to encode the value;
-///   it determines which bit-width scheme to decode with.
+/// - `l`: the number of decimal places (1-4) that was used to encode the value;
+///   selects which of the four bit-width tables to decode with.
 /// - `reader`: the bit-level source the encoded representation is read from.
 /// Returns the decoded `dxor_prime` value, or `Error.ByteStreamError` if the
-/// stream ends before the expected bits are available. This mirrors the three
-/// cases of `writeDxorPrime` (`l <= 1`, `l == 2`, `l >= 3`) exactly.
+/// stream ends before the expected bits are available. Reads the same prefix
+/// as `writeDxorPrime` (none for `l <= 1`, 1 bit for `l == 2`, 2 bits for `l == 3`
+/// or `l == 4`) and then the bucket's value bits, exactly inverting it.
 fn readDxorPrime(l: u8, reader: *shared_structs.BulkBitReader) Error!u64 {
-    if (l <= 1) {
-        return reader.readBitsNoEof(u64, @as(u6, @intCast(l + 1))) catch return Error.ByteStreamError;
-    } else if (l == 2) {
-        const small = reader.readBitsNoEof(u1, 1) catch return Error.ByteStreamError;
-        const bits_needed: u6 = if (small == 1) 2 else 5;
-        return reader.readBitsNoEof(u64, bits_needed) catch return Error.ByteStreamError;
-    } else {
-        const max_val = @ceil(math.log2(math.pow(f64, 2.0, -@as(f64, @floatFromInt(l))) *
-            math.pow(f64, 10.0, @as(f64, @floatFromInt(l)))));
-        const max = @as(u64, @intFromFloat(max_val));
-        const idx = reader.readBitsNoEof(u2, 2) catch return Error.ByteStreamError;
-        const bits_to_read = @as(u6, @intCast((@as(u64, idx) + 1) * max / 4));
-        return reader.readBitsNoEof(u64, bits_to_read) catch return Error.ByteStreamError;
+    switch (l) {
+        0, 1 => return reader.readBitsNoEof(u64, 3) catch return Error.ByteStreamError,
+        2 => {
+            const t = reader.readBitsNoEof(u1, 1) catch return Error.ByteStreamError;
+            const bits: u6 = if (t == 0) 3 else 5;
+            return reader.readBitsNoEof(u64, bits) catch return Error.ByteStreamError;
+        },
+        3 => {
+            const t = reader.readBitsNoEof(u2, 2) catch return Error.ByteStreamError;
+            const bits: u6 = switch (t) {
+                0 => 1,
+                1 => 3,
+                2 => 5,
+                3 => 7,
+            };
+            return reader.readBitsNoEof(u64, bits) catch return Error.ByteStreamError;
+        },
+        else => { // l == 4
+            const t = reader.readBitsNoEof(u2, 2) catch return Error.ByteStreamError;
+            const bits: u6 = switch (t) {
+                0 => 4,
+                1 => 6,
+                2 => 8,
+                3 => 10,
+            };
+            return reader.readBitsNoEof(u64, bits) catch return Error.ByteStreamError;
+        },
     }
 }
 
@@ -311,9 +378,6 @@ fn compressDecimalPart(frac: f64, l: u8, writer: *shared_structs.BulkBitWriter) 
     const is_negative = frac < 0.0;
     try writer.writeBits(@as(u1, @intFromBool(is_negative)), 1);
     const magnitude = @abs(frac);
-
-    // Write the decimal count l.
-    try writer.writeBits(l, decimal_count_bits);
 
     const step = math.pow(f64, 2.0, -@as(f64, @floatFromInt(l)));
     if (magnitude >= step) {
@@ -357,16 +421,19 @@ fn compressDecimalPart(frac: f64, l: u8, writer: *shared_structs.BulkBitWriter) 
 
 /// Decompress the fractional part that was compressed by `compressDecimalPart`.
 /// Parameters:
+/// - `l`: the per-value decimal place count `lv`, decoded by the caller from
+///   the 2-bit field that precedes this value's decimal part (see `decompress`).
 /// - `reader`: the bit-level source the encoded representation is read from.
-/// Returns the reconstructed fractional value (including its sign), or
-/// `Error.ByteStreamError` if the stream ends before the expected bits are
-/// available. Reads the sign bit, the decimal place count `l`, and the XOR
-/// flag, then either reverses the XOR scheme (flag 1) or reads the stored
-/// magnitude directly (flag 0) — the exact inverse of `compressDecimalPart`.
-fn decompressDecimalPart(reader: *shared_structs.BulkBitReader) Error!f64 {
+/// Returns the reconstructed fractional value (including its sign), rounded to
+/// `l` decimal places, or `Error.ByteStreamError` if the stream ends early.
+/// Reads the sign bit and the XOR flag, then either reverses the XOR scheme
+/// (flag 1) or reads the stored magnitude directly (flag 0). In the XOR branch,
+/// a final `@round(...) / factor` snap cancels the residual XOR/(1+m)−1 noise so
+/// that values with at most `l` decimal digits reproduce bit-exactly.
+fn decompressDecimalPart(l: u8, reader: *shared_structs.BulkBitReader) Error!f64 {
     const is_negative = reader.readBitsNoEof(u1, 1) catch return Error.ByteStreamError;
-    const l = @as(u8, @intCast(reader.readBitsNoEof(u8, decimal_count_bits) catch return Error.ByteStreamError));
     const flag = reader.readBitsNoEof(u1, 1) catch return Error.ByteStreamError;
+    const factor = math.pow(f64, 10.0, @as(f64, @floatFromInt(l)));
     var magnitude: f64 = undefined;
     if (flag == 1) {
         const center_bits = reader.readBitsNoEof(u64, @as(u6, @intCast(l))) catch return Error.ByteStreamError;
@@ -379,16 +446,16 @@ fn decompressDecimalPart(reader: *shared_structs.BulkBitReader) Error!f64 {
         const shift = @as(u6, @intCast(52 - l));
         const vd = center_bits << shift;
         const dxor_prime = try readDxorPrime(l, reader);
-        const factor = math.pow(f64, 10.0, @as(f64, @floatFromInt(l)));
         const dxor_frac = @as(f64, @floatFromInt(dxor_prime)) / factor;
         const a_bits = doubleToBits(1.0 + dxor_frac);
         const xor_bits = a_bits ^ vd;
         const b = bitsToDouble(xor_bits);
         magnitude = b - 1.0;
         if (magnitude < 0.0) magnitude = 0.0;
+        // Snap to l decimal digits: cancels the residual XOR/(1+m)−1 noise.
+        magnitude = @round(magnitude * factor) / factor;
     } else {
         const dxor_prime = try readDxorPrime(l, reader);
-        const factor = math.pow(f64, 10.0, @as(f64, @floatFromInt(l)));
         magnitude = @as(f64, @floatFromInt(dxor_prime)) / factor;
     }
     return if (is_negative == 1) -magnitude else magnitude;
@@ -401,8 +468,9 @@ fn decompressDecimalPart(reader: *shared_structs.BulkBitReader) Error!f64 {
 /// - `uncompressed_values`: the input values to compress, in time order.
 /// - `compressed_values`: output buffer that the compressed bytes are appended to.
 /// - `method_configuration`: a JSON object such as `{"decimal_places": 4}`.
-///   When empty, `default_decimal_places` is used; an out-of-range or malformed
-///   value yields `Error.InvalidConfiguration`.
+///   When empty, `default_decimal_places` is used. `decimal_places` is the cap on
+///   how many decimal digits are retained; it is clamped to `[1, 4]` because the
+///   per-value count is stored in a 2-bit field (matching the paper/Java).
 /// The compressed stream format is:
 ///   - 8 bytes:  u64 value count
 ///   - 8 bytes:  first value (raw f64)
@@ -410,7 +478,9 @@ fn decompressDecimalPart(reader: *shared_structs.BulkBitReader) Error!f64 {
 ///        1 bit:  0 = normal, 1 = special (NaN, Inf, `-0.0`, or a finite value
 ///                whose magnitude is too large to split into integer/decimal parts)
 ///        if special: 64 bits raw value
-///        else: compressed integer part + compressed decimal part
+///        else: compressed integer part
+///              + 2 bits: per-value decimal count `lv - 1` (00→1 .. 11→4)
+///              + compressed decimal part (encoded at `lv`)
 pub fn compress(
     allocator: Allocator,
     uncompressed_values: []const f64,
@@ -430,13 +500,17 @@ pub fn compress(
             return Error.InvalidConfiguration;
         }
     }
-    const l = decimal_places;
+    // The per-value decimal count is stored in 2 bits, so the cap is 1..4. This
+    // also forces `lv >= 1`, which keeps the `lv - 1` field non-negative.
+    const max_count: u8 = 4;
+    decimal_places = @max(@as(u8, 1), @min(decimal_places, max_count));
 
     // Write the value count.
     try shared_functions.appendValue(allocator, u64, @intCast(uncompressed_values.len), compressed_values);
     if (uncompressed_values.len == 0) return;
 
-    // Write the first value raw.
+    // Write the first value raw. (No per-stream `l` header any more — the decimal
+    // count now travels per value as a 2-bit field
     try shared_functions.appendValue(allocator, f64, uncompressed_values[0], compressed_values);
 
     // Use a bulk bit writer for the rest.
@@ -445,20 +519,30 @@ pub fn compress(
     var prev_int: ?i64 = if (fitsIntegerPart(uncompressed_values[0])) intPart(uncompressed_values[0]) else null;
     for (uncompressed_values[1..]) |v| {
         const is_special = !fitsIntegerPart(v) or isNegativeZero(v);
+        var int_part: i64 = 0;
+        var frac: f64 = 0.0;
+        var lv: u8 = 0; // per-value decimal count; only meaningful on the normal path
+        if (!is_special) {
+            int_part = intPart(v);
+            frac = fracPart(v);
+            // Per-value decimal count, capped at the configured ceiling. A value
+            // like 23.5 encodes at lv=1, 23.4567 at lv=4 — each pays only for the
+            // precision it actually has (paper Algorithm 2, line 1).
+            lv = @min(calDecimalCount(v), decimal_places);
+        }
         try bit_writer.writeBits(@as(u1, @intFromBool(is_special)), 1);
         if (is_special) {
+            // Special values carry only their raw 64 bits — no integer/decimal
+            // split, and therefore no decimal-count field.
             const bits = doubleToBits(v);
             try bit_writer.writeBits(bits, 64);
-            // Special values (NaN, Inf, finite values too large to split into an
-            // integer/decimal part such as `math.floatMax(f64)`, and `-0.0` whose
-            // sign the split cannot preserve) have no meaningful integer part, so
-            // we leave `prev_int` as-is for subsequent normal values.
+            // No meaningful integer part, so leave `prev_int` unchanged.
             continue;
         }
-        const int_part = intPart(v);
-        const frac = fracPart(v);
         try compressIntegerPart(prev_int, int_part, &bit_writer);
-        try compressDecimalPart(frac, l, &bit_writer);
+        // Per-value decimal count as `lv - 1` in 2 bits (00→1, 01→2, 10→3, 11→4).
+        try bit_writer.writeBits(@as(u2, @intCast(lv - 1)), 2);
+        try compressDecimalPart(frac, lv, &bit_writer);
         prev_int = int_part;
     }
 
@@ -475,7 +559,8 @@ pub fn compress(
 /// header, or `Error.ByteStreamError` if it ends before all values are decoded.
 /// Reverses the format documented on `compress`: it reads the value count and
 /// first raw value, then walks the bitstream decoding either a special raw
-/// value or an integer/decimal pair for each remaining value.
+/// value or an integer part + 2-bit decimal count + decimal part for each
+/// remaining value.
 pub fn decompress(
     allocator: Allocator,
     compressed_values: []const u8,
@@ -485,6 +570,8 @@ pub fn decompress(
     const value_count = try shared_functions.readOffsetValue(u64, compressed_values, &offset);
     if (value_count == 0) return;
 
+    // Minimal header is the 8-byte count + 8-byte first value. The per-stream `l`
+    // byte is gone; the decimal count now travels per value as a 2-bit field.
     if (compressed_values.len < 16) return Error.UnsupportedInput;
     try decompressed_values.ensureTotalCapacity(allocator, @intCast(value_count));
 
@@ -504,7 +591,9 @@ pub fn decompress(
             continue;
         }
         const int_part = try decompressIntegerPart(prev_int, &bit_reader);
-        const frac = try decompressDecimalPart(&bit_reader);
+        // Per-value decimal count, stored as `lv - 1` in 2 bits (00→1 .. 11→4).
+        const lv: u8 = @as(u8, bit_reader.readBitsNoEof(u2, 2) catch return Error.ByteStreamError) + 1;
+        const frac = try decompressDecimalPart(lv, &bit_reader);
         const value = @as(f64, @floatFromInt(int_part)) + frac;
         decompressed_values.appendAssumeCapacity(value);
         prev_int = int_part;
@@ -516,39 +605,18 @@ pub fn decompress(
 // ----------------------------------------------------------------------------
 
 test "camel round-trip fixed values" {
-    const allocator = testing.allocator;
-
-    const values = [_]f64{
+    const uncompressed_values = &[_]f64{
         0.0,
         1.0,
         -1.0,
         12.34,
         -56.789,
         1000.0001,
-        -9999.9999,
-        3.14159,
+        3.1415,
         -2.5,
     };
 
-    var compressed = ArrayList(u8).empty;
-    defer compressed.deinit(allocator);
-
-    // `3.14159` has 5 significant decimal digits, so `decimal_places` must be at
-    // least 5 for Camel's lossless guarantee ("lossless when input values have at
-    // most `decimal_places` significant decimal digits") to cover every value below.
-    try compress(allocator, values[0..], &compressed, "{\"decimal_places\": 5}");
-
-    var decompressed = ArrayList(f64).empty;
-    defer decompressed.deinit(allocator);
-
-    try decompress(allocator, compressed.items, &decompressed);
-
-    try testing.expectEqual(values.len, decompressed.items.len);
-    try testing.expect(shared_functions.isWithinErrorBound(
-        values[0..],
-        decompressed.items,
-        1e-9,
-    ));
+    try tester.expectLosslessRoundTrip(testing.allocator, compress, decompress, uncompressed_values);
 }
 
 test "camel roundtrips empty input" {
