@@ -71,8 +71,15 @@ jobs:
       working-directory: bindings/julia
 
     # Python
+    - name: Python Upgrade pip
+      run: python -m pip install --upgrade pip
+    - name: Python Install Binding
+      run: python -m pip install . -v
+      working-directory: bindings/python
+    - name: Python Verify Installed Binding Import
+      run: python -c "import pathlib, tersets; p=str(pathlib.Path(tersets.__file__)).lower(); print(p); assert 'site-packages' in p or 'dist-packages' in p"
     - name: Python Run Unittest
-      run: python3 -m unittest --verbose
+      run: python -m unittest --verbose
       working-directory: bindings/python
 
     # The presence of .dylib files breaks static linking on macOS.

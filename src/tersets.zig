@@ -53,6 +53,9 @@ const vw = @import("lossy_compression/line_simplification/visvalingam_whyatt.zig
 const sliding_window = @import("lossy_compression/line_simplification/sliding_window.zig");
 const bottom_up = @import("lossy_compression/line_simplification/bottom_up.zig");
 
+// Import domain transform methods.
+const dft = @import("lossy_compression/domain_transformation/discrete_fourier_transform.zig");
+
 // Import lossless compression methods.
 const rle_encoding = @import("lossless_compression/run_length_encoding.zig");
 const delta_encoding = @import("lossless_compression/bitpacked_delta_encoding.zig");
@@ -101,6 +104,7 @@ pub const Method = enum {
     Chimp64,
     Chimp128,
     BitPackedDeltaEncoding,
+    DiscreteFourierTransform,
 };
 
 /// Compress `uncompressed_values` using `method` and its `configuration` and returns the results
@@ -264,6 +268,14 @@ pub fn compress(
                 configuration,
             );
         },
+        .DiscreteFourierTransform => {
+            try dft.compress(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                configuration,
+            );
+        },
         .BitPackedDeltaEncoding => {
             try delta_encoding.compress(
                 allocator,
@@ -371,6 +383,9 @@ pub fn decompress(
         },
         .SerfQT => {
             try serfqt.decompress(allocator, compressed_values_slice, &decompressed_values);
+        },
+        .DiscreteFourierTransform => {
+            try dft.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .BitPackedDeltaEncoding => {
             try delta_encoding.decompress(allocator, compressed_values_slice, &decompressed_values);
@@ -500,6 +515,14 @@ pub fn extract(
         },
         .NonLinearApproximation => {
             try non_linear_approximation.extract(
+                allocator,
+                compressed_values_slice,
+                indices,
+                coefficients,
+            );
+        },
+        .DiscreteFourierTransform => {
+            try dft.extract(
                 allocator,
                 compressed_values_slice,
                 indices,
@@ -639,6 +662,14 @@ pub fn rebuild(
         },
         .NonLinearApproximation => {
             try non_linear_approximation.rebuild(
+                allocator,
+                indices,
+                coefficients,
+                &compressed_values,
+            );
+        },
+        .DiscreteFourierTransform => {
+            try dft.rebuild(
                 allocator,
                 indices,
                 coefficients,

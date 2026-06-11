@@ -100,7 +100,10 @@ pub fn compressMidrange(
         index += 1;
     }
 
-    const compressed_value: f64 = @floatCast((maximum + minimum) / 2);
+    const compressed_value: f64 = if (error_bound == 0)
+        @floatCast(maximum)
+    else
+        @floatCast((maximum + minimum) / 2);
     try shared_functions.appendValueAndIndexToArrayList(
         allocator,
         compressed_value,
