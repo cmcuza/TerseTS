@@ -23,24 +23,16 @@
 const std = @import("std");
 const mem = std.mem;
 const math = std.math;
-const time = std.time;
 const ArrayList = std.ArrayList;
 const Allocator = mem.Allocator;
 
 const tersets = @import("../../tersets.zig");
 const configuration = @import("../../configuration.zig");
-const Method = tersets.Method;
 const Error = tersets.Error;
 
-const HashedPriorityQueue = @import(
-    "../../utilities/hashed_priority_queue.zig",
-).HashedPriorityQueue;
+const IndexedPriorityQueue = @import("../../utilities/indexed_priority_queue.zig").IndexedPriorityQueue;
 
-const shared_structs = @import("../../utilities/shared_structs.zig");
 const shared_functions = @import("../../utilities/shared_functions.zig");
-
-const DiscretePoint = shared_structs.DiscretePoint;
-const LinearFunction = shared_structs.LinearFunction;
 
 const tester = @import("../../tester.zig");
 const extractors = @import("../../utilities/extractors.zig");
@@ -52,7 +44,7 @@ const testing = std.testing;
 /// This algorithm iteratively merges points to minimize the sum of squared errors,
 /// ensuring that the resulting compressed sequence stays within the specified `error_bound`.
 /// The function writes the simplified sequence to the `compressed_values`. The `allocator`
-/// is used to allocate memory for the HashedPriorityQueue used in the implementation and
+/// is used to allocate memory for the IndexedPriorityQueue used in the implementation and
 /// the `method_configuration` parser. The `method_configuration` is expected to be of
 /// `AggregateError` type otherwise an `InvalidConfiguration` error is return. If any other
 /// error occurs during the execution of the method, it is returned.
@@ -78,104 +70,112 @@ pub fn compress(
         return;
     }
 
-    // Initialize a hashed priority queue to store the effective area of triangles formed by every
-    // sequence of three consecutive points. The priority is determined by the area.
-    var heap = try HashedPriorityQueue(
-        SegmentMergeCost,
-        void,
-        compareSegmentMergeCost,
-        SegmentMergeCostHashContext,
-    ).init(allocator, {});
+    const segment_count = (uncompressed_values.len + 1) / 2;
+
+    // Initialize an indexed priority queue to store the cost of merging each segment with the
+    // segment to its right. Segment IDs are dense and stable for the whole compression run.
+    var heap = try IndexedPriorityQueue(f64, compareMergeCost).init(allocator, segment_count);
     defer heap.deinit();
 
-    // Compute all pairwise merging cost of the segments.
-    try buildInitialPairwiseSegmentCost(&heap, uncompressed_values);
+    const costs = try allocator.alloc(f64, segment_count);
+    defer allocator.free(costs);
+    const left_segments = try allocator.alloc(usize, segment_count);
+    defer allocator.free(left_segments);
+    const right_segments = try allocator.alloc(usize, segment_count);
+    defer allocator.free(right_segments);
+    const segment_starts = try allocator.alloc(usize, segment_count);
+    defer allocator.free(segment_starts);
+    const segment_ends = try allocator.alloc(usize, segment_count);
+    defer allocator.free(segment_ends);
 
-    // Placeholder for the segment cost to be used in the loop to search for neighboring segments.
-    // During the merging process, we keep track of neighboring segments: the "left segment" is
-    // the segment immediately before the current one, and the "right segment" is the segment
-    // immediately after. These relationships are maintained using the `left_seg` and `right_seg`
-    // fields in the `SegmentMergeCost` struct.
-    var placeholder_segment_cost: SegmentMergeCost = .{
-        .index = undefined,
-        .cost = undefined,
-        .left_seg = undefined,
-        .right_seg = undefined,
-        .seg_start = undefined,
-        .seg_end = undefined,
-    };
+    // Compute all pairwise merging costs of the segments.
+    try buildInitialPairwiseSegmentCost(
+        &heap,
+        costs,
+        left_segments,
+        right_segments,
+        segment_starts,
+        segment_ends,
+        uncompressed_values,
+    );
 
-    while (heap.len > 2) {
+    while (heap.count() > 2) {
         // Peek into the segment with the lowest cost.
-        const min_segment: SegmentMergeCost = try heap.peek();
+        const min_segment = try heap.peek();
+        const min_segment_index = min_segment.index;
 
         // Check if the cost is within the error bound.
-        if (min_segment.cost > error_bound) {
+        if (min_segment.priority > error_bound) {
             break;
         }
 
-        // Now is safe to pop the point from the heap.
+        // Now is safe to pop the segment from the heap.
         _ = try heap.pop();
 
-        // Update the index of the placeholder segment to the right segment of the current minimum segment.
-        placeholder_segment_cost.index = min_segment.right_seg;
-
-        // Retrieve the right segment from the heap using its index.
-        var right_seg: SegmentMergeCost = try heap.get(try heap.getIndex(placeholder_segment_cost));
+        const right_segment_index = right_segments[min_segment_index];
 
         // Update the start of the right segment to include the start of the merged segment.
-        right_seg.seg_start = min_segment.seg_start;
+        segment_starts[right_segment_index] = segment_starts[min_segment_index];
 
         // If the current minimum segment is not the first segment, update the left segment.
-        if (min_segment.seg_start != 0) {
-            // Update the index of the placeholder segment to the left segment of the current minimum segment.
-            placeholder_segment_cost.index = min_segment.left_seg;
+        if (segment_starts[min_segment_index] != 0) {
+            const left_segment_index = left_segments[min_segment_index];
 
-            // Retrieve the left segment from the heap using its index.
-            var left_seg: SegmentMergeCost = try heap.get(try heap.getIndex(placeholder_segment_cost));
-
-            // Update the right segment's left neighbor to the left segment's index.
-            right_seg.left_seg = left_seg.index;
-
-            // Update the left segment's right neighbor to the right segment's index.
-            left_seg.right_seg = right_seg.index;
+            // Update the neighboring segment links to bypass the removed segment.
+            left_segments[right_segment_index] = left_segment_index;
+            right_segments[left_segment_index] = right_segment_index;
 
             // Compute the merge cost of merging the left and right segments.
-            const merge_cost = try mergeCost(uncompressed_values, left_seg, right_seg);
-
-            // Update the cost of the left segment with the computed merge cost.
-            left_seg.cost = merge_cost;
+            costs[left_segment_index] = try mergeCostFromState(
+                uncompressed_values,
+                segment_starts,
+                segment_ends,
+                left_segment_index,
+                right_segment_index,
+            );
 
             // Update the left segment in the heap.
-            try heap.update(left_seg, left_seg);
+            try heap.update(left_segment_index, costs[left_segment_index]);
         }
 
         // If the right segment is not the last segment, update its merge cost with its right neighbor.
-        if (right_seg.seg_end != uncompressed_values.len - 1) {
-            // Update the index of the placeholder segment to the right neighbor of the right segment.
-            placeholder_segment_cost.index = right_seg.right_seg;
-
-            // Retrieve the right neighbor of the right segment from the heap.
-            const right_to_right_seg = try heap.get(try heap.getIndex(placeholder_segment_cost));
-
+        if (segment_ends[right_segment_index] != uncompressed_values.len - 1) {
             // Compute the merge cost of merging the right segment with its right neighbor.
-            const merge_cost = try mergeCost(uncompressed_values, right_seg, right_to_right_seg);
-
-            // Update the cost of the right segment with the computed merge cost.
-            right_seg.cost = merge_cost;
+            costs[right_segment_index] = try mergeCostFromState(
+                uncompressed_values,
+                segment_starts,
+                segment_ends,
+                right_segment_index,
+                right_segments[right_segment_index],
+            );
         }
 
         // Update the right segment in the heap.
-        try heap.update(right_seg, right_seg);
+        try heap.update(right_segment_index, costs[right_segment_index]);
     }
 
-    // Sort remaining points by original index to preserve order.
-    mem.sort(SegmentMergeCost, heap.items[0..heap.len], {}, SegmentMergeCost.firstThan);
+    // Sort remaining segments by original index to preserve order.
+    var remaining_segments = ArrayList(SegmentMergeCost).empty;
+    defer remaining_segments.deinit(allocator);
+    try remaining_segments.ensureTotalCapacity(allocator, heap.count());
+
+    for (0..segment_count) |segment_index| {
+        if (!heap.contains(segment_index)) continue;
+        try remaining_segments.append(allocator, .{
+            .index = segment_index,
+            .cost = costs[segment_index],
+            .left_seg = left_segments[segment_index],
+            .right_seg = right_segments[segment_index],
+            .seg_start = segment_starts[segment_index],
+            .seg_end = segment_ends[segment_index],
+        });
+    }
+    mem.sort(SegmentMergeCost, remaining_segments.items, {}, SegmentMergeCost.firstThan);
 
     // Output compressed series: (seg_start, index, end_value) pairs.
-    for (0..heap.len) |index| {
-        const seg_start = heap.items[index].seg_start;
-        const seg_end = heap.items[index].seg_end;
+    for (remaining_segments.items) |segment| {
+        const seg_start = segment.seg_start;
+        const seg_end = segment.seg_end;
         // Append the start value, the end index, and the end value to the compressed representation.
         try shared_functions.appendValue(allocator, f64, uncompressed_values[seg_start], compressed_values);
         try shared_functions.appendValue(allocator, f64, uncompressed_values[seg_end], compressed_values);
@@ -310,102 +310,59 @@ const SegmentMergeCost = struct {
     }
 };
 
-/// `SegmentMergeCostHashContext` provides context for hashing and comparing `SegmentMergeCost` items for use
-/// in `HashMap`. It defines how `SegmentMergeCost` are hashed and compared for equality.
-const SegmentMergeCostHashContext = struct {
-    /// Hashes the `index: usize` by bitcasting it to `u64`.
-    pub fn hash(_: SegmentMergeCostHashContext, seg_merge_cost: SegmentMergeCost) u64 {
-        return @as(u64, @intCast(seg_merge_cost.index));
-    }
-    /// Compares two `index` for equality.
-    pub fn eql(
-        _: SegmentMergeCostHashContext,
-        seg_merge_error_one: SegmentMergeCost,
-        seg_merge_error_two: SegmentMergeCost,
-    ) bool {
-        return seg_merge_error_one.index == seg_merge_error_two.index;
-    }
-};
-
-/// Comparison function for the `HashedPriorityQueue`. It compares merge cost between two segments.
-fn compareSegmentMergeCost(_: void, seg_1: SegmentMergeCost, seg_2: SegmentMergeCost) math.Order {
-    if (seg_1.cost == seg_2.cost)
-        return math.Order.eq;
-    return math.order(seg_1.cost, seg_2.cost);
+/// Comparison function for the `IndexedPriorityQueue`. It compares merge costs between two segments.
+fn compareMergeCost(cost_1: f64, cost_2: f64) math.Order {
+    return math.order(cost_1, cost_2);
 }
 
 /// Build initial pair-wise segments costs (two points per segment if possible).
 fn buildInitialPairwiseSegmentCost(
-    heap: *HashedPriorityQueue(
-        SegmentMergeCost,
-        void,
-        compareSegmentMergeCost,
-        SegmentMergeCostHashContext,
-    ),
+    heap: *IndexedPriorityQueue(f64, compareMergeCost),
+    costs: []f64,
+    left_segments: []usize,
+    right_segments: []usize,
+    segment_starts: []usize,
+    segment_ends: []usize,
     uncompressed_values: []const f64,
 ) Error!void {
-    var seg_id: usize = 1;
-    var seg_start: usize = 2;
-
     // We need to create a segment for every two points in the uncompressed values.
     // The first segment is always the first two points.
     // The second segment is the next two points, and so on.
-    var previous_seg = SegmentMergeCost{
-        .index = 0,
-        .cost = math.inf(f64),
-        .left_seg = 0,
-        .right_seg = 1,
-        .seg_start = 0,
-        .seg_end = 1,
-    };
-
-    while (seg_start < uncompressed_values.len) : (seg_start += 2) {
+    for (0..costs.len) |segment_index| {
+        const seg_start = segment_index * 2;
         const seg_end: usize = if (seg_start + 1 < uncompressed_values.len) seg_start + 1 else seg_start;
 
-        const current_seg = SegmentMergeCost{
-            .index = seg_id,
-            .cost = math.inf(f64),
-            .left_seg = seg_id - 1,
-            .right_seg = seg_id + 1,
-            .seg_start = seg_start,
-            .seg_end = seg_end,
-        };
-
-        // Compute the merge cost of merging the previous and current segments.
-        const merge_cost = try mergeCost(uncompressed_values, previous_seg, current_seg);
-        previous_seg.cost = merge_cost;
-        try heap.add(previous_seg);
-
-        seg_id += 1;
-        previous_seg = current_seg;
+        left_segments[segment_index] = if (segment_index == 0) 0 else segment_index - 1;
+        right_segments[segment_index] = segment_index + 1;
+        segment_starts[segment_index] = seg_start;
+        segment_ends[segment_index] = seg_end;
+        costs[segment_index] = math.inf(f64);
     }
 
-    // Inserts the previous segment, which is likely the last segment in the sequence.
-    // In the bottom-up line simplification algorithm, the last segment cannot be merged
-    // with any segment to its right, as there are no further segments. Therefore, it is
-    // added with an infinite cost to indicate that no further merging is possible.
-    try heap.add(previous_seg);
-
-    // If the last segment is not a pair, we need to add it to the heap.
-    if (seg_start < uncompressed_values.len) {
-        var last_seg = SegmentMergeCost{
-            .index = seg_id,
-            .cost = math.inf(f64),
-            .left_seg = seg_id - 1,
-            .right_seg = seg_id + 1,
-            .seg_start = seg_start,
-            .seg_end = seg_start,
-        };
-        const merge_cost = try mergeCost(uncompressed_values, previous_seg, last_seg);
-        last_seg.cost = merge_cost;
-        try heap.add(last_seg);
+    for (0..costs.len) |segment_index| {
+        if (segment_index + 1 < costs.len) {
+            costs[segment_index] = try mergeCostFromState(
+                uncompressed_values,
+                segment_starts,
+                segment_ends,
+                segment_index,
+                segment_index + 1,
+            );
+        }
+        try heap.add(segment_index, costs[segment_index]);
     }
 }
 
-/// Incremental cost of merging the neighbouring segments `seg_one` and `seg_two`.
-fn mergeCost(uncompressed_values: []const f64, seg_one: SegmentMergeCost, seg_two: SegmentMergeCost) !f64 {
-    const merged_start = @min(seg_one.seg_start, seg_two.seg_start);
-    const merged_end = @max(seg_one.seg_end, seg_two.seg_end);
+/// Incremental cost of merging the neighbouring segments identified by dense segment IDs.
+fn mergeCostFromState(
+    uncompressed_values: []const f64,
+    segment_starts: []const usize,
+    segment_ends: []const usize,
+    segment_one: usize,
+    segment_two: usize,
+) !f64 {
+    const merged_start = @min(segment_starts[segment_one], segment_starts[segment_two]);
+    const merged_end = @max(segment_ends[segment_one], segment_ends[segment_two]);
     return try shared_functions.computeRMSE(uncompressed_values, merged_start, merged_end);
 }
 
