@@ -41,7 +41,8 @@ Mirror TerseTS Method Enum.
     Chimp64 = 18
     Chimp128 = 19
     BitPackedDeltaEncoding = 20
-    Camel = 21
+    DiscreteFourierTransform = 21
+    Camel = 22
 end
 
 """

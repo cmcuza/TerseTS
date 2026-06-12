@@ -30,7 +30,8 @@ enum Method {
   Chimp64                       = 18,
   Chimp128                      = 19,
   BitPackedDeltaEncoding        = 20,
-  Camel                         = 21,
+  DiscreteFourierTransform      = 21,
+  Camel                         = 22,
 };
 
 // A pointer to uncompressed values and the number of values.
