@@ -16,6 +16,7 @@ const std = @import("std");
 const LinkMode = std.builtin.LinkMode;
 
 pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
 
     // Define build options.
     const linking = b.option(
@@ -30,13 +31,24 @@ pub fn build(b: *std.Build) void {
         "Use Position Independent Code (PIC)",
     ) orelse null;
 
+    const optimize = b.standardOptimizeOption(.{});
+
     // Create root module.
     const root_module = b.createModule(.{
         .root_source_file = b.path("src/capi.zig"),
-        .target = b.standardTargetOptions(.{}),
-        .optimize = b.standardOptimizeOption(.{}),
+        .target = target,
+        .optimize = optimize,
         .pic = pic,
     });
+
+    // Paths to external libraries. Include the PocketFFT source file directly in the build,
+    // as it's a single C file with no dependencies.
+    const pocketfft_path = b.path("lib/pocketfft");
+    const pocketfft_c_path = b.path("lib/pocketfft/pocketfft.c");
+
+    root_module.addIncludePath(pocketfft_path);
+    root_module.addCSourceFile(.{ .file = pocketfft_c_path });
+    root_module.link_libc = true;
 
     // Task for compilation.
     const library = b.addLibrary(.{

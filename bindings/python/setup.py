@@ -23,50 +23,68 @@ from setuptools.command.build_ext import build_ext
 from setuptools.command.bdist_wheel import bdist_wheel
 
 
-def copy_src_if_repository():
-    """Copies the Zig source code to the current directory if in the repository."""
+def copy_if_repository(relative_path):
+    """Copies a file or directory at `relative_path` to the current directory if in the repository."""
     cwd = Path.cwd()
-
-    target_src_folder = cwd / "src"
-    if target_src_folder.exists():
+    target = cwd / relative_path
+    if target.exists():
         return
 
     repository_root = cwd.parent.parent
-    git_folder = repository_root / ".git"
-    if git_folder.exists():
-        input_src_folder = repository_root / "src"
-        shutil.copytree(input_src_folder, target_src_folder)
-        return
+    if not (repository_root / ".git").exists():
+        raise FileNotFoundError(f"Failed to locate {relative_path}.")
 
-    raise FileNotFoundError("Failed to locate Zig source code.")
+    source = repository_root / relative_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if source.is_dir():
+        shutil.copytree(source, target)
+    else:
+        shutil.copy2(source, target)
 
 
-def delete_src_if_repository():
-    """Deletes the Zig source code in the current directory if in the repository."""
+def delete_if_repository(relative_path):
+    """Deletes a file or directory at `relative_path` in the current directory if in the repository."""
     cwd = Path.cwd()
-
-    src_folder = cwd / "src"
-    if not src_folder.exists():
+    target = cwd / relative_path
+    if not target.exists():
         return
 
-    repository_root = cwd.parent.parent
-    git_folder = repository_root / ".git"
-    if git_folder.exists():
-        shutil.rmtree(src_folder)
+    if not (cwd.parent.parent / ".git").exists():
+        return
+
+    if target.is_dir():
+        shutil.rmtree(target)
+        parent = target.parent
+        if parent != cwd and parent.exists() and not any(parent.iterdir()):
+            parent.rmdir()
+    else:
+        target.unlink()
 
 
 class ZigSDist(sdist):
     def run(self):
-        copy_src_if_repository()
-        super().run()
-        delete_src_if_repository()
+        copy_if_repository("src")
+        copy_if_repository("lib/pocketfft")
+        copy_if_repository("build.zig")
+        try:
+            super().run()
+        finally:
+            delete_if_repository("src")
+            delete_if_repository("lib/pocketfft")
+            delete_if_repository("build.zig")
 
 
 class ZigBDistWheel(bdist_wheel):
     def run(self):
-        copy_src_if_repository()
-        super().run()
-        delete_src_if_repository()
+        copy_if_repository("src")
+        copy_if_repository("lib/pocketfft")
+        copy_if_repository("build.zig")
+        try:
+            super().run()
+        finally:
+            delete_if_repository("src")
+            delete_if_repository("lib/pocketfft")
+            delete_if_repository("build.zig")
 
     def get_tag(self):
         python, abi, plat = super().get_tag()
@@ -83,33 +101,31 @@ class ZigBuildExt(build_ext):
         if not os.path.exists(self.build_lib):
             os.makedirs(self.build_lib)
 
-        self.spawn(
-            [
-                sys.executable,
-                "-m",
-                "ziglang",
-                "build-lib",
-                ext.sources[0],
-                f"-femit-bin={self.get_ext_fullpath(ext.name)}",
-                "-mcpu",
-                "native",
-                "-dynamic",
-                "-O",
-                "ReleaseFast",
-            ],
-        )
+        # Output path for the generated library.
+        output_path = self.get_ext_fullpath(ext.name)
 
-        # Zig generates files that are not needed and can be removed.
-        if sys.platform == "darwin" or sys.platform == "linux":
-            path_to_file = self.get_ext_fullpath(ext.name) + ".o"
-            if os.path.exists(path_to_file):
-                os.remove(path_to_file)
+        optimize = "Debug" if self.debug else "ReleaseFast"
+        zig_cmd = [
+            sys.executable,
+            "-m",
+            "ziglang",
+            "build",
+            "-Dlinking=dynamic",
+            f"-Doptimize={optimize}",
+        ]
+        self.spawn(zig_cmd)
 
-        elif sys.platform == "win32":
-            for name in ["capi.lib", "tersets.pdb", "tersets.pyd.obj"]:
-                path_to_file = os.path.join(self.build_lib, name)
-                if os.path.exists(path_to_file):
-                    os.remove(path_to_file)
+        if sys.platform == "win32":
+            built_library = Path("zig-out") / "bin" / "tersets.dll"
+        elif sys.platform == "darwin":
+            built_library = Path("zig-out") / "lib" / "libtersets.dylib"
+        else:
+            built_library = Path("zig-out") / "lib" / "libtersets.so"
+
+        if not built_library.exists():
+            raise FileNotFoundError(f"Expected Zig output was not found: {built_library}")
+
+        shutil.copy2(built_library, output_path)
 
     def get_ext_filename(self, ext_name):
         # Removes the CPython part of ext_name as the library is not linked to

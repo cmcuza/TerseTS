@@ -25,6 +25,13 @@ fn main() {
     // Make the optimization level of TerseTS and Rust bindings match.
     let build_profile = env::var("PROFILE").unwrap();
     let optimize = match build_profile.as_str() {
+        // On Windows, both `Debug` and `ReleaseSafe` pull in Zig's stack-trace
+        // panic handler (`std.debug.SelfInfo.Windows.findModule`), which calls
+        // `LdrRegisterDllNotification`. That API exists in ntdll.dll but is absent
+        // from the stripped ntdll.lib bundled in Rust's MSVC sysroot, causing a
+        // link failure. `ReleaseFast` avoids this by omitting panic stack traces.
+        // On other platforms, `-Doptimize=Debug` links correctly.
+        "debug" if cfg!(windows) => "-Doptimize=ReleaseFast",
         "debug" => "-Doptimize=Debug",
         "release" => "-Doptimize=ReleaseFast",
         build_profile => {

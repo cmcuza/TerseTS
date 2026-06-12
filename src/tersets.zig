@@ -53,6 +53,9 @@ const vw = @import("lossy_compression/line_simplification/visvalingam_whyatt.zig
 const sliding_window = @import("lossy_compression/line_simplification/sliding_window.zig");
 const bottom_up = @import("lossy_compression/line_simplification/bottom_up.zig");
 
+// Import domain transform methods.
+const dft = @import("lossy_compression/domain_transformation/discrete_fourier_transform.zig");
+
 // Import lossless compression methods.
 const rle_encoding = @import("lossless_compression/run_length_encoding.zig");
 const delta_encoding = @import("lossless_compression/bitpacked_delta_encoding.zig");
@@ -102,6 +105,7 @@ pub const Method = enum {
     Chimp64,
     Chimp128,
     BitPackedDeltaEncoding,
+    DiscreteFourierTransform,
     Camel,
 };
 
@@ -117,16 +121,13 @@ pub fn compress(
 ) Error!ArrayList(u8) {
     var compressed_values = ArrayList(u8).empty;
 
-    // If the input is one or zero elements, just store them uncompressed disregarding
-    // the compression method.
-    if (uncompressed_values.len < 2) {
-        if (uncompressed_values.len == 1) {
-            const value_as_bytes: [8]u8 = @bitCast(uncompressed_values[0]);
-            try compressed_values.appendSlice(allocator, value_as_bytes[0..]);
-            return compressed_values;
-        }
-        // The `uncompressed_values` is empty.
-        return Error.UnsupportedInput;
+    // Handle the trivial cases of zero or one element.
+    if (uncompressed_values.len == 0) {
+        return compressed_values;
+    } else if (uncompressed_values.len == 1) {
+        const value_as_bytes: [8]u8 = @bitCast(uncompressed_values[0]);
+        try compressed_values.appendSlice(allocator, value_as_bytes[0..]);
+        return compressed_values;
     }
 
     switch (method) {
@@ -266,6 +267,14 @@ pub fn compress(
                 configuration,
             );
         },
+        .DiscreteFourierTransform => {
+            try dft.compress(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                configuration,
+            );
+        },
         .BitPackedDeltaEncoding => {
             try delta_encoding.compress(
                 allocator,
@@ -318,12 +327,12 @@ pub fn decompress(
     allocator: Allocator,
     compressed_values: []const u8,
 ) Error!ArrayList(f64) {
-    if (compressed_values.len == 0) return Error.CorruptedCompressedData;
-
     var decompressed_values = ArrayList(f64).empty;
 
-    // Handle the trivial case of one element.
-    if (compressed_values.len == 8) {
+    // Handle the trivial cases of zero or one element.
+    if (compressed_values.len == 0) {
+        return decompressed_values;
+    } else if (compressed_values.len == 8) {
         const value: f64 = @bitCast(compressed_values[0..8].*);
         try decompressed_values.append(allocator, value);
         return decompressed_values;
@@ -382,6 +391,9 @@ pub fn decompress(
         .SerfQT => {
             try serfqt.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
+        .DiscreteFourierTransform => {
+            try dft.decompress(allocator, compressed_values_slice, &decompressed_values);
+        },
         .BitPackedDeltaEncoding => {
             try delta_encoding.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
@@ -412,7 +424,8 @@ pub fn extract(
     indices: *ArrayList(u64),
     coefficients: *ArrayList(f64),
 ) Error!void {
-    if (compressed_values.len == 0) return Error.UnsupportedInput;
+    // Handle the trivial cases of zero or one element.
+    if (compressed_values.len <= 8) return Error.UnsupportedInput;
 
     const method_index: u8 = compressed_values[compressed_values.len - 1];
     if (method_index > getMaxMethodIndex()) return Error.UnknownMethod;
@@ -513,6 +526,14 @@ pub fn extract(
         },
         .NonLinearApproximation => {
             try non_linear_approximation.extract(
+                allocator,
+                compressed_values_slice,
+                indices,
+                coefficients,
+            );
+        },
+        .DiscreteFourierTransform => {
+            try dft.extract(
                 allocator,
                 compressed_values_slice,
                 indices,
@@ -655,6 +676,14 @@ pub fn rebuild(
         },
         .NonLinearApproximation => {
             try non_linear_approximation.rebuild(
+                allocator,
+                indices,
+                coefficients,
+                &compressed_values,
+            );
+        },
+        .DiscreteFourierTransform => {
+            try dft.rebuild(
                 allocator,
                 indices,
                 coefficients,
