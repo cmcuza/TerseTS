@@ -526,11 +526,10 @@ pub fn compress(
             // Check for integer-diff overflow. If it exists, the value is treated as special and stored raw
             if (prev_int) |p| {
                 const diff_overflow = @subWithOverflow(int_part, p);
-                if (diff_overflow[1] != 0 or diff_overflow[0] < -65535 or diff_overflow[0] > 65535) 
-                {
+                if (diff_overflow[1] != 0 or diff_overflow[0] < -65535 or diff_overflow[0] > 65535) {
                     is_special = true;
                 }
-}
+            }
         }
         try bit_writer.writeBits(@as(u1, @intFromBool(is_special)), 1);
         if (is_special) {
