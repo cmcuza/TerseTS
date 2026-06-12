@@ -38,6 +38,7 @@ const ArrayList = std.ArrayList;
 const Allocator = mem.Allocator;
 
 const tersets = @import("../tersets.zig");
+const configuration = @import("../configuration.zig");
 const shared_functions = @import("../utilities/shared_functions.zig");
 const shared_structs = @import("../utilities/shared_structs.zig");
 const tester = @import("../tester.zig");
@@ -487,19 +488,12 @@ pub fn compress(
     compressed_values: *ArrayList(u8),
     method_configuration: []const u8,
 ) Error!void {
-    // Parse configuration manually.
     var decimal_places: u8 = default_decimal_places;
-    if (method_configuration.len > 0) {
-        var parsed = std.json.parseFromSlice(std.json.Value, allocator, method_configuration, .{}) catch return Error.InvalidConfiguration;
-        defer parsed.deinit();
-        if (parsed.value.object.get("decimal_places")) |v| {
-            const int_val = v.integer;
-            if (int_val < 0 or int_val > max_decimal_places) return Error.InvalidConfiguration;
-            decimal_places = @intCast(int_val);
-        } else if (parsed.value.object.count() > 0) {
-            return Error.InvalidConfiguration;
-        }
-    }
+    _ = try configuration.parse(
+        allocator,
+        configuration.EmptyConfiguration,
+        method_configuration,
+    );
     // The per-value decimal count is stored in 2 bits, so the cap is 1..4. This
     // also forces `lv >= 1`, which keeps the `lv - 1` field non-negative.
     const max_count: u8 = 4;
@@ -518,7 +512,7 @@ pub fn compress(
 
     var prev_int: ?i64 = if (fitsIntegerPart(uncompressed_values[0])) intPart(uncompressed_values[0]) else null;
     for (uncompressed_values[1..]) |v| {
-        const is_special = !fitsIntegerPart(v) or isNegativeZero(v);
+        var is_special = !fitsIntegerPart(v) or isNegativeZero(v);
         var int_part: i64 = 0;
         var frac: f64 = 0.0;
         var lv: u8 = 0; // per-value decimal count; only meaningful on the normal path
@@ -529,6 +523,13 @@ pub fn compress(
             // like 23.5 encodes at lv=1, 23.4567 at lv=4 — each pays only for the
             // precision it actually has (paper Algorithm 2, line 1).
             lv = @min(calDecimalCount(v), decimal_places);
+            // Check for integer-diff overflow. If it exists, the value is treated as special and stored raw
+            if (prev_int) |p| {
+                const diff_overflow = @subWithOverflow(int_part, p);
+                if (diff_overflow[1] != 0 or diff_overflow[0] < -65535 or diff_overflow[0] > 65535) {
+                    is_special = true;
+                }
+            }
         }
         try bit_writer.writeBits(@as(u1, @intFromBool(is_special)), 1);
         if (is_special) {
