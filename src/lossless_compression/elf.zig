@@ -266,10 +266,13 @@ fn getSPAnd10iNFlag(v_abs: f64) struct { sp: i16, is_pow10_neg: bool } {
         }
     }
     // Fallback for values outside the tables (|v| >= 10^9 or |v| < 10^-10).
+    // is_pow10_neg must stay true only for exact negative powers (v = 10^-i, i > 0), so guard
+    // on log10v < 0: a large positive power like 1e12 also has integral log10 but is NOT the
+    // 10^-i corner case and must not be flagged (that would wrongly force beta_star = 0).
     const log10v = @log10(v_abs);
     return .{
         .sp = @intFromFloat(@floor(log10v)),
-        .is_pow10_neg = (log10v == @floor(log10v)),
+        .is_pow10_neg = (log10v < 0 and log10v == @floor(log10v)),
     };
 }
 
@@ -316,9 +319,11 @@ fn get10iN(i: i32) f64 {
 ///   getSignificantCount(0.0314, sp=-2) = 3   ("3", "1", "4")
 ///   getSignificantCount(5.20,   sp=0)  = 2   ("5", "2")
 ///
-/// Algorithm (matches the reference): start at the SMALLEST candidate scale and walk i
-/// upward to the first power of ten that makes v * 10^i an exact integer; beta = sp + i + 1.
-/// Starting low lands directly on the minimal i, so no trailing-zero stripping is needed.
+/// Algorithm (matches the reference): start at the smallest scale that can move the leading
+/// non-zero digit to the ones place (i = 1 for v >= 1, i = -sp for v < 1) and walk i upward to
+/// the first power of ten that makes v * 10^i an exact integer; beta = sp + i + 1. Scale i = 0 is
+/// skipped on purpose: an already-integral value has no fractional digits to count here, and the
+/// eraser's downstream no-erase guards handle it. Starting low needs no trailing-zero stripping.
 /// Returns 17 (the f64 decimal-precision ceiling) for values with no clean short decimal form
 /// - the caller treats that as "give up, no erase". (A previous version started at the maximal
 /// i = 17 - sp - 1 and stripped zeros; the large multiply lost precision and gave up far too
@@ -408,9 +413,12 @@ fn eraseValue(
     const v_abs = @abs(v);
     const ab = computeAlphaAndBetaStar(v_abs);
 
-    // Bail to no-erase if alpha is outside the useful range:
-    //   alpha < 0  -> integer-valued float (e.g. 100.0) - nothing to erase
-    //   alpha >= 21 -> beyond the f_alpha_table (very small subnormals) - rare, skip
+    // Bail to no-erase if alpha is outside the useful range. Normally alpha equals the scale i
+    // (>= 1), so these guards only catch the extremes where the significant-digit search saturated:
+    //   alpha < 0   -> magnitude so large beta capped at 17 (|v| >~ 1e17) - nothing useful to erase
+    //   alpha >= 21 -> beyond the f_alpha_table (very small / subnormal values) - rare, skip
+    // Ordinary integers (e.g. 100.0) pass this guard with alpha >= 0; they route to no-erase a few
+    // lines below via the delta == 0 check, which sees no erasable low mantissa bits.
     if (ab.alpha < 0 or ab.alpha >= f_alpha_table.len) {
         try bit_writer.writeBits(@as(u1, 0), 1);
         return v_bits;
