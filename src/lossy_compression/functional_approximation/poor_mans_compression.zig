@@ -55,6 +55,38 @@ pub fn compressMidrange(
 
     const error_bound: f32 = parsed_configuration.abs_error_bound;
 
+    // When the error bound is zero an exact bit-for-bit round-trip is required. Using f80
+    // intermediates and @floatCast(f80 -> f64) can silently mutate subnormal f64 bit patterns
+    // during the widening/narrowing cycle (x87 denormalization on store). Values are therefore
+    // compared and stored directly in f64 using f64 inequality, which does not involve subtraction
+    // and never underflows, correctly separating any two distinct f64 bit patterns.
+    if (error_bound == 0) {
+        var current_value: f64 = uncompressed_values[0];
+        index = 1;
+        for (uncompressed_values[1..]) |value| {
+            if (value != current_value) {
+                try shared_functions.appendValueAndIndexToArrayList(
+                    allocator,
+                    current_value,
+                    index,
+                    compressed_values,
+                );
+                current_value = value;
+            }
+            index += 1;
+        }
+        try shared_functions.appendValueAndIndexToArrayList(
+            allocator,
+            current_value,
+            index,
+            compressed_values,
+        );
+        return;
+    }
+
+    // For positive error bounds f80 intermediates provide extra precision so that tiny but
+    // distinct values (e.g. 34.5e-301 and 4.5e-301) whose f64 difference underflows to zero
+    // are still detected as spanning more than 2 * error_bound.
     var minimum: f80 = uncompressed_values[0]; // m.
     var maximum: f80 = uncompressed_values[0]; // M.
 
@@ -62,48 +94,24 @@ pub fn compressMidrange(
         const nextMinimum = @min(value, minimum);
         const nextMaximum = @max(value, maximum);
 
-        // If the error bound is zero, we only append a new value if the next value is different.
-        // Without this check low precision values would pass the error bound check and lose information.
-        // For example if minimum is 34.5e-301 and maximum is 4.5e-301, the error bound check would pass
-        // since 34.5e-301 - 4.5e-301 == 0 due to precision loss.
-        if (error_bound == 0) {
-            if (nextMaximum != nextMinimum) {
-                const compressed_value: f64 = @floatCast(maximum);
-                try shared_functions.appendValueAndIndexToArrayList(
-                    allocator,
-                    compressed_value,
-                    index,
-                    compressed_values,
-                );
-                minimum = value;
-                maximum = value;
-            } else {
-                minimum = nextMinimum;
-                maximum = nextMaximum;
-            }
+        if ((nextMaximum - nextMinimum) > 2 * error_bound) {
+            const compressed_value: f64 = @floatCast((maximum + minimum) / 2);
+            try shared_functions.appendValueAndIndexToArrayList(
+                allocator,
+                compressed_value,
+                index,
+                compressed_values,
+            );
+            minimum = value;
+            maximum = value;
         } else {
-            if ((nextMaximum - nextMinimum) > 2 * error_bound) {
-                const compressed_value: f64 = @floatCast((maximum + minimum) / 2);
-                try shared_functions.appendValueAndIndexToArrayList(
-                    allocator,
-                    compressed_value,
-                    index,
-                    compressed_values,
-                );
-                minimum = value;
-                maximum = value;
-            } else {
-                minimum = nextMinimum;
-                maximum = nextMaximum;
-            }
+            minimum = nextMinimum;
+            maximum = nextMaximum;
         }
         index += 1;
     }
 
-    const compressed_value: f64 = if (error_bound == 0)
-        @floatCast(maximum)
-    else
-        @floatCast((maximum + minimum) / 2);
+    const compressed_value: f64 = @floatCast((maximum + minimum) / 2);
     try shared_functions.appendValueAndIndexToArrayList(
         allocator,
         compressed_value,
@@ -137,53 +145,54 @@ pub fn compressMean(
 
     const error_bound: f32 = parsed_configuration.abs_error_bound;
 
+    // Same rationale as compressMidrange: for zero error bound use f64 directly to avoid
+    // bit-pattern mutations from the f80 widening/narrowing cycle.
+    if (error_bound == 0) {
+        var current_value: f64 = uncompressed_values[0];
+        index = 1;
+        for (uncompressed_values[1..]) |value| {
+            if (value != current_value) {
+                try shared_functions.appendValueAndIndexToArrayList(
+                    allocator,
+                    current_value,
+                    index,
+                    compressed_values,
+                );
+                current_value = value;
+            }
+            index += 1;
+        }
+        try shared_functions.appendValueAndIndexToArrayList(
+            allocator,
+            current_value,
+            index,
+            compressed_values,
+        );
+        return;
+    }
+
     for (uncompressed_values) |value| {
         const nextMinimum = @min(value, minimum);
         const nextMaximum = @max(value, maximum);
         const nextLength = length + 1;
         const nextAverage = (average * length + value) / nextLength;
 
-        // If the error bound is zero, we only append a new value if the next value is different.
-        // Without this check low precision values would pass the error bound check and lose information.
-        // For example if minimum is 34.5e-301 and maximum is 4.5e-301, the error bound check would pass
-        // since 34.5e-301 - 4.5e-301 == 0 due to precision loss.
-        if (error_bound == 0) {
-            if (nextMaximum != nextMinimum) {
-                const compressed_value: f64 = @floatCast(maximum);
-                try shared_functions.appendValueAndIndexToArrayList(
-                    allocator,
-                    compressed_value,
-                    index,
-                    compressed_values,
-                );
-                minimum = value;
-                maximum = value;
-                length = 1;
-                average = value;
-            } else {
-                minimum = nextMinimum;
-                maximum = nextMaximum;
-                length = nextLength;
-                average = nextAverage;
-            }
+        if ((nextMaximum - nextAverage > error_bound) or (nextAverage - nextMinimum > error_bound)) {
+            try shared_functions.appendValueAndIndexToArrayList(
+                allocator,
+                @floatCast(average),
+                index,
+                compressed_values,
+            );
+            minimum = value;
+            maximum = value;
+            length = 1;
+            average = value;
         } else {
-            if ((nextMaximum - nextAverage > error_bound) or (nextAverage - nextMinimum > error_bound)) {
-                try shared_functions.appendValueAndIndexToArrayList(
-                    allocator,
-                    @floatCast(average),
-                    index,
-                    compressed_values,
-                );
-                minimum = value;
-                maximum = value;
-                length = 1;
-                average = value;
-            } else {
-                minimum = nextMinimum;
-                maximum = nextMaximum;
-                length = nextLength;
-                average = nextAverage;
-            }
+            minimum = nextMinimum;
+            maximum = nextMaximum;
+            length = nextLength;
+            average = nextAverage;
         }
         index += 1;
     }
