@@ -115,7 +115,7 @@ pub fn parse(
                 return error.InvalidConfiguration;
         },
         DecimalPrecision => {
-            if (parsed_value.decimal_precision <= 0 or parsed_value.decimal_precision >= 64)
+            if (parsed_value.decimal_precision == 0 or parsed_value.decimal_precision >= 64)
                 return error.InvalidConfiguration;
         },
         EmptyConfiguration => {},

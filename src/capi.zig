@@ -138,6 +138,7 @@ export fn decompress(
 /// - 8) Byte stream error.
 /// - 9) Unsupported method.
 /// - 10) Out of memory.
+/// - 11) Write failed.
 export fn extract(
     compressed_values: CompressedValues,
     indices: *Indices,
@@ -147,7 +148,9 @@ export fn extract(
     if (compressed_values_slice.len == 0) return 2;
 
     var indices_array_list = ArrayList(u64).empty;
+    defer indices_array_list.deinit(allocator); // Prevent memory leaks if extract() fail.
     var coefficients_array_list = ArrayList(f64).empty;
+    defer coefficients_array_list.deinit(allocator); // Prevent memory leaks if extract() fail.
 
     // Return indices and coefficients together. We need to put the size of indices at front in a
     // u32 to split the values.
@@ -183,6 +186,7 @@ export fn extract(
 /// - 8) Byte stream error.
 /// - 9) Unsupported method.
 /// - 10) Out of memory.
+/// - 11) Write failed.
 export fn rebuild(
     indices_values: Indices,
     coefficients: Coefficients,
@@ -202,6 +206,7 @@ export fn rebuild(
         coefficients_slices,
         method,
     ) catch |e| return errorToIndex(e);
+    defer compressed_values_array_list.deinit(allocator); //Prevent memory leaks if rebuild fails.
 
     const compressed_values_slice = compressed_values_array_list.toOwnedSlice(allocator) catch |err| return errorToIndex(err);
 
