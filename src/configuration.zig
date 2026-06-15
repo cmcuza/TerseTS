@@ -204,6 +204,7 @@ pub fn defaultConfigurationBuilder(
         },
 
         // Methods with empty configuration.
+        .Uncompressed,
         .RunLengthEncoding,
         .Chimp64,
         .Chimp128,

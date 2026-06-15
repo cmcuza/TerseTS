@@ -17,9 +17,11 @@
 //! Compressing High-Frequency Time Series Through Multiple Models and Stealing from Residuals.
 //! ICDE 2026.
 //! This module implements MacaqueV as proposed in the original paper and MacaqueS, which is a
-//! simplified version which bit-packs the rewritten values without the additional XOR steps.
-//! MacaqueS can be useful in scenarios where the consecutive values are not close to each other.
-//! MacaqueV can achieve better results when consecutive values are close to each other.
+//! simplified version that bit-packs the rewritten values without the additional XOR steps.
+//! MacaqueS is useful when consecutive values do not usually share long prefixes after rewriting,
+//! since it avoids the extra XOR metadata that MacaqueV stores for each changed value. MacaqueV can
+//! achieve better results when consecutive rewritten values are similar, since XOR encoding stores
+//! only the changed bits.
 
 const std = @import("std");
 const math = std.math;
@@ -39,8 +41,8 @@ const tester = @import("../../tester.zig");
 const shared_functions = @import("../../utilities/shared_functions.zig");
 const Method = tersets.Method;
 
-const u64_max: u64 = 0xFFFF_FFFF_FFFF_FFFF;
-const max_u64_bits: u7 = 64;
+const maximum_u64_value: u64 = 0xFFFF_FFFF_FFFF_FFFF;
+const maximum_u64_bits: u7 = 64;
 
 /// Helper struct to hold the number of `bits_needed` and the `rewritten_value` after
 /// applying the error bound-based rewriting.
@@ -49,11 +51,11 @@ const RewrittenValue = struct {
     rewritten_value: u64,
 };
 
-/// Compress `uncompressed_values` within an error bound using MacaqueS. The function performs
-/// the lossy rewriting of the values based on the provided `AbsoluteErrorBound`'s `method_configuration`
-/// and bit-packs the rewritten values. The compressed representation is written in `compressed_values`.
-/// The `allocator` is used for memory management of intermediates containers and the `method_configuration`
-/// parser. If an error occurs it is returned.
+/// Compress `uncompressed_values` within an error bound using MacaqueS. The function performs the
+/// lossy rewriting based on the provided `AbsoluteErrorBound`'s `method_configuration` and
+/// bit-packs the rewritten values. The compressed representation is written in `compressed_values`.
+/// The `allocator` is used for intermediate containers and the `method_configuration` parser. If an
+/// error occurs it is returned.
 pub fn compressMacaqueS(
     allocator: Allocator,
     uncompressed_values: []const f64,
@@ -86,7 +88,7 @@ pub fn compressMacaqueS(
 
     var bit_writer = try shared_structs.BitWriter.init(allocator, compressed_values);
 
-    // Step 1: For each value, rewrite bits based on the error bound and calculate the maximum number of bits rewritten.
+    // Rewrite each value according to the error bound, then write the packed representation.
     for (uncompressed_values) |value| {
         if (!math.isFinite(value) or @abs(value) > tester.max_test_value) return Error.UnsupportedInput;
         const returned_values = rewriteValueBasedOnErrorBound(value, error_bound);
@@ -101,10 +103,10 @@ pub fn compressMacaqueS(
 }
 
 /// Compress `uncompressed_values` within an error bound using MacaqueV. The function performs the
-/// lossy rewriting of the values based on the provided `AbsoluteErrorBound`'s `method_configuration`.
-/// The compressed representation is written in `compressed_values` using the XOR-based encoding as described
-/// in the original paper. The `allocator` is used for memory management of intermediates containers
-/// and the `method_configuration` parser. If an error occurs it is returned.
+/// lossy rewriting based on the provided `AbsoluteErrorBound`'s `method_configuration`. The
+/// compressed representation is written in `compressed_values` using the XOR-based encoding from
+/// the original paper. The `allocator` is used for intermediate containers and the
+/// `method_configuration` parser. If an error occurs it is returned.
 pub fn compressMacaqueV(
     allocator: Allocator,
     uncompressed_values: []const f64,
@@ -158,15 +160,15 @@ pub fn compressMacaqueV(
 
     var previous_value: f64 = @bitCast(previous_rewritten_value.rewritten_value);
 
-    for (1..uncompressed_values.len) |i| {
-        const value: f64 = uncompressed_values[i];
+    for (1..uncompressed_values.len) |index| {
+        const value: f64 = uncompressed_values[index];
 
         if (!math.isFinite(value) or @abs(value) > tester.max_test_value) return Error.UnsupportedInput;
 
         if (@abs(value - previous_value) <= error_bound) {
             // If the current value is within the error bound of the previous value,
-            // we can store a control bit of 0 and skip storing the value.
-            try bit_writer.writeBits(@as(u1, 0b0), 1); // Header '0'.
+            // a header bit of 0 is enough to repeat the previous value.
+            try bit_writer.writeBits(@as(u1, 0b0), 1); // header '0'.
             continue;
         }
 
@@ -174,7 +176,7 @@ pub fn compressMacaqueV(
 
         previous_value = @bitCast(current_rewritten_value.rewritten_value);
 
-        // Perform XOR between the previous rewritten value and the current rewritten value to find the bits that differ.
+        // XOR the previous and current rewritten values to find the bits that differ.
         const xor_value: u64 = previous_rewritten_value.rewritten_value ^ current_rewritten_value.rewritten_value;
 
         if (xor_value == 0) {
@@ -185,25 +187,25 @@ pub fn compressMacaqueV(
             const trailing_zeros: u7 = @ctz(xor_value);
 
             if (trailing_zeros >= last_trailing_zeros and leading_zeros >= last_leading_zeros) {
-                // Store a control bit of 10.
                 try bit_writer.writeBits(@as(u1, 0b0), 1); // second control bit '0'.
 
-                // We only need to store the significant bits that differ from the previous value, which are between the leading and trailing zeros.
-                const significant_bits_length: u7 = max_u64_bits - last_leading_zeros - last_trailing_zeros;
+                // Reuse the previous leading and trailing zero counts, so only the significant bits
+                // between them need to be stored.
+                const significant_bits_length: u7 =
+                    maximum_u64_bits - last_leading_zeros - last_trailing_zeros;
                 const significant_bits: u64 = xor_value >> @as(u6, @intCast(last_trailing_zeros));
 
                 // Store the significant bits that differ from the previous value.
                 try bit_writer.writeBits(significant_bits, significant_bits_length);
             } else {
-                // Store a control bit of 11.
-                try bit_writer.writeBits(@as(u1, 0b1), 1); // header '1'.
+                try bit_writer.writeBits(@as(u1, 0b1), 1); // second control bit '1'.
 
                 // We need to store the leading zeros, significant bits length,
                 // and the significant bits that differ from the previous value.
                 // A u64 XOR can have 0..63 leading zeros, so this field needs 6 bits.
                 try bit_writer.writeBits(@as(u6, @intCast(leading_zeros)), 6);
 
-                const meaningful_bits: u7 = max_u64_bits - leading_zeros - trailing_zeros;
+                const meaningful_bits: u7 = maximum_u64_bits - leading_zeros - trailing_zeros;
 
                 // Store the significant bits length in 6 bits.
                 try bit_writer.writeBits(meaningful_bits, 6);
@@ -223,8 +225,8 @@ pub fn compressMacaqueV(
 }
 
 /// Decompress `compressed_values` produced by MacaqueS. The function writes the result to
-/// `decompressed_values`. The `allocator` is used for memory management of intermediates containers.
-/// If an error occurs it is returned.
+/// `decompressed_values`. The `allocator` is used for intermediate containers. If an error occurs
+/// it is returned.
 pub fn decompressMacaqueS(
     allocator: Allocator,
     compressed_values: []const u8,
@@ -257,8 +259,8 @@ pub fn decompressMacaqueS(
 }
 
 /// Decompress `compressed_values` produced by MacaqueV. The function writes the result to
-/// `decompressed_values`. The `allocator` is used for memory management of intermediates containers.
-/// If an error occurs it is returned.
+/// `decompressed_values`. The `allocator` is used for intermediate containers. If an error occurs
+/// it is returned.
 pub fn decompressMacaqueV(
     allocator: Allocator,
     compressed_values: []const u8,
@@ -300,9 +302,13 @@ pub fn decompressMacaqueV(
             const second_control_bit: u8 = bit_reader.readBitsNoEof(u8, 1) catch return Error.ByteStreamError;
 
             if (second_control_bit == 0) {
-                // We only need to read the significant bits that differ from the previous value, which are between the leading and trailing zeros.
-                const significant_bits_length: u7 = max_u64_bits - last_leading_zeros - last_trailing_zeros;
-                const significant_bits: u64 = bit_reader.readBitsNoEof(u64, significant_bits_length) catch return Error.ByteStreamError;
+                // Reuse the previous leading and trailing zero counts, so only the significant bits
+                // between them need to be read.
+                const significant_bits_length: u7 =
+                    maximum_u64_bits - last_leading_zeros - last_trailing_zeros;
+                const significant_bits: u64 =
+                    bit_reader.readBitsNoEof(u64, significant_bits_length) catch
+                        return Error.ByteStreamError;
 
                 const xor_value: u64 = significant_bits << @as(u6, @intCast(last_trailing_zeros));
                 const rewritten_value: u64 = previous_rewritten_value ^ xor_value; // Luckily, XOR is its own inverse.
@@ -310,24 +316,29 @@ pub fn decompressMacaqueV(
                 try decompressed_values.append(allocator, previous_value);
                 previous_rewritten_value = rewritten_value;
             } else {
-                // The previous xor value is not close enough to the current value, so we need to read the leading zeros,
-                // significant bits length, and the significant bits that differ from the previous value.
-                const leading_zeros: u7 = bit_reader.readBitsNoEof(u7, 6) catch return Error.ByteStreamError;
-                const encoded_significant_bits_length: u6 = bit_reader.readBitsNoEof(u6, 6) catch return Error.ByteStreamError;
+                // The previous XOR range cannot be reused, so read a new leading zero count,
+                // significant bits length, and significant bits.
+                const leading_zeros: u7 =
+                    bit_reader.readBitsNoEof(u7, 6) catch return Error.ByteStreamError;
+                const encoded_significant_bits_length: u6 =
+                    bit_reader.readBitsNoEof(u6, 6) catch return Error.ByteStreamError;
                 const significant_bits_length: u7 = if (encoded_significant_bits_length == 0)
-                    max_u64_bits
+                    maximum_u64_bits
                 else
                     @as(u7, encoded_significant_bits_length);
 
-                if (leading_zeros + significant_bits_length > max_u64_bits) {
+                if (leading_zeros + significant_bits_length > maximum_u64_bits) {
                     return Error.ByteStreamError;
                 }
 
-                const significant_bits: u64 = bit_reader.readBitsNoEof(u64, significant_bits_length) catch return Error.ByteStreamError;
+                const significant_bits: u64 =
+                    bit_reader.readBitsNoEof(u64, significant_bits_length) catch
+                        return Error.ByteStreamError;
 
-                // All needed information read from the compressed representation.
-                // Now we can reconstruct the rewritten value and then the original value.
-                const xor_shift: u6 = @intCast(max_u64_bits - leading_zeros - significant_bits_length);
+                // All needed information is read from the compressed representation.
+                // Now we can reconstruct the next rewritten value.
+                const xor_shift: u6 =
+                    @intCast(maximum_u64_bits - leading_zeros - significant_bits_length);
                 const xor_value: u64 = significant_bits << xor_shift;
                 const rewritten_value: u64 = previous_rewritten_value ^ xor_value; // Luckily, XOR is its own inverse.
                 previous_value = @bitCast(rewritten_value);
@@ -335,21 +346,21 @@ pub fn decompressMacaqueV(
 
                 previous_rewritten_value = rewritten_value;
                 last_leading_zeros = leading_zeros;
-                last_trailing_zeros = max_u64_bits - leading_zeros - significant_bits_length;
+                last_trailing_zeros = maximum_u64_bits - leading_zeros - significant_bits_length;
             }
         }
     }
 }
 
-/// Rewrites the bits of `value` based on the `error_bound`. The function calculates how many bits can be rewritten
-/// while keeping the decompressed value within the error bound. It returns the number of bits needed `bits_needed`
-/// to be stored and the rewritten value `new_rewritten_value` as a u64.
+/// Rewrites the bits of `value` based on the `error_bound`. The function calculates how many bits
+/// can be rewritten while keeping the decompressed value within the error bound. It returns the
+/// number of bits needed to store the value and the rewritten value as a `u64`.
 fn rewriteValueBasedOnErrorBound(
     value: f64,
     error_bound: f64,
 ) RewrittenValue {
 
-    // Cast the f64 value to its binary representation as a u64 to manipulate the bits directly.
+    // Interpret the f64 value as a u64 bit pattern to manipulate the bits directly.
     const value_as_u64: u64 = @bitCast(value);
     // Extract the exponent.
     const exponent: f64 = @floatFromInt(getExponentU64(value_as_u64));
@@ -372,38 +383,39 @@ fn rewriteValueBasedOnErrorBound(
         bits_needed = @min(52, @as(u6, @intFromFloat(needed_f64)));
     }
 
-    // The variable `rewrite_position` tells us how many of the least significant bits of the mantissa we can rewrite.
+    // The variable `rewrite_position` tells us how many of the least significant bits of the
+    // mantissa we can rewrite.
     const rewrite_position: u6 = 52 - bits_needed;
     // We create a mask to zero out the least significant `rewrite_position` bits of the mantissa.
-    const mask: u64 = u64_max << rewrite_position;
-    const rewritten_value: u64 = value_as_u64 & mask;
+    const rewrite_mask: u64 = maximum_u64_value << rewrite_position;
+    const rewritten_value: u64 = value_as_u64 & rewrite_mask;
 
     // Cast to f64 to check if the rewritten value is within the error bound.
     const decompressed_value: f64 = @bitCast(rewritten_value);
 
-    // If the decompressed value is within the error bound, we can keep it as is. Otherwise, we need to rewrite less bits.
+    // If the decompressed value is outside the error bound, rewrite fewer bits.
     if (@abs(decompressed_value - value) <= error_bound) {
         // If the decompressed value is within the error bound, we keep it as is.
         return RewrittenValue{ .bits_needed = bits_needed, .rewritten_value = rewritten_value };
     } else {
-        const new_mask: u64 = u64_max << (rewrite_position - 1);
-        const new_rewritten_value: u64 = value_as_u64 & new_mask;
+        const adjusted_rewrite_mask: u64 = maximum_u64_value << (rewrite_position - 1);
+        const new_rewritten_value: u64 = value_as_u64 & adjusted_rewrite_mask;
         return RewrittenValue{ .bits_needed = bits_needed + 1, .rewritten_value = new_rewritten_value };
     }
 }
 
-/// Helper function to extract the exponent from the binary representation of a f64 `value`.
-/// The `value` is interpreted as a 64-bit unsigned integer, and the exponent bits are extracted
+/// Helper function to extract the exponent from the `u64` bit pattern of a `f64` value. The bit
+/// pattern is interpreted as a 64-bit unsigned integer, and the exponent bits are extracted
 /// and adjusted by the bias (1023 for f64) to return the actual exponent as an i16.
 fn getExponentU64(value: u64) i16 {
     const exponent_bits: i16 = @intCast((value >> 52) & 0x7FF);
     return exponent_bits - 1023;
 }
 
-/// Helper function to write a `value` using the `bit_writer`. The function writes the `bits_needed`
-/// and the `value` in a bit-packed format. The `bits_needed` is written using 6 bits, and the `value`
-/// is written using the number of bits specified by `bits_needed` plus 12 bits for the sign and
-/// exponent. If an error occurs during writing, it is returned.
+/// Helper function to write a `value` using the `bit_writer`. The function writes `bits_needed` and
+/// `value` in a bit-packed format. The `bits_needed` value is written using 6 bits, and `value` is
+/// written using `bits_needed` plus 12 bits for the sign and exponent. If an error occurs during
+/// writing, it is returned.
 fn writeCompressedMacaqueValue(bit_writer: *shared_structs.BitWriter, bits_needed: u6, value: u64) !void {
     try bit_writer.writeBits(bits_needed, 6);
     const most_significant_bits: u16 = @as(u16, bits_needed) + 12; // 12 bits for sign and exponent.
@@ -471,9 +483,9 @@ test "macaquev can compress and decompress values with small differences between
     );
     try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
 
-    for (0..uncompressed_values.len) |i| {
-        const original_value = uncompressed_values[i];
-        const decompressed_value = decompressed_values.items[i];
+    for (0..uncompressed_values.len) |index| {
+        const original_value = uncompressed_values[index];
+        const decompressed_value = decompressed_values.items[index];
         try testing.expectApproxEqAbs(original_value, decompressed_value, 1.5);
     }
 }
@@ -636,7 +648,7 @@ test "macaquev can compress and decompress within floating-point precision limit
     );
 }
 
-test "macaques always reduces size of time series" {
+test "macaques reduce size for generated bounded time series" {
     const allocator = testing.allocator;
     // Generate a random error bound between 10 and 1000, which will be used for quantization.
     const error_bound = @floor(tester.generateBoundedRandomValue(
@@ -680,7 +692,7 @@ test "macaques always reduces size of time series" {
     try testing.expect(uncompressed_values.items.len * 8 > compressed_values.items.len);
 }
 
-test "macaquev always reduces size of time series" {
+test "macaquev reduces size for generated bounded time series" {
     const allocator = testing.allocator;
     // Generate a random error bound between 10 and 1000, which will be used for quantization.
     const error_bound = @floor(tester.generateBoundedRandomValue(
@@ -756,10 +768,10 @@ test "macaquev preserves values when xor has more than 31 leading zeros" {
     );
 
     try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
-    for (0..uncompressed_values.len) |i| {
+    for (0..uncompressed_values.len) |index| {
         try testing.expectApproxEqAbs(
-            uncompressed_values[i],
-            decompressed_values.items[i],
+            uncompressed_values[index],
+            decompressed_values.items[index],
             1e-07,
         );
     }

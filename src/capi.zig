@@ -288,30 +288,31 @@ fn errorToIndex(err: Error) i32 {
 }
 
 test "method enum must match method constants" {
-    try testing.expectEqual(@intFromEnum(tersets.Method.PoorMansCompressionMidrange), 0);
-    try testing.expectEqual(@intFromEnum(tersets.Method.PoorMansCompressionMean), 1);
-    try testing.expectEqual(@intFromEnum(tersets.Method.SwingFilter), 2);
-    try testing.expectEqual(@intFromEnum(tersets.Method.SwingFilterDisconnected), 3);
-    try testing.expectEqual(@intFromEnum(tersets.Method.SlideFilter), 4);
-    try testing.expectEqual(@intFromEnum(tersets.Method.SimPiece), 5);
-    try testing.expectEqual(@intFromEnum(tersets.Method.PiecewiseConstantHistogram), 6);
-    try testing.expectEqual(@intFromEnum(tersets.Method.PiecewiseLinearHistogram), 7);
-    try testing.expectEqual(@intFromEnum(tersets.Method.ABCLinearApproximation), 8);
-    try testing.expectEqual(@intFromEnum(tersets.Method.VisvalingamWhyatt), 9);
-    try testing.expectEqual(@intFromEnum(tersets.Method.SlidingWindow), 10);
-    try testing.expectEqual(@intFromEnum(tersets.Method.BottomUp), 11);
-    try testing.expectEqual(@intFromEnum(tersets.Method.MixPiece), 12);
-    try testing.expectEqual(@intFromEnum(tersets.Method.BitPackedQuantization), 13);
-    try testing.expectEqual(@intFromEnum(tersets.Method.RunLengthEncoding), 14);
-    try testing.expectEqual(@intFromEnum(tersets.Method.NonLinearApproximation), 15);
-    try testing.expectEqual(@intFromEnum(tersets.Method.SerfQT), 16);
-    try testing.expectEqual(@intFromEnum(tersets.Method.BitPackedBUFF), 17);
-    try testing.expectEqual(@intFromEnum(tersets.Method.Chimp64), 18);
-    try testing.expectEqual(@intFromEnum(tersets.Method.Chimp128), 19);
-    try testing.expectEqual(@intFromEnum(tersets.Method.BitPackedDeltaEncoding), 20);
-    try testing.expectEqual(@intFromEnum(tersets.Method.DiscreteFourierTransform), 21);
-    try testing.expectEqual(@intFromEnum(tersets.Method.MacaqueS), 22);
-    try testing.expectEqual(@intFromEnum(tersets.Method.MacaqueV), 23);
+    try testing.expectEqual(@intFromEnum(tersets.Method.Uncompressed), 0);
+    try testing.expectEqual(@intFromEnum(tersets.Method.PoorMansCompressionMidrange), 1);
+    try testing.expectEqual(@intFromEnum(tersets.Method.PoorMansCompressionMean), 2);
+    try testing.expectEqual(@intFromEnum(tersets.Method.SwingFilter), 3);
+    try testing.expectEqual(@intFromEnum(tersets.Method.SwingFilterDisconnected), 4);
+    try testing.expectEqual(@intFromEnum(tersets.Method.SlideFilter), 5);
+    try testing.expectEqual(@intFromEnum(tersets.Method.SimPiece), 6);
+    try testing.expectEqual(@intFromEnum(tersets.Method.PiecewiseConstantHistogram), 7);
+    try testing.expectEqual(@intFromEnum(tersets.Method.PiecewiseLinearHistogram), 8);
+    try testing.expectEqual(@intFromEnum(tersets.Method.ABCLinearApproximation), 9);
+    try testing.expectEqual(@intFromEnum(tersets.Method.VisvalingamWhyatt), 10);
+    try testing.expectEqual(@intFromEnum(tersets.Method.SlidingWindow), 11);
+    try testing.expectEqual(@intFromEnum(tersets.Method.BottomUp), 12);
+    try testing.expectEqual(@intFromEnum(tersets.Method.MixPiece), 13);
+    try testing.expectEqual(@intFromEnum(tersets.Method.BitPackedQuantization), 14);
+    try testing.expectEqual(@intFromEnum(tersets.Method.RunLengthEncoding), 15);
+    try testing.expectEqual(@intFromEnum(tersets.Method.NonLinearApproximation), 16);
+    try testing.expectEqual(@intFromEnum(tersets.Method.SerfQT), 17);
+    try testing.expectEqual(@intFromEnum(tersets.Method.BitPackedBUFF), 18);
+    try testing.expectEqual(@intFromEnum(tersets.Method.Chimp64), 19);
+    try testing.expectEqual(@intFromEnum(tersets.Method.Chimp128), 20);
+    try testing.expectEqual(@intFromEnum(tersets.Method.BitPackedDeltaEncoding), 21);
+    try testing.expectEqual(@intFromEnum(tersets.Method.DiscreteFourierTransform), 22);
+    try testing.expectEqual(@intFromEnum(tersets.Method.MacaqueS), 23);
+    try testing.expectEqual(@intFromEnum(tersets.Method.MacaqueV), 24);
 }
 
 test "error for unknown compression method" {
@@ -369,7 +370,7 @@ test "error for negative error bound when compressing" {
     };
     var compressed_values = CompressedValues{ .data = undefined, .len = undefined };
 
-    const method_index: u8 = 0;
+    const method_index: u8 = @intFromEnum(tersets.Method.PoorMansCompressionMidrange);
     const configuration = "{ \"abs_error_bound\": -1.0 }";
 
     const return_code = compress(
@@ -378,7 +379,6 @@ test "error for negative error bound when compressing" {
         method_index,
         configuration,
     );
-
     try testing.expectEqual(3, return_code);
 }
 
