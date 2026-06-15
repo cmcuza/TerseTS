@@ -43,6 +43,8 @@ const Method = tersets.Method;
 
 const maximum_u64_value: u64 = 0xFFFF_FFFF_FFFF_FFFF;
 const maximum_u64_bits: u7 = 64;
+const macaquev_end_marker_leading_zeros: u7 = 63;
+const macaquev_end_marker_significant_bits_length: u6 = 0;
 
 /// Helper struct to hold the number of `bits_needed` and the `rewritten_value` after
 /// applying the error bound-based rewriting.
@@ -71,20 +73,6 @@ pub fn compressMacaqueS(
     const error_bound: f64 = @floatCast(parsed_configuration.abs_error_bound);
 
     if (error_bound <= 0.0) return Error.InvalidConfiguration;
-
-    // Since the number of values is stored in 4 bytes in the compressed representation,
-    // we need to ensure that the input does not exceed this limit. This is reasonable since
-    // compressing more than 4 billion values is uncommon, while saving 4 bytes for most cases.
-    if (uncompressed_values.len >= math.maxInt(u32)) {
-        return Error.UnsupportedInput;
-    }
-
-    try shared_functions.appendValue(
-        allocator,
-        u32,
-        @as(u32, @intCast(uncompressed_values.len)),
-        compressed_values,
-    );
 
     var bit_writer = try shared_structs.BitWriter.init(allocator, compressed_values);
 
@@ -122,20 +110,6 @@ pub fn compressMacaqueV(
     const error_bound: f64 = @floatCast(parsed_configuration.abs_error_bound);
 
     if (error_bound <= 0.0) return Error.InvalidConfiguration;
-
-    // Since the number of values is stored in 4 bytes in the compressed representation,
-    // we need to ensure that the input does not exceed this limit. This is reasonable since
-    // compressing more than 4 billion values is uncommon, while saving 4 bytes for most cases.
-    if (uncompressed_values.len >= math.maxInt(u32)) {
-        return Error.UnsupportedInput;
-    }
-
-    try shared_functions.appendValue(
-        allocator,
-        u32,
-        @as(u32, @intCast(uncompressed_values.len)),
-        compressed_values,
-    );
 
     var bit_writer = try shared_structs.BitWriter.init(allocator, compressed_values);
 
@@ -221,6 +195,7 @@ pub fn compressMacaqueV(
         }
     }
 
+    try writeMacaqueVEndMarker(&bit_writer);
     try bit_writer.flushBits();
 }
 
@@ -232,28 +207,10 @@ pub fn decompressMacaqueS(
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
 ) Error!void {
-    // The first 4 bytes of `compressed_values` represent the number of values.
-    // At least those bytes should be present to be able to read the number of values.
-    if (compressed_values.len < 4) return Error.UnsupportedInput;
-
-    const number_of_values: usize = @intCast(@as(u32, @bitCast(compressed_values[0..4].*)));
-
-    const stream = Io.Reader.fixed(compressed_values[4..]);
+    const stream = Io.Reader.fixed(compressed_values);
     var bit_reader = shared_structs.BitReader.init(stream);
 
-    try decompressed_values.ensureTotalCapacity(allocator, number_of_values);
-
-    for (0..number_of_values) |_| {
-        const bits_needed: u6 = bit_reader.readBitsNoEof(u6, 6) catch return Error.ByteStreamError;
-
-        const most_significant_bits: u16 = @as(u16, bits_needed) + 12;
-
-        const packed_value: u64 = bit_reader.readBitsNoEof(u64, most_significant_bits) catch return Error.ByteStreamError;
-
-        const shift: u6 = @intCast(64 - most_significant_bits);
-        const rewritten_bits: u64 = packed_value << shift;
-        const value: f64 = @bitCast(rewritten_bits);
-
+    while (try readCompressedMacaqueValue(&bit_reader)) |value| {
         try decompressed_values.append(allocator, value);
     }
 }
@@ -266,26 +223,12 @@ pub fn decompressMacaqueV(
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
 ) Error!void {
-    // The first 4 bytes of `compressed_values` represent the number of values.
-    // At least those bytes should be present to be able to read the number of values.
-    if (compressed_values.len < 4) return Error.UnsupportedInput;
-
-    const number_of_values: usize = @intCast(@as(u32, @bitCast(compressed_values[0..4].*)));
-
-    const reader = std.Io.Reader.fixed(compressed_values[4..]);
+    const reader = Io.Reader.fixed(compressed_values);
     var bit_reader = shared_structs.BitReader.init(reader);
 
-    try decompressed_values.ensureTotalCapacity(allocator, number_of_values);
-
-    const bits_needed: u6 = bit_reader.readBitsNoEof(u6, 6) catch return Error.ByteStreamError;
-    const most_significant_bits: u16 = @as(u16, bits_needed) + 12;
-
-    const first_packed_value: u64 = bit_reader.readBitsNoEof(u64, most_significant_bits) catch return Error.ByteStreamError;
-
-    const shift: u6 = @intCast(64 - most_significant_bits);
-
     // The previous rewritten value is initialized with the first value, which is stored in full.
-    var previous_rewritten_value: u64 = first_packed_value << shift;
+    const first_value = try readCompressedMacaqueValue(&bit_reader) orelse return Error.UnsupportedInput;
+    var previous_rewritten_value: u64 = @bitCast(first_value);
     var previous_value: f64 = @bitCast(previous_rewritten_value);
 
     try decompressed_values.append(allocator, previous_value);
@@ -293,7 +236,7 @@ pub fn decompressMacaqueV(
     var last_leading_zeros: u7 = @clz(previous_rewritten_value);
     var last_trailing_zeros: u7 = @ctz(previous_rewritten_value);
 
-    for (1..number_of_values) |_| {
+    while (true) {
         const control_bit: u8 = bit_reader.readBitsNoEof(u8, 1) catch return Error.ByteStreamError;
 
         if (control_bit == 0) {
@@ -322,6 +265,13 @@ pub fn decompressMacaqueV(
                     bit_reader.readBitsNoEof(u7, 6) catch return Error.ByteStreamError;
                 const encoded_significant_bits_length: u6 =
                     bit_reader.readBitsNoEof(u6, 6) catch return Error.ByteStreamError;
+
+                if (leading_zeros == macaquev_end_marker_leading_zeros and
+                    encoded_significant_bits_length == macaquev_end_marker_significant_bits_length)
+                {
+                    break;
+                }
+
                 const significant_bits_length: u7 = if (encoded_significant_bits_length == 0)
                     maximum_u64_bits
                 else
@@ -422,6 +372,40 @@ fn writeCompressedMacaqueValue(bit_writer: *shared_structs.BitWriter, bits_neede
     const shift: u6 = @intCast(64 - most_significant_bits);
     const packed_value: u64 = value >> shift;
     try bit_writer.writeBits(packed_value, most_significant_bits);
+}
+
+/// Reads one Macaque value from `bit_reader`. Returns `null` when the reader reaches byte-alignment
+/// padding or the end of the stream before a new value starts. A partial value with non-zero remaining
+/// bits is treated as corrupted data.
+fn readCompressedMacaqueValue(bit_reader: *shared_structs.BitReader) Error!?f64 {
+    var bits_read: u16 = 0;
+    const bits_needed = bit_reader.readBits(u6, 6, &bits_read) catch return Error.ByteStreamError;
+
+    if (bits_read == 0) return null;
+    // If bits_read is between 1 and 5, it means we have a partial value that cannot be
+    // correctly read, so we treat it as an error.
+    if (bits_read < 6) {
+        return if (bits_needed == 0) null else Error.ByteStreamError;
+    }
+
+    const most_significant_bits: u16 = @as(u16, bits_needed) + 12;
+    const packed_value = bit_reader.readBits(u64, most_significant_bits, &bits_read) catch
+        return Error.ByteStreamError;
+
+    if (bits_read < most_significant_bits) {
+        return if (packed_value == 0) null else Error.ByteStreamError;
+    }
+
+    const shift: u6 = @intCast(64 - most_significant_bits);
+    const rewritten_bits: u64 = packed_value << shift;
+    return @bitCast(rewritten_bits);
+}
+
+fn writeMacaqueVEndMarker(bit_writer: *shared_structs.BitWriter) !void {
+    try bit_writer.writeBits(@as(u1, 0b1), 1); // header '1'.
+    try bit_writer.writeBits(@as(u1, 0b1), 1); // second control bit '1'.
+    try bit_writer.writeBits(macaquev_end_marker_leading_zeros, 6);
+    try bit_writer.writeBits(macaquev_end_marker_significant_bits_length, 6);
 }
 
 test "macaques can compress and decompress bounded values" {
