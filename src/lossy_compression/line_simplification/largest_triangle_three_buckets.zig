@@ -31,6 +31,12 @@ const DiscretePoint = shared_structs.DiscretePoint;
 
 const calculateArea = shared_functions.calculateTriangleArea;
 
+/// Compress `uncompressed_values` using "Largest Triangle Three Buckets" simplification algorithm by keeping
+/// points which form the greatest triangle between an anchor point of the previous bucket and the average point
+/// of the next bucket. The function writes the result to `compressed_values`. The `allocator` is used to
+/// allocate memory for `method_configuration` parser. The `method_configuration` is expected to be of
+/// `OutputThresholdNumber` type otherwise an `InvalidConfiguration` error is return.
+/// If any other error occurs during the execution of the method, it is returned.
 pub fn compress(
     allocator: Allocator,
     uncompressed_values: []const f64,
@@ -113,11 +119,51 @@ pub fn compress(
     try shared_functions.appendValue(allocator, usize, uncompressed_values.len, compressed_values);
 }
 
+/// Decompress `compressed_values` produced by "Largest Triangle Three Buckets" and write the
+/// result to `decompressed_values`. If an error occurs it is returned.
 pub fn decompress(allocator: Allocator, compressed_values: []const u8, decompressed_values: *ArrayList(f64)) Error!void {
-    //TODO
-    _ = allocator;
-    _ = compressed_values;
-    _ = decompressed_values;
+    // The compressed representation is composed of two values after getting the first since all
+    // segments are connected. Therefore, the condition checks that after the first value, the rest
+    // of the values are in pairs (value, index) and that they are all of type 64-bit float.
+    if ((compressed_values.len - 8) % 16 != 0) return Error.UnsupportedInput;
+
+    const compressed_lines_and_index = mem.bytesAsSlice(f64, compressed_values);
+
+    var index: usize = 0;
+
+    // Extract the start point from the compressed representation.
+    var start_point: DiscretePoint = .{ .index = 0, .value = compressed_lines_and_index[0] };
+    try decompressed_values.append(allocator, start_point.value);
+
+    // We need to create a segment for the linear function.
+    var slope: f64 = undefined;
+    var intercept: f64 = undefined;
+    while (index < compressed_lines_and_index.len - 1) : (index += 2) {
+        // index + 1 is the end value and index + 2 is the end time.
+        const end_point: DiscretePoint = .{
+            .index = @as(usize, @bitCast(compressed_lines_and_index[index + 2])),
+            .value = compressed_lines_and_index[index + 1],
+        };
+
+        if (start_point.index + 1 < end_point.index) {
+            // Create the linear approximation for the current segment.
+            const duration: f64 = @floatFromInt(end_point.index - start_point.index);
+            slope = (end_point.value - start_point.value) / duration;
+            intercept = start_point.value - slope *
+                @as(f64, @floatFromInt(start_point.index));
+
+            var current_index: usize = start_point.index + 1;
+            // Interpolate the values between the start and end points of the current segment.
+            while (current_index < end_point.index) : (current_index += 1) {
+                const y: f64 = slope * @as(f64, @floatFromInt(current_index)) + intercept;
+                try decompressed_values.append(allocator, y);
+            }
+        }
+        try decompressed_values.append(allocator, end_point.value);
+
+        // The start point of the next segment is the end point of the current segment.
+        start_point = end_point;
+    }
 }
 
 pub fn extract(
