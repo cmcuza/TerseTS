@@ -72,13 +72,10 @@ pub fn compressMacaqueS(
 
     const error_bound: f64 = @floatCast(parsed_configuration.abs_error_bound);
 
-    if (error_bound <= 0.0) return Error.InvalidConfiguration;
-
     var bit_writer = try shared_structs.BitWriter.init(allocator, compressed_values);
 
     // Rewrite each value according to the error bound, then write the packed representation.
     for (uncompressed_values) |value| {
-        if (!math.isFinite(value) or @abs(value) > tester.max_test_value) return Error.UnsupportedInput;
         const returned_values = rewriteValueBasedOnErrorBound(value, error_bound);
 
         const bits_needed: u6 = returned_values.bits_needed;
@@ -109,16 +106,9 @@ pub fn compressMacaqueV(
 
     const error_bound: f64 = @floatCast(parsed_configuration.abs_error_bound);
 
-    if (error_bound <= 0.0) return Error.InvalidConfiguration;
-
     var bit_writer = try shared_structs.BitWriter.init(allocator, compressed_values);
 
     const first_value: f64 = uncompressed_values[0];
-
-    // Check if the first value is finite and within the maximum test value.
-    // If not, return an error since it cannot be compressed.
-    if (!math.isFinite(first_value) or @abs(first_value) > tester.max_test_value)
-        return Error.UnsupportedInput;
 
     // The previous rewritten value is initialized with the first value, which is stored in full.
     var previous_rewritten_value = rewriteValueBasedOnErrorBound(first_value, error_bound);
@@ -137,9 +127,7 @@ pub fn compressMacaqueV(
     for (1..uncompressed_values.len) |index| {
         const value: f64 = uncompressed_values[index];
 
-        if (!math.isFinite(value) or @abs(value) > tester.max_test_value) return Error.UnsupportedInput;
-
-        if (@abs(value - previous_value) <= error_bound) {
+        if (canReusePreviousValue(value, previous_value, error_bound)) {
             // If the current value is within the error bound of the previous value,
             // a header bit of 0 is enough to repeat the previous value.
             try bit_writer.writeBits(@as(u1, 0b0), 1); // header '0'.
@@ -312,6 +300,11 @@ fn rewriteValueBasedOnErrorBound(
 
     // Interpret the f64 value as a u64 bit pattern to manipulate the bits directly.
     const value_as_u64: u64 = @bitCast(value);
+
+    if (error_bound == 0.0 or !math.isFinite(value)) {
+        return RewrittenValue{ .bits_needed = 52, .rewritten_value = value_as_u64 };
+    }
+
     // Extract the exponent.
     const exponent: f64 = @floatFromInt(getExponentU64(value_as_u64));
     // The variable `m` tells us how many bits we can rewrite while staying within the error bound.
@@ -330,7 +323,7 @@ fn rewriteValueBasedOnErrorBound(
     } else {
         // 0 < m < 1 => -log2(m) is positive and defines the required mantissa bits.
         const needed_f64 = @floor(-@log2(m));
-        bits_needed = @min(52, @as(u6, @intFromFloat(needed_f64)));
+        bits_needed = if (needed_f64 >= 52.0) 52 else @as(u6, @intFromFloat(needed_f64));
     }
 
     // The variable `rewrite_position` tells us how many of the least significant bits of the
@@ -362,6 +355,19 @@ fn getExponentU64(value: u64) i16 {
     return exponent_bits - 1023;
 }
 
+/// Determines if the `value` can be approximated by the `previous_value` within the `error_bound`.
+/// If the `error_bound` is zero, the function checks for exact bitwise equality. Otherwise, it checks if
+/// both values are finite and if their absolute difference is within the error bound.
+fn canReusePreviousValue(value: f64, previous_value: f64, error_bound: f64) bool {
+    if (error_bound == 0.0) {
+        return @as(u64, @bitCast(value)) == @as(u64, @bitCast(previous_value));
+    }
+
+    return math.isFinite(value) and
+        math.isFinite(previous_value) and
+        @abs(value - previous_value) <= error_bound;
+}
+
 /// Helper function to write a `value` using the `bit_writer`. The function writes `bits_needed` and
 /// `value` in a bit-packed format. The `bits_needed` value is written using 6 bits, and `value` is
 /// written using `bits_needed` plus 12 bits for the sign and exponent. If an error occurs during
@@ -382,8 +388,6 @@ fn readCompressedMacaqueValue(bit_reader: *shared_structs.BitReader) Error!?f64 
     const bits_needed = bit_reader.readBits(u6, 6, &bits_read) catch return Error.ByteStreamError;
 
     if (bits_read == 0) return null;
-    // If bits_read is between 1 and 5, it means we have a partial value that cannot be
-    // correctly read, so we treat it as an error.
     if (bits_read < 6) {
         return if (bits_needed == 0) null else Error.ByteStreamError;
     }
@@ -401,11 +405,26 @@ fn readCompressedMacaqueValue(bit_reader: *shared_structs.BitReader) Error!?f64 
     return @bitCast(rewritten_bits);
 }
 
+/// Writes a special end marker in `bit_writer` to indicate the end of the stream.
+/// The function returns an error if writing fails.
 fn writeMacaqueVEndMarker(bit_writer: *shared_structs.BitWriter) !void {
     try bit_writer.writeBits(@as(u1, 0b1), 1); // header '1'.
     try bit_writer.writeBits(@as(u1, 0b1), 1); // second control bit '1'.
     try bit_writer.writeBits(macaquev_end_marker_leading_zeros, 6);
     try bit_writer.writeBits(macaquev_end_marker_significant_bits_length, 6);
+}
+
+/// Helper function to compare two slices of `f64` values by their bit representation.
+/// This is necessary to correctly compare special values like NaN. The function returns
+/// an error if the slices have different lengths or if any pair of values differ.
+fn expectEqualF64Bits(expected_values: []const f64, actual_values: []const f64) !void {
+    try testing.expectEqual(expected_values.len, actual_values.len);
+    for (expected_values, actual_values) |expected_value, actual_value| {
+        try testing.expectEqual(
+            @as(u64, @bitCast(expected_value)),
+            @as(u64, @bitCast(actual_value)),
+        );
+    }
 }
 
 test "macaques can compress and decompress bounded values" {
@@ -474,65 +493,85 @@ test "macaquev can compress and decompress values with small differences between
     }
 }
 
-test "macaques cannot compress and decompress nan values" {
+test "macaques can losslessly compress and decompress special f64 values" {
     const allocator = testing.allocator;
-    const uncompressed_values = [3]f64{ 343.0, math.nan(f64), 520.0 };
+    const uncompressed_values = [8]f64{
+        343.0,
+        @bitCast(@as(u64, 0x7ff8_0000_0000_0001)),
+        math.inf(f64),
+        -math.inf(f64),
+        math.floatMax(f64),
+        -math.floatMax(f64),
+        -0.0,
+        0.0,
+    };
     var compressed_values = ArrayList(u8).empty;
     defer compressed_values.deinit(allocator);
 
     const method_configuration =
-        \\ {"abs_error_bound": 0.1}
+        \\ {"abs_error_bound": 0.0}
     ;
 
-    compressMacaqueS(
+    try compressMacaqueS(
         allocator,
         uncompressed_values[0..],
         &compressed_values,
         method_configuration,
-    ) catch |err| {
-        try testing.expectEqual(Error.UnsupportedInput, err);
-        return;
-    };
-
-    try testing.expectFmt(
-        "",
-        "The Macaque method cannot compress NaN values",
-        .{},
     );
+
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
+    try decompressMacaqueS(
+        allocator,
+        compressed_values.items,
+        &decompressed_values,
+    );
+
+    try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
+    try expectEqualF64Bits(uncompressed_values[0..], decompressed_values.items);
 }
 
-test "macaquev cannot compress and decompress nan values" {
+test "macaquev can losslessly compress and decompress special f64 values" {
     const allocator = testing.allocator;
-    const uncompressed_values = [3]f64{ 343.0, math.nan(f64), 520.0 };
+    const uncompressed_values = [8]f64{
+        343.0,
+        @bitCast(@as(u64, 0x7ff8_0000_0000_0001)),
+        math.inf(f64),
+        -math.inf(f64),
+        math.floatMax(f64),
+        -math.floatMax(f64),
+        -0.0,
+        0.0,
+    };
     var compressed_values = ArrayList(u8).empty;
     defer compressed_values.deinit(allocator);
 
     const method_configuration =
-        \\ {"abs_error_bound": 0.1}
+        \\ {"abs_error_bound": 0.0}
     ;
 
-    compressMacaqueV(
+    try compressMacaqueV(
         allocator,
         uncompressed_values[0..],
         &compressed_values,
         method_configuration,
-    ) catch |err| {
-        try testing.expectEqual(Error.UnsupportedInput, err);
-        return;
-    };
-
-    try testing.expectFmt(
-        "",
-        "The Macaque method cannot compress NaN values",
-        .{},
     );
+
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
+    try decompressMacaqueV(
+        allocator,
+        compressed_values.items,
+        &decompressed_values,
+    );
+
+    try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
+    try expectEqualF64Bits(uncompressed_values[0..], decompressed_values.items);
 }
 
-test "macaques cannot compress and decompress values exceeding floating-point precision limits" {
+test "macaques can compress and decompress values exceeding generated test limits" {
     const allocator = testing.allocator;
-    // A value exceeding floating-point precision limits refers to a number that cannot be
-    // accurately represented using f64 due to its magnitude, such as 1e20.
-    const uncompressed_values = [3]f64{ 343.0, 1e20, 520.0 };
+    const uncompressed_values = [3]f64{ 343.0, 1e20, -1e20 };
     var compressed_values = ArrayList(u8).empty;
     defer compressed_values.deinit(allocator);
 
@@ -540,28 +579,34 @@ test "macaques cannot compress and decompress values exceeding floating-point pr
         \\ {"abs_error_bound": 0.1}
     ;
 
-    compressMacaqueS(
+    try compressMacaqueS(
         allocator,
         uncompressed_values[0..],
         &compressed_values,
         method_configuration,
-    ) catch |err| {
-        try testing.expectEqual(Error.UnsupportedInput, err);
-        return;
-    };
-
-    try testing.expectFmt(
-        "",
-        "The Macaque method cannot compress values exceeding floating-point precision limits",
-        .{},
     );
+
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
+    try decompressMacaqueS(
+        allocator,
+        compressed_values.items,
+        &decompressed_values,
+    );
+
+    try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
+    for (0..uncompressed_values.len) |index| {
+        try testing.expectApproxEqAbs(
+            uncompressed_values[index],
+            decompressed_values.items[index],
+            0.1,
+        );
+    }
 }
 
-test "macaquev cannot compress and decompress values exceeding floating-point precision limits" {
+test "macaquev can compress and decompress values exceeding generated test limits" {
     const allocator = testing.allocator;
-    // A value exceeding floating-point precision limits refers to a number that cannot be
-    // accurately represented using f64 due to its magnitude, such as 1e20.
-    const uncompressed_values = [3]f64{ 343.0, 1e20, 520.0 };
+    const uncompressed_values = [3]f64{ 343.0, 1e20, -1e20 };
     var compressed_values = ArrayList(u8).empty;
     defer compressed_values.deinit(allocator);
 
@@ -569,21 +614,29 @@ test "macaquev cannot compress and decompress values exceeding floating-point pr
         \\ {"abs_error_bound": 0.1}
     ;
 
-    compressMacaqueV(
+    try compressMacaqueV(
         allocator,
         uncompressed_values[0..],
         &compressed_values,
         method_configuration,
-    ) catch |err| {
-        try testing.expectEqual(Error.UnsupportedInput, err);
-        return;
-    };
-
-    try testing.expectFmt(
-        "",
-        "The Macaque method cannot compress values exceeding floating-point precision limits",
-        .{},
     );
+
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
+    try decompressMacaqueV(
+        allocator,
+        compressed_values.items,
+        &decompressed_values,
+    );
+
+    try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
+    for (0..uncompressed_values.len) |index| {
+        try testing.expectApproxEqAbs(
+            uncompressed_values[index],
+            decompressed_values.items[index],
+            0.1,
+        );
+    }
 }
 
 test "macaques can compress and decompress within floating-point precision limits at different scales" {
