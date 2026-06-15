@@ -53,6 +53,14 @@ const RewrittenValue = struct {
     rewritten_value: u64,
 };
 
+/// Helper struct to hold the number of leading and trailing zeros in a `u64` value, which defines the
+/// range of significant bits. This is used in MacaqueV to optimize the storage of XOR differences
+/// between consecutive rewritten values.
+const SignificantBitRange = struct {
+    leading_zeros: u7,
+    trailing_zeros: u7,
+};
+
 /// Compress `uncompressed_values` within an error bound using MacaqueS. The function performs the
 /// lossy rewriting based on the provided `AbsoluteErrorBound`'s `method_configuration` and
 /// bit-packs the rewritten values. The compressed representation is written in `compressed_values`.
@@ -119,8 +127,7 @@ pub fn compressMacaqueV(
         previous_rewritten_value.rewritten_value,
     );
 
-    var last_leading_zeros: u7 = @clz(previous_rewritten_value.rewritten_value);
-    var last_trailing_zeros: u7 = @ctz(previous_rewritten_value.rewritten_value);
+    var last_significant_bit_range = significantBitRange(previous_rewritten_value.rewritten_value);
 
     var previous_value: f64 = @bitCast(previous_rewritten_value.rewritten_value);
 
@@ -145,39 +152,48 @@ pub fn compressMacaqueV(
             try bit_writer.writeBits(@as(u1, 0b0), 1); // header '0'.
         } else {
             try bit_writer.writeBits(@as(u1, 0b1), 1); // header '1'.
-            const leading_zeros: u7 = @clz(xor_value);
-            const trailing_zeros: u7 = @ctz(xor_value);
+            const current_significant_bit_range = significantBitRange(xor_value);
 
-            if (trailing_zeros >= last_trailing_zeros and leading_zeros >= last_leading_zeros) {
-                try bit_writer.writeBits(@as(u1, 0b0), 1); // second control bit '0'.
+            if (current_significant_bit_range.trailing_zeros >= last_significant_bit_range.trailing_zeros and
+                current_significant_bit_range.leading_zeros >= last_significant_bit_range.leading_zeros)
+            {
+                try bit_writer.writeBits(@as(u1, 0b0), 1); // header '0'.
 
                 // Reuse the previous leading and trailing zero counts, so only the significant bits
                 // between them need to be stored.
                 const significant_bits_length: u7 =
-                    maximum_u64_bits - last_leading_zeros - last_trailing_zeros;
-                const significant_bits: u64 = xor_value >> @as(u6, @intCast(last_trailing_zeros));
+                    maximum_u64_bits -
+                    last_significant_bit_range.leading_zeros -
+                    last_significant_bit_range.trailing_zeros;
+                const significant_bits: u64 =
+                    xor_value >> @as(u6, @intCast(last_significant_bit_range.trailing_zeros));
 
                 // Store the significant bits that differ from the previous value.
                 try bit_writer.writeBits(significant_bits, significant_bits_length);
             } else {
-                try bit_writer.writeBits(@as(u1, 0b1), 1); // second control bit '1'.
+                try bit_writer.writeBits(@as(u1, 0b1), 1); // header '1'.
 
                 // We need to store the leading zeros, significant bits length,
                 // and the significant bits that differ from the previous value.
                 // A u64 XOR can have 0..63 leading zeros, so this field needs 6 bits.
-                try bit_writer.writeBits(@as(u6, @intCast(leading_zeros)), 6);
+                try bit_writer.writeBits(@as(u6, @intCast(current_significant_bit_range.leading_zeros)), 6);
 
-                const meaningful_bits: u7 = maximum_u64_bits - leading_zeros - trailing_zeros;
+                const meaningful_bits: u7 =
+                    maximum_u64_bits -
+                    current_significant_bit_range.leading_zeros -
+                    current_significant_bit_range.trailing_zeros;
 
-                // Store the significant bits length in 6 bits.
-                try bit_writer.writeBits(meaningful_bits, 6);
-                const significant_bits: u64 = xor_value >> @as(u6, @intCast(trailing_zeros));
+                // Store 0 when all 64 bits are significant.
+                const encoded_meaningful_bits: u6 =
+                    if (meaningful_bits == maximum_u64_bits) 0 else @intCast(meaningful_bits);
+                try bit_writer.writeBits(encoded_meaningful_bits, 6);
+                const significant_bits: u64 =
+                    xor_value >> @as(u6, @intCast(current_significant_bit_range.trailing_zeros));
 
                 // Store the significant bits that differ from the previous value.
                 try bit_writer.writeBits(significant_bits, meaningful_bits);
 
-                last_leading_zeros = leading_zeros;
-                last_trailing_zeros = trailing_zeros;
+                last_significant_bit_range = current_significant_bit_range;
             }
             previous_rewritten_value = current_rewritten_value;
         }
@@ -221,27 +237,30 @@ pub fn decompressMacaqueV(
 
     try decompressed_values.append(allocator, previous_value);
 
-    var last_leading_zeros: u7 = @clz(previous_rewritten_value);
-    var last_trailing_zeros: u7 = @ctz(previous_rewritten_value);
+    var last_significant_bit_range = significantBitRange(previous_rewritten_value);
 
     while (true) {
-        const control_bit: u8 = bit_reader.readBitsNoEof(u8, 1) catch return Error.ByteStreamError;
+        const control_bit: u8 = bit_reader.readBitsNoEof(u8, 1) catch return Error.CorruptedCompressedData;
 
         if (control_bit == 0) {
             try decompressed_values.append(allocator, previous_value);
         } else {
-            const second_control_bit: u8 = bit_reader.readBitsNoEof(u8, 1) catch return Error.ByteStreamError;
+            const second_control_bit: u8 =
+                bit_reader.readBitsNoEof(u8, 1) catch return Error.CorruptedCompressedData;
 
             if (second_control_bit == 0) {
                 // Reuse the previous leading and trailing zero counts, so only the significant bits
                 // between them need to be read.
                 const significant_bits_length: u7 =
-                    maximum_u64_bits - last_leading_zeros - last_trailing_zeros;
+                    maximum_u64_bits -
+                    last_significant_bit_range.leading_zeros -
+                    last_significant_bit_range.trailing_zeros;
                 const significant_bits: u64 =
                     bit_reader.readBitsNoEof(u64, significant_bits_length) catch
-                        return Error.ByteStreamError;
+                        return Error.CorruptedCompressedData;
 
-                const xor_value: u64 = significant_bits << @as(u6, @intCast(last_trailing_zeros));
+                const xor_value: u64 =
+                    significant_bits << @as(u6, @intCast(last_significant_bit_range.trailing_zeros));
                 const rewritten_value: u64 = previous_rewritten_value ^ xor_value; // Luckily, XOR is its own inverse.
                 previous_value = @bitCast(rewritten_value);
                 try decompressed_values.append(allocator, previous_value);
@@ -250,9 +269,9 @@ pub fn decompressMacaqueV(
                 // The previous XOR range cannot be reused, so read a new leading zero count,
                 // significant bits length, and significant bits.
                 const leading_zeros: u7 =
-                    bit_reader.readBitsNoEof(u7, 6) catch return Error.ByteStreamError;
+                    bit_reader.readBitsNoEof(u7, 6) catch return Error.CorruptedCompressedData;
                 const encoded_significant_bits_length: u6 =
-                    bit_reader.readBitsNoEof(u6, 6) catch return Error.ByteStreamError;
+                    bit_reader.readBitsNoEof(u6, 6) catch return Error.CorruptedCompressedData;
 
                 if (leading_zeros == macaquev_end_marker_leading_zeros and
                     encoded_significant_bits_length == macaquev_end_marker_significant_bits_length)
@@ -266,12 +285,12 @@ pub fn decompressMacaqueV(
                     @as(u7, encoded_significant_bits_length);
 
                 if (leading_zeros + significant_bits_length > maximum_u64_bits) {
-                    return Error.ByteStreamError;
+                    return Error.CorruptedCompressedData;
                 }
 
                 const significant_bits: u64 =
                     bit_reader.readBitsNoEof(u64, significant_bits_length) catch
-                        return Error.ByteStreamError;
+                        return Error.CorruptedCompressedData;
 
                 // All needed information is read from the compressed representation.
                 // Now we can reconstruct the next rewritten value.
@@ -283,8 +302,10 @@ pub fn decompressMacaqueV(
                 try decompressed_values.append(allocator, previous_value);
 
                 previous_rewritten_value = rewritten_value;
-                last_leading_zeros = leading_zeros;
-                last_trailing_zeros = maximum_u64_bits - leading_zeros - significant_bits_length;
+                last_significant_bit_range = .{
+                    .leading_zeros = leading_zeros,
+                    .trailing_zeros = maximum_u64_bits - leading_zeros - significant_bits_length,
+                };
             }
         }
     }
@@ -355,6 +376,19 @@ fn getExponentU64(value: u64) i16 {
     return exponent_bits - 1023;
 }
 
+/// Helper function to calculate the number of leading and trailing zeros in a `u64` value.
+/// The function returns a `SignificantBitRange` containing the counts of leading and trailing zeros.
+fn significantBitRange(value: u64) SignificantBitRange {
+    if (value == 0) {
+        return .{ .leading_zeros = maximum_u64_bits, .trailing_zeros = 0 };
+    }
+
+    return .{
+        .leading_zeros = @clz(value),
+        .trailing_zeros = @ctz(value),
+    };
+}
+
 /// Determines if the `value` can be approximated by the `previous_value` within the `error_bound`.
 /// If the `error_bound` is zero, the function checks for exact bitwise equality. Otherwise, it checks if
 /// both values are finite and if their absolute difference is within the error bound.
@@ -385,19 +419,20 @@ fn writeCompressedMacaqueValue(bit_writer: *shared_structs.BitWriter, bits_neede
 /// bits is treated as corrupted data.
 fn readCompressedMacaqueValue(bit_reader: *shared_structs.BitReader) Error!?f64 {
     var bits_read: u16 = 0;
-    const bits_needed = bit_reader.readBits(u6, 6, &bits_read) catch return Error.ByteStreamError;
+    const bits_needed = bit_reader.readBits(u6, 6, &bits_read) catch return Error.CorruptedCompressedData;
 
     if (bits_read == 0) return null;
     if (bits_read < 6) {
-        return if (bits_needed == 0) null else Error.ByteStreamError;
+        return if (bits_needed == 0) null else Error.CorruptedCompressedData;
     }
+    if (bits_needed > 52) return Error.CorruptedCompressedData;
 
     const most_significant_bits: u16 = @as(u16, bits_needed) + 12;
     const packed_value = bit_reader.readBits(u64, most_significant_bits, &bits_read) catch
-        return Error.ByteStreamError;
+        return Error.CorruptedCompressedData;
 
     if (bits_read < most_significant_bits) {
-        return if (packed_value == 0) null else Error.ByteStreamError;
+        return if (packed_value == 0) null else Error.CorruptedCompressedData;
     }
 
     const shift: u6 = @intCast(64 - most_significant_bits);
@@ -409,7 +444,7 @@ fn readCompressedMacaqueValue(bit_reader: *shared_structs.BitReader) Error!?f64 
 /// The function returns an error if writing fails.
 fn writeMacaqueVEndMarker(bit_writer: *shared_structs.BitWriter) !void {
     try bit_writer.writeBits(@as(u1, 0b1), 1); // header '1'.
-    try bit_writer.writeBits(@as(u1, 0b1), 1); // second control bit '1'.
+    try bit_writer.writeBits(@as(u1, 0b1), 1); // header '1'.
     try bit_writer.writeBits(macaquev_end_marker_leading_zeros, 6);
     try bit_writer.writeBits(macaquev_end_marker_significant_bits_length, 6);
 }

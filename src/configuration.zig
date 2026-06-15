@@ -148,12 +148,18 @@ pub fn defaultConfigurationBuilder(
         .NonLinearApproximation,
         .SerfQT,
         .BitPackedQuantization,
+        => blk: {
+            break :blk try getDefaultAbsoluteErrorConfiguration(
+                allocator,
+                random_f32,
+            );
+        },
         .MacaqueS,
         .MacaqueV,
         => blk: {
             break :blk try getDefaultAbsoluteErrorConfiguration(
                 allocator,
-                random_f32,
+                0.0,
             );
         },
 
