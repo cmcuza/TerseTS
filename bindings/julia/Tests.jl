@@ -145,6 +145,7 @@ end
             line = strip(line)
             line = rstrip(line, ',')
             isempty(line) && continue
+            startswith(line, "///") && continue
             push!(members, line)
         end
 

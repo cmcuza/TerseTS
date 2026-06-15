@@ -36,17 +36,11 @@ const non_linear_approximation = @import(
 );
 
 // Import value approximation methods.
-const piecewise_histogram = @import(
-    "lossy_compression/value_representation/histogram_representation.zig",
-);
-const bitpacked_quantization = @import(
-    "lossy_compression/value_representation/bitpacked_quantization.zig",
-);
-const serfqt = @import(
-    "lossy_compression/value_representation/serf_qt.zig",
-);
-
+const piecewise_histogram = @import("lossy_compression/value_representation/histogram_representation.zig");
+const bitpacked_quantization = @import("lossy_compression/value_representation/bitpacked_quantization.zig");
+const serfqt = @import("lossy_compression/value_representation/serf_qt.zig");
 const buff = @import("lossy_compression/value_representation/bounded_fast_floats.zig");
+const macaque = @import("lossy_compression/value_representation/macaque.zig");
 
 // Import line simplification methods.
 const vw = @import("lossy_compression/line_simplification/visvalingam_whyatt.zig");
@@ -83,6 +77,10 @@ pub const Error = error{
 
 /// The compression methods in TerseTS.
 pub const Method = enum {
+    /// Stores every `f64` value as its raw 8-byte IEEE 754 representation with no
+    /// transformation. This is the default for single-element inputs and can be used
+    /// explicitly whenever a lossless, format-agnostic encoding is needed.
+    Uncompressed,
     PoorMansCompressionMidrange,
     PoorMansCompressionMean,
     SwingFilter,
@@ -105,6 +103,8 @@ pub const Method = enum {
     Chimp128,
     BitPackedDeltaEncoding,
     DiscreteFourierTransform,
+    MacaqueS,
+    MacaqueV,
 };
 
 /// Compress `uncompressed_values` using `method` and its `configuration` and returns the results
@@ -125,6 +125,7 @@ pub fn compress(
     } else if (uncompressed_values.len == 1) {
         const value_as_bytes: [8]u8 = @bitCast(uncompressed_values[0]);
         try compressed_values.appendSlice(allocator, value_as_bytes[0..]);
+        try compressed_values.append(allocator, @intFromEnum(Method.Uncompressed));
         return compressed_values;
     }
 
@@ -305,6 +306,28 @@ pub fn compress(
                 configuration,
             );
         },
+        .MacaqueS => {
+            try macaque.compressMacaqueS(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                configuration,
+            );
+        },
+        .MacaqueV => {
+            try macaque.compressMacaqueV(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                configuration,
+            );
+        },
+        .Uncompressed => {
+            for (uncompressed_values) |value| {
+                const value_as_bytes: [8]u8 = @bitCast(value);
+                try compressed_values.appendSlice(allocator, value_as_bytes[0..]);
+            }
+        },
     }
     try compressed_values.append(allocator, @intFromEnum(method));
     return compressed_values;
@@ -319,12 +342,8 @@ pub fn decompress(
 ) Error!ArrayList(f64) {
     var decompressed_values = ArrayList(f64).empty;
 
-    // Handle the trivial cases of zero or one element.
+    // Handle the trivial case of zero elements.
     if (compressed_values.len == 0) {
-        return decompressed_values;
-    } else if (compressed_values.len == 8) {
-        const value: f64 = @bitCast(compressed_values[0..8].*);
-        try decompressed_values.append(allocator, value);
         return decompressed_values;
     }
 
@@ -395,6 +414,20 @@ pub fn decompress(
         },
         .Chimp128 => {
             try chimp128.decompress(allocator, compressed_values_slice, &decompressed_values);
+        },
+        .MacaqueS => {
+            try macaque.decompressMacaqueS(allocator, compressed_values_slice, &decompressed_values);
+        },
+        .MacaqueV => {
+            try macaque.decompressMacaqueV(allocator, compressed_values_slice, &decompressed_values);
+        },
+        .Uncompressed => {
+            if (compressed_values_slice.len % 8 != 0) return Error.CorruptedCompressedData;
+            var offset: usize = 0;
+            while (offset < compressed_values_slice.len) : (offset += 8) {
+                const value: f64 = @bitCast(compressed_values_slice[offset..][0..8].*);
+                try decompressed_values.append(allocator, value);
+            }
         },
     }
 
@@ -541,6 +574,7 @@ pub fn extract(
         // corrupted streams or misinterpretation of the data during decompression.
         // In case of RLE, modifying the coefficients can disrupt the run-length
         // encoding scheme, also leading to incorrect decompression results.
+        .Uncompressed,
         .BitPackedQuantization,
         .BitPackedDeltaEncoding,
         .SerfQT,
@@ -548,6 +582,8 @@ pub fn extract(
         .BitPackedBUFF,
         .Chimp64,
         .Chimp128,
+        .MacaqueS,
+        .MacaqueV,
         => {
             return Error.UnsupportedMethod;
         },
@@ -688,6 +724,7 @@ pub fn rebuild(
         // corrupted streams or misinterpretation of the data during decompression.
         // In case of RLE, modifying the coefficients can disrupt the run-length
         // encoding scheme, also leading to incorrect decompression results.
+        .Uncompressed,
         .BitPackedQuantization,
         .BitPackedDeltaEncoding,
         .BitPackedBUFF,
@@ -695,6 +732,8 @@ pub fn rebuild(
         .RunLengthEncoding,
         .Chimp64,
         .Chimp128,
+        .MacaqueS,
+        .MacaqueV,
         => {
             return Error.UnsupportedMethod;
         },
@@ -734,13 +773,16 @@ test "extract and rebuild works for any compression method supported" {
     inline for (std.meta.fields(Method)) |method_field| {
         const method: Method = @enumFromInt(method_field.value);
 
-        if (method == Method.BitPackedQuantization or
+        if (method == Method.Uncompressed or
+            method == Method.BitPackedQuantization or
             method == Method.SerfQT or
             method == Method.RunLengthEncoding or
             method == Method.BitPackedDeltaEncoding or
             method == Method.BitPackedBUFF or
             method == Method.Chimp64 or
-            method == Method.Chimp128)
+            method == Method.Chimp128 or
+            method == Method.MacaqueS or
+            method == Method.MacaqueV)
         {
             // These compression methods are not supported for extraction
             // of the coefficients and indices. This is because even small
@@ -803,4 +845,40 @@ test "extract and rebuild works for any compression method supported" {
         try testing.expectEqual(rebuild_values.items.len, compressed_values.items.len);
         try testing.expectEqualSlices(u8, rebuild_values.items, compressed_values.items);
     }
+}
+
+test "Uncompressed compresses and decompresses any number of elements" {
+    const allocator = testing.allocator;
+    const values = [_]f64{ 1.0, -2.5, 3.14159, 0.0 };
+
+    const configuration = try configuration_file.defaultConfigurationBuilder(
+        allocator,
+        .Uncompressed,
+    );
+    defer allocator.free(configuration);
+
+    // Multi-element round-trip.
+    var compressed = try compress(allocator, values[0..], .Uncompressed, configuration);
+    defer compressed.deinit(allocator);
+
+    var decompressed = try decompress(allocator, compressed.items);
+    defer decompressed.deinit(allocator);
+
+    try testing.expectEqual(values.len, decompressed.items.len);
+    for (values, decompressed.items) |expected, actual| {
+        try testing.expectEqual(@as(u64, @bitCast(expected)), @as(u64, @bitCast(actual)));
+    }
+
+    // Single-element round-trip (any method defaults to Uncompressed for one element).
+    var compressed_single = try compress(allocator, values[0..1], .Uncompressed, configuration);
+    defer compressed_single.deinit(allocator);
+
+    var decompressed_single = try decompress(allocator, compressed_single.items);
+    defer decompressed_single.deinit(allocator);
+
+    try testing.expectEqual(@as(usize, 1), decompressed_single.items.len);
+    try testing.expectEqual(
+        @as(u64, @bitCast(values[0])),
+        @as(u64, @bitCast(decompressed_single.items[0])),
+    );
 }

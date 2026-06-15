@@ -27,6 +27,7 @@ pub use error::{Result, TerseTSError};
 /// Mirror TerseTS Method Enum.
 #[repr(u8)]
 pub enum Method {
+    Uncompressed,
     PoorMansCompressionMidrange,
     PoorMansCompressionMean,
     SwingFilter,
@@ -49,6 +50,8 @@ pub enum Method {
     Chimp128,
     BitPackedDeltaEncoding,
     DiscreteFourierTransform,
+    MacaqueS,
+    MacaqueV,
 }
 
 /// Compress a slice of [`f64`] in `uncompressed_values` to a [`Vec`] of [`u8`] with a TerseTS

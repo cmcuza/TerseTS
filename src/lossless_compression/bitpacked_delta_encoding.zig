@@ -77,7 +77,7 @@ pub fn compress(
     var minimum_scale: f64 = math.floatMax(f64); // minimum required precision.
     var maximum_scale: f64 = 1.0; // maximum required precision.
     for (uncompressed_values) |value| {
-        if (!math.isFinite(value) or value > 1e15)
+        if (!math.isFinite(value) or @abs(value) > 1e15)
             return Error.UnsupportedInput;
 
         if (!isEffectivelyInteger(value)) {

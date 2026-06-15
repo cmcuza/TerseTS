@@ -155,6 +155,8 @@ class MethodEnumMatchTest(unittest.TestCase):
         for line in body.splitlines():
             line = line.strip().rstrip(",")
             if line:
+                if line.startswith("///"):
+                    continue
                 if "=" in line:
                     name, _ = [part.strip() for part in line.split("=", 1)]
                     enum_members.append(name)
