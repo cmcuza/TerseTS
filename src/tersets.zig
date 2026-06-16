@@ -801,7 +801,7 @@ test "extract and rebuild works for any compression method supported" {
             method == Method.Chimp64 or
             method == Method.Chimp128 or
             method == Method.MacaqueS or
-            method == Method.MacaqueV)
+            method == Method.MacaqueV or
             method == Method.Chimp128 or
             method == Method.Camel)
         {
