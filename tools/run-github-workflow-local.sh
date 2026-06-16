@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 
 # Copyright 2026 TerseTS Contributors
 #
@@ -14,14 +14,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# This script is intended to be run from the root of the repository 
-# and will execute the same steps as the GitHub workflow defined in
-# .github/workflows/ci.yml, allowing you to verify that the workflow will
-# succeed locally before pushing changes.
+# Mirrors .github/workflows/ci.yml for local verification before pushing.
 
-set -euo pipefail
+set -eu
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 
 export CARGO_TERM_COLOR=always
 export RUSTFLAGS="-D warnings"
@@ -31,21 +28,22 @@ print_step() {
     printf "\n==> %s\n" "$1"
 }
 
+# Accumulates names of missing commands and reports them all at once.
 assert_command_available() {
-    local missing_commands=()
+    local missing_commands=""
     local command_name
 
     for command_name in "$@"
     do
         if ! command -v "$command_name" >/dev/null 2>&1
         then
-            missing_commands+=("$command_name")
+            missing_commands="${missing_commands:+$missing_commands }$command_name"
         fi
     done
 
-    if [ "${#missing_commands[@]}" -gt 0 ]
+    if [ -n "$missing_commands" ]
     then
-        printf "Required commands not found in PATH: %s\n" "${missing_commands[*]}" >&2
+        printf "Required commands not found in PATH: %s\n" "$missing_commands" >&2
         exit 1
     fi
 }
@@ -54,7 +52,7 @@ assert_command_available zig gcc julia python rustup cargo
 
 cd "$repo_root"
 
-# Build the native library first so local bindings can load zig-out artifacts.
+# Build in both modes first so binding tests can load the zig-out artifacts.
 print_step "Zig fmt Check"
 zig fmt --check .
 print_step "Zig Build Debug"
@@ -66,17 +64,14 @@ zig build test -Doptimize="Debug"
 print_step "Zig Build Test ReleaseFast"
 zig build test -Doptimize="ReleaseFast"
 
-# Julia
 cd "$repo_root/bindings/julia"
 print_step "Julia Run Unittest"
 julia Tests.jl
 
-# Python
-cd "$repo_root"
+# Install from source, confirm the package resolves from site-packages, then test.
 cd "$repo_root/bindings/python"
 print_step "Python Install Binding"
 python -m pip install . -v
-cd "$repo_root"
 print_step "Python Verify Installed Binding Import"
 python - <<'PY'
 import pathlib
@@ -86,14 +81,11 @@ library_path = str(pathlib.Path(tersets.__file__)).lower()
 print(library_path)
 assert "site-packages" in library_path or "dist-packages" in library_path
 PY
-cd "$repo_root/bindings/python"
 print_step "Python Run Unittest"
 python -m unittest --verbose
 
-# The presence of .dylib files breaks static linking on macOS in CI.
-# Run the same cleanup locally to mirror the workflow before Rust tasks.
+# Zig outputs .dylib files into zig-out that break Rust static linking on macOS.
 cd "$repo_root"
-
 print_step "Clear Zig Cache and Zig Out"
 rm -rf .zig-cache zig-out
 
