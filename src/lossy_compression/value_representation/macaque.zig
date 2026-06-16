@@ -1,0 +1,898 @@
+// Copyright 2026 TerseTS Contributors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Implementation of two variations of the Macaque algorithm from the paper
+//! "Abduvoris Abduvakhobov, Søren Kejser Jensen, Christian Thomsen, Torben Bach Pedersen".
+//! Compressing High-Frequency Time Series Through Multiple Models and Stealing from Residuals.
+//! ICDE 2026.
+//! This module implements MacaqueV as proposed in the original paper and MacaqueS, which is a
+//! simplified version that bit-packs the rewritten values without the additional XOR steps.
+//! MacaqueS is useful when consecutive values do not usually share long prefixes after rewriting,
+//! since it avoids the extra XOR metadata that MacaqueV stores for each changed value. MacaqueV can
+//! achieve better results when consecutive rewritten values are similar, since XOR encoding stores
+//! only the changed bits.
+
+const std = @import("std");
+const math = std.math;
+const mem = std.mem;
+const Io = std.Io;
+const testing = std.testing;
+const Writer = Io.Writer;
+const ArrayList = std.ArrayList;
+const Allocator = mem.Allocator;
+
+const tersets = @import("../../tersets.zig");
+const shared_structs = @import("../../utilities/shared_structs.zig");
+const configuration = @import("../../configuration.zig");
+const Error = tersets.Error;
+const tester = @import("../../tester.zig");
+
+const shared_functions = @import("../../utilities/shared_functions.zig");
+const Method = tersets.Method;
+
+const maximum_u64_value: u64 = 0xFFFF_FFFF_FFFF_FFFF;
+const maximum_u64_bits: u7 = 64;
+const macaquev_end_marker_leading_zeros: u7 = 63;
+const macaquev_end_marker_significant_bits_length: u6 = 0;
+
+/// Helper struct to hold the number of `bits_needed` and the `rewritten_value` after
+/// applying the error bound-based rewriting.
+const RewrittenValue = struct {
+    bits_needed: u6,
+    rewritten_value: u64,
+};
+
+/// Helper struct to hold the number of leading and trailing zeros in a `u64` value, which defines the
+/// range of significant bits. This is used in MacaqueV to optimize the storage of XOR differences
+/// between consecutive rewritten values.
+const SignificantBitRange = struct {
+    leading_zeros: u7,
+    trailing_zeros: u7,
+};
+
+/// Compress `uncompressed_values` within an error bound using MacaqueS. The function performs the
+/// lossy rewriting based on the provided `AbsoluteErrorBound`'s `method_configuration` and
+/// bit-packs the rewritten values. The compressed representation is written in `compressed_values`.
+/// The `allocator` is used for intermediate containers and the `method_configuration` parser. If an
+/// error occurs it is returned.
+pub fn compressMacaqueS(
+    allocator: Allocator,
+    uncompressed_values: []const f64,
+    compressed_values: *ArrayList(u8),
+    method_configuration: []const u8,
+) Error!void {
+    const parsed_configuration = try configuration.parse(
+        allocator,
+        configuration.AbsoluteErrorBound,
+        method_configuration,
+    );
+
+    const error_bound: f64 = @floatCast(parsed_configuration.abs_error_bound);
+
+    var bit_writer = try shared_structs.BitWriter.init(allocator, compressed_values);
+
+    // Rewrite each value according to the error bound, then write the packed representation.
+    for (uncompressed_values) |value| {
+        const returned_values = rewriteValueBasedOnErrorBound(value, error_bound);
+
+        const bits_needed: u6 = returned_values.bits_needed;
+        const rewritten_value: u64 = returned_values.rewritten_value;
+
+        try writeCompressedMacaqueValue(&bit_writer, bits_needed, rewritten_value);
+    }
+
+    try bit_writer.flushBits();
+}
+
+/// Compress `uncompressed_values` within an error bound using MacaqueV. The function performs the
+/// lossy rewriting based on the provided `AbsoluteErrorBound`'s `method_configuration`. The
+/// compressed representation is written in `compressed_values` using the XOR-based encoding from
+/// the original paper. The `allocator` is used for intermediate containers and the
+/// `method_configuration` parser. If an error occurs it is returned.
+pub fn compressMacaqueV(
+    allocator: Allocator,
+    uncompressed_values: []const f64,
+    compressed_values: *ArrayList(u8),
+    method_configuration: []const u8,
+) Error!void {
+    const parsed_configuration = try configuration.parse(
+        allocator,
+        configuration.AbsoluteErrorBound,
+        method_configuration,
+    );
+
+    const error_bound: f64 = @floatCast(parsed_configuration.abs_error_bound);
+
+    var bit_writer = try shared_structs.BitWriter.init(allocator, compressed_values);
+
+    const first_value: f64 = uncompressed_values[0];
+
+    // The previous rewritten value is initialized with the first value, which is stored in full.
+    var previous_rewritten_value = rewriteValueBasedOnErrorBound(first_value, error_bound);
+
+    try writeCompressedMacaqueValue(
+        &bit_writer,
+        previous_rewritten_value.bits_needed,
+        previous_rewritten_value.rewritten_value,
+    );
+
+    var last_significant_bit_range = significantBitRange(previous_rewritten_value.rewritten_value);
+
+    var previous_value: f64 = @bitCast(previous_rewritten_value.rewritten_value);
+
+    for (1..uncompressed_values.len) |index| {
+        const value: f64 = uncompressed_values[index];
+
+        if (canReusePreviousValue(value, previous_value, error_bound)) {
+            // If the current value is within the error bound of the previous value,
+            // a header bit of 0 is enough to repeat the previous value.
+            try bit_writer.writeBits(@as(u1, 0b0), 1); // header '0'.
+            continue;
+        }
+
+        const current_rewritten_value = rewriteValueBasedOnErrorBound(value, error_bound);
+
+        previous_value = @bitCast(current_rewritten_value.rewritten_value);
+
+        // XOR the previous and current rewritten values to find the bits that differ.
+        const xor_value: u64 = previous_rewritten_value.rewritten_value ^ current_rewritten_value.rewritten_value;
+
+        if (xor_value == 0) {
+            try bit_writer.writeBits(@as(u1, 0b0), 1); // header '0'.
+        } else {
+            try bit_writer.writeBits(@as(u1, 0b1), 1); // header '1'.
+            const current_significant_bit_range = significantBitRange(xor_value);
+
+            if (current_significant_bit_range.trailing_zeros >= last_significant_bit_range.trailing_zeros and
+                current_significant_bit_range.leading_zeros >= last_significant_bit_range.leading_zeros)
+            {
+                try bit_writer.writeBits(@as(u1, 0b0), 1); // header '0'.
+
+                // Reuse the previous leading and trailing zero counts, so only the significant bits
+                // between them need to be stored.
+                const significant_bits_length: u7 =
+                    maximum_u64_bits -
+                    last_significant_bit_range.leading_zeros -
+                    last_significant_bit_range.trailing_zeros;
+                const significant_bits: u64 =
+                    xor_value >> @as(u6, @intCast(last_significant_bit_range.trailing_zeros));
+
+                // Store the significant bits that differ from the previous value.
+                try bit_writer.writeBits(significant_bits, significant_bits_length);
+            } else {
+                try bit_writer.writeBits(@as(u1, 0b1), 1); // header '1'.
+
+                // We need to store the leading zeros, significant bits length,
+                // and the significant bits that differ from the previous value.
+                // A u64 XOR can have 0..63 leading zeros, so this field needs 6 bits.
+                try bit_writer.writeBits(@as(u6, @intCast(current_significant_bit_range.leading_zeros)), 6);
+
+                const meaningful_bits: u7 =
+                    maximum_u64_bits -
+                    current_significant_bit_range.leading_zeros -
+                    current_significant_bit_range.trailing_zeros;
+
+                // Store 0 when all 64 bits are significant.
+                const encoded_meaningful_bits: u6 =
+                    if (meaningful_bits == maximum_u64_bits) 0 else @intCast(meaningful_bits);
+                try bit_writer.writeBits(encoded_meaningful_bits, 6);
+                const significant_bits: u64 =
+                    xor_value >> @as(u6, @intCast(current_significant_bit_range.trailing_zeros));
+
+                // Store the significant bits that differ from the previous value.
+                try bit_writer.writeBits(significant_bits, meaningful_bits);
+
+                last_significant_bit_range = current_significant_bit_range;
+            }
+            previous_rewritten_value = current_rewritten_value;
+        }
+    }
+
+    try writeMacaqueVEndMarker(&bit_writer);
+    try bit_writer.flushBits();
+}
+
+/// Decompress `compressed_values` produced by MacaqueS. The function writes the result to
+/// `decompressed_values`. The `allocator` is used for intermediate containers. If an error occurs
+/// it is returned.
+pub fn decompressMacaqueS(
+    allocator: Allocator,
+    compressed_values: []const u8,
+    decompressed_values: *ArrayList(f64),
+) Error!void {
+    const stream = Io.Reader.fixed(compressed_values);
+    var bit_reader = shared_structs.BitReader.init(stream);
+
+    while (try readCompressedMacaqueValue(&bit_reader)) |value| {
+        try decompressed_values.append(allocator, value);
+    }
+}
+
+/// Decompress `compressed_values` produced by MacaqueV. The function writes the result to
+/// `decompressed_values`. The `allocator` is used for intermediate containers. If an error occurs
+/// it is returned.
+pub fn decompressMacaqueV(
+    allocator: Allocator,
+    compressed_values: []const u8,
+    decompressed_values: *ArrayList(f64),
+) Error!void {
+    const reader = Io.Reader.fixed(compressed_values);
+    var bit_reader = shared_structs.BitReader.init(reader);
+
+    // The previous rewritten value is initialized with the first value, which is stored in full.
+    const first_value = try readCompressedMacaqueValue(&bit_reader) orelse return Error.UnsupportedInput;
+    var previous_rewritten_value: u64 = @bitCast(first_value);
+    var previous_value: f64 = @bitCast(previous_rewritten_value);
+
+    try decompressed_values.append(allocator, previous_value);
+
+    var last_significant_bit_range = significantBitRange(previous_rewritten_value);
+
+    while (true) {
+        const control_bit: u8 = bit_reader.readBitsNoEof(u8, 1) catch return Error.CorruptedCompressedData;
+
+        if (control_bit == 0) {
+            try decompressed_values.append(allocator, previous_value);
+        } else {
+            const second_control_bit: u8 =
+                bit_reader.readBitsNoEof(u8, 1) catch return Error.CorruptedCompressedData;
+
+            if (second_control_bit == 0) {
+                // Reuse the previous leading and trailing zero counts, so only the significant bits
+                // between them need to be read.
+                const significant_bits_length: u7 =
+                    maximum_u64_bits -
+                    last_significant_bit_range.leading_zeros -
+                    last_significant_bit_range.trailing_zeros;
+                const significant_bits: u64 =
+                    bit_reader.readBitsNoEof(u64, significant_bits_length) catch
+                        return Error.CorruptedCompressedData;
+
+                const xor_value: u64 =
+                    significant_bits << @as(u6, @intCast(last_significant_bit_range.trailing_zeros));
+                const rewritten_value: u64 = previous_rewritten_value ^ xor_value; // Luckily, XOR is its own inverse.
+                previous_value = @bitCast(rewritten_value);
+                try decompressed_values.append(allocator, previous_value);
+                previous_rewritten_value = rewritten_value;
+            } else {
+                // The previous XOR range cannot be reused, so read a new leading zero count,
+                // significant bits length, and significant bits.
+                const leading_zeros: u7 =
+                    bit_reader.readBitsNoEof(u7, 6) catch return Error.CorruptedCompressedData;
+                const encoded_significant_bits_length: u6 =
+                    bit_reader.readBitsNoEof(u6, 6) catch return Error.CorruptedCompressedData;
+
+                if (leading_zeros == macaquev_end_marker_leading_zeros and
+                    encoded_significant_bits_length == macaquev_end_marker_significant_bits_length)
+                {
+                    break;
+                }
+
+                const significant_bits_length: u7 = if (encoded_significant_bits_length == 0)
+                    maximum_u64_bits
+                else
+                    @as(u7, encoded_significant_bits_length);
+
+                if (leading_zeros + significant_bits_length > maximum_u64_bits) {
+                    return Error.CorruptedCompressedData;
+                }
+
+                const significant_bits: u64 =
+                    bit_reader.readBitsNoEof(u64, significant_bits_length) catch
+                        return Error.CorruptedCompressedData;
+
+                // All needed information is read from the compressed representation.
+                // Now we can reconstruct the next rewritten value.
+                const xor_shift: u6 =
+                    @intCast(maximum_u64_bits - leading_zeros - significant_bits_length);
+                const xor_value: u64 = significant_bits << xor_shift;
+                const rewritten_value: u64 = previous_rewritten_value ^ xor_value; // Luckily, XOR is its own inverse.
+                previous_value = @bitCast(rewritten_value);
+                try decompressed_values.append(allocator, previous_value);
+
+                previous_rewritten_value = rewritten_value;
+                last_significant_bit_range = .{
+                    .leading_zeros = leading_zeros,
+                    .trailing_zeros = maximum_u64_bits - leading_zeros - significant_bits_length,
+                };
+            }
+        }
+    }
+}
+
+/// Rewrites the bits of `value` based on the `error_bound`. The function calculates how many bits
+/// can be rewritten while keeping the decompressed value within the error bound. It returns the
+/// number of bits needed to store the value and the rewritten value as a `u64`.
+fn rewriteValueBasedOnErrorBound(
+    value: f64,
+    error_bound: f64,
+) RewrittenValue {
+
+    // Interpret the f64 value as a u64 bit pattern to manipulate the bits directly.
+    const value_as_u64: u64 = @bitCast(value);
+
+    if (error_bound == 0.0 or !math.isFinite(value)) {
+        return RewrittenValue{ .bits_needed = 52, .rewritten_value = value_as_u64 };
+    }
+
+    // Extract the exponent.
+    const exponent: f64 = @floatFromInt(getExponentU64(value_as_u64));
+    // The variable `m` tells us how many bits we can rewrite while staying within the error bound.
+    // We reuse the variable name `m` from the original paper (Alg. 2 Line 9).
+    const m: f64 = error_bound / math.pow(f64, 2, exponent);
+
+    // If m >= 1, we can rewrite all 52 mantissa bits. If m <= 0, we cannot rewrite any bits.
+    // For 0 < m < 1, the number of bits we can rewrite is given by -log2(m).
+    var bits_needed: u6 = 0;
+    if (!math.isFinite(m) or m <= 0.0) {
+        // Degenerate case: keep full mantissa precision.
+        bits_needed = 52;
+    } else if (m >= 1.0) {
+        // Large error bound for this magnitude: no mantissa bits are required.
+        bits_needed = 0;
+    } else {
+        // 0 < m < 1 => -log2(m) is positive and defines the required mantissa bits.
+        const needed_f64 = @floor(-@log2(m));
+        bits_needed = if (needed_f64 >= 52.0) 52 else @as(u6, @intFromFloat(needed_f64));
+    }
+
+    // The variable `rewrite_position` tells us how many of the least significant bits of the
+    // mantissa we can rewrite.
+    const rewrite_position: u6 = 52 - bits_needed;
+    // We create a mask to zero out the least significant `rewrite_position` bits of the mantissa.
+    const rewrite_mask: u64 = maximum_u64_value << rewrite_position;
+    const rewritten_value: u64 = value_as_u64 & rewrite_mask;
+
+    // Cast to f64 to check if the rewritten value is within the error bound.
+    const decompressed_value: f64 = @bitCast(rewritten_value);
+
+    // If the decompressed value is outside the error bound, rewrite fewer bits.
+    if (@abs(decompressed_value - value) <= error_bound) {
+        // If the decompressed value is within the error bound, we keep it as is.
+        return RewrittenValue{ .bits_needed = bits_needed, .rewritten_value = rewritten_value };
+    } else {
+        const adjusted_rewrite_mask: u64 = maximum_u64_value << (rewrite_position - 1);
+        const new_rewritten_value: u64 = value_as_u64 & adjusted_rewrite_mask;
+        return RewrittenValue{ .bits_needed = bits_needed + 1, .rewritten_value = new_rewritten_value };
+    }
+}
+
+/// Helper function to extract the exponent from the `u64` bit pattern of a `f64` value. The bit
+/// pattern is interpreted as a 64-bit unsigned integer, and the exponent bits are extracted
+/// and adjusted by the bias (1023 for f64) to return the actual exponent as an i16.
+fn getExponentU64(value: u64) i16 {
+    const exponent_bits: i16 = @intCast((value >> 52) & 0x7FF);
+    return exponent_bits - 1023;
+}
+
+/// Helper function to calculate the number of leading and trailing zeros in a `u64` value.
+/// The function returns a `SignificantBitRange` containing the counts of leading and trailing zeros.
+fn significantBitRange(value: u64) SignificantBitRange {
+    if (value == 0) {
+        return .{ .leading_zeros = maximum_u64_bits, .trailing_zeros = 0 };
+    }
+
+    return .{
+        .leading_zeros = @clz(value),
+        .trailing_zeros = @ctz(value),
+    };
+}
+
+/// Determines if the `value` can be approximated by the `previous_value` within the `error_bound`.
+/// If the `error_bound` is zero, the function checks for exact bitwise equality. Otherwise, it checks if
+/// both values are finite and if their absolute difference is within the error bound.
+fn canReusePreviousValue(value: f64, previous_value: f64, error_bound: f64) bool {
+    if (error_bound == 0.0) {
+        return @as(u64, @bitCast(value)) == @as(u64, @bitCast(previous_value));
+    }
+
+    return math.isFinite(value) and
+        math.isFinite(previous_value) and
+        @abs(value - previous_value) <= error_bound;
+}
+
+/// Helper function to write a `value` using the `bit_writer`. The function writes `bits_needed` and
+/// `value` in a bit-packed format. The `bits_needed` value is written using 6 bits, and `value` is
+/// written using `bits_needed` plus 12 bits for the sign and exponent. If an error occurs during
+/// writing, it is returned.
+fn writeCompressedMacaqueValue(bit_writer: *shared_structs.BitWriter, bits_needed: u6, value: u64) !void {
+    try bit_writer.writeBits(bits_needed, 6);
+    const most_significant_bits: u16 = @as(u16, bits_needed) + 12; // 12 bits for sign and exponent.
+    const shift: u6 = @intCast(64 - most_significant_bits);
+    const packed_value: u64 = value >> shift;
+    try bit_writer.writeBits(packed_value, most_significant_bits);
+}
+
+/// Reads one Macaque value from `bit_reader`. Returns `null` when the reader reaches byte-alignment
+/// padding or the end of the stream before a new value starts. A partial value with non-zero remaining
+/// bits is treated as corrupted data.
+fn readCompressedMacaqueValue(bit_reader: *shared_structs.BitReader) Error!?f64 {
+    var bits_read: u16 = 0;
+    const bits_needed = bit_reader.readBits(u6, 6, &bits_read) catch return Error.CorruptedCompressedData;
+
+    if (bits_read == 0) return null;
+    if (bits_read < 6) {
+        return if (bits_needed == 0) null else Error.CorruptedCompressedData;
+    }
+    if (bits_needed > 52) return Error.CorruptedCompressedData;
+
+    const most_significant_bits: u16 = @as(u16, bits_needed) + 12;
+    const packed_value = bit_reader.readBits(u64, most_significant_bits, &bits_read) catch
+        return Error.CorruptedCompressedData;
+
+    if (bits_read < most_significant_bits) {
+        return if (packed_value == 0) null else Error.CorruptedCompressedData;
+    }
+
+    const shift: u6 = @intCast(64 - most_significant_bits);
+    const rewritten_bits: u64 = packed_value << shift;
+    return @bitCast(rewritten_bits);
+}
+
+/// Writes a special end marker in `bit_writer` to indicate the end of the stream.
+/// The function returns an error if writing fails.
+fn writeMacaqueVEndMarker(bit_writer: *shared_structs.BitWriter) !void {
+    try bit_writer.writeBits(@as(u1, 0b1), 1); // header '1'.
+    try bit_writer.writeBits(@as(u1, 0b1), 1); // header '1'.
+    try bit_writer.writeBits(macaquev_end_marker_leading_zeros, 6);
+    try bit_writer.writeBits(macaquev_end_marker_significant_bits_length, 6);
+}
+
+/// Helper function to compare two slices of `f64` values by their bit representation.
+/// This is necessary to correctly compare special values like NaN. The function returns
+/// an error if the slices have different lengths or if any pair of values differ.
+fn expectEqualF64Bits(expected_values: []const f64, actual_values: []const f64) !void {
+    try testing.expectEqual(expected_values.len, actual_values.len);
+    for (expected_values, actual_values) |expected_value, actual_value| {
+        try testing.expectEqual(
+            @as(u64, @bitCast(expected_value)),
+            @as(u64, @bitCast(actual_value)),
+        );
+    }
+}
+
+test "macaques can compress and decompress bounded values" {
+    const allocator = testing.allocator;
+    const data_distributions = &[_]tester.DataDistribution{
+        .LinearFunctions,
+        .BoundedRandomValues,
+        .SinusoidalFunction,
+        .MixedBoundedValuesFunctions,
+    };
+
+    try tester.testErrorBoundedCompressionMethod(
+        allocator,
+        Method.MacaqueS,
+        data_distributions,
+    );
+}
+
+test "macaquev can compress and decompress bounded values" {
+    const allocator = testing.allocator;
+    const data_distributions = &[_]tester.DataDistribution{
+        .LinearFunctions,
+        .BoundedRandomValues,
+        .SinusoidalFunction,
+        .MixedBoundedValuesFunctions,
+    };
+
+    try tester.testErrorBoundedCompressionMethod(
+        allocator,
+        Method.MacaqueV,
+        data_distributions,
+    );
+}
+
+test "macaquev can compress and decompress values with small differences between consecutive values" {
+    const allocator = testing.allocator;
+    const uncompressed_values = [6]f64{ 3.12, 4.423, 5.20, 7.9, 8.1, 9.0 };
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    // Set error bound big enough to allow consecutive values to be compressed effectively.
+    const method_configuration =
+        \\ {"abs_error_bound": 1.5}
+    ;
+
+    try compressMacaqueV(
+        allocator,
+        uncompressed_values[0..],
+        &compressed_values,
+        method_configuration,
+    );
+
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
+    try decompressMacaqueV(
+        allocator,
+        compressed_values.items,
+        &decompressed_values,
+    );
+    try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
+
+    for (0..uncompressed_values.len) |index| {
+        const original_value = uncompressed_values[index];
+        const decompressed_value = decompressed_values.items[index];
+        try testing.expectApproxEqAbs(original_value, decompressed_value, 1.5);
+    }
+}
+
+test "macaques can losslessly compress and decompress special f64 values" {
+    const allocator = testing.allocator;
+    const uncompressed_values = [8]f64{
+        343.0,
+        @bitCast(@as(u64, 0x7ff8_0000_0000_0001)),
+        math.inf(f64),
+        -math.inf(f64),
+        math.floatMax(f64),
+        -math.floatMax(f64),
+        -0.0,
+        0.0,
+    };
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    const method_configuration =
+        \\ {"abs_error_bound": 0.0}
+    ;
+
+    try compressMacaqueS(
+        allocator,
+        uncompressed_values[0..],
+        &compressed_values,
+        method_configuration,
+    );
+
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
+    try decompressMacaqueS(
+        allocator,
+        compressed_values.items,
+        &decompressed_values,
+    );
+
+    try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
+    try expectEqualF64Bits(uncompressed_values[0..], decompressed_values.items);
+}
+
+test "macaquev can losslessly compress and decompress special f64 values" {
+    const allocator = testing.allocator;
+    const uncompressed_values = [8]f64{
+        343.0,
+        @bitCast(@as(u64, 0x7ff8_0000_0000_0001)),
+        math.inf(f64),
+        -math.inf(f64),
+        math.floatMax(f64),
+        -math.floatMax(f64),
+        -0.0,
+        0.0,
+    };
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    const method_configuration =
+        \\ {"abs_error_bound": 0.0}
+    ;
+
+    try compressMacaqueV(
+        allocator,
+        uncompressed_values[0..],
+        &compressed_values,
+        method_configuration,
+    );
+
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
+    try decompressMacaqueV(
+        allocator,
+        compressed_values.items,
+        &decompressed_values,
+    );
+
+    try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
+    try expectEqualF64Bits(uncompressed_values[0..], decompressed_values.items);
+}
+
+test "macaques can compress and decompress values exceeding generated test limits" {
+    const allocator = testing.allocator;
+    const uncompressed_values = [3]f64{ 343.0, 1e20, -1e20 };
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    const method_configuration =
+        \\ {"abs_error_bound": 0.1}
+    ;
+
+    try compressMacaqueS(
+        allocator,
+        uncompressed_values[0..],
+        &compressed_values,
+        method_configuration,
+    );
+
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
+    try decompressMacaqueS(
+        allocator,
+        compressed_values.items,
+        &decompressed_values,
+    );
+
+    try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
+    for (0..uncompressed_values.len) |index| {
+        try testing.expectApproxEqAbs(
+            uncompressed_values[index],
+            decompressed_values.items[index],
+            0.1,
+        );
+    }
+}
+
+test "macaquev can compress and decompress values exceeding generated test limits" {
+    const allocator = testing.allocator;
+    const uncompressed_values = [3]f64{ 343.0, 1e20, -1e20 };
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    const method_configuration =
+        \\ {"abs_error_bound": 0.1}
+    ;
+
+    try compressMacaqueV(
+        allocator,
+        uncompressed_values[0..],
+        &compressed_values,
+        method_configuration,
+    );
+
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
+    try decompressMacaqueV(
+        allocator,
+        compressed_values.items,
+        &decompressed_values,
+    );
+
+    try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
+    for (0..uncompressed_values.len) |index| {
+        try testing.expectApproxEqAbs(
+            uncompressed_values[index],
+            decompressed_values.items[index],
+            0.1,
+        );
+    }
+}
+
+test "macaques can compress and decompress within floating-point precision limits at different scales" {
+    const allocator = testing.allocator;
+    const error_bound = tester.generateBoundedRandomValue(f32, 0, 1e3, null);
+
+    var uncompressed_values = ArrayList(f64).empty;
+    defer uncompressed_values.deinit(allocator);
+
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1, 1, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e2, 1e2, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e4, 1e4, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e6, 1e6, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e8, 1e8, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e14, 1e14, null);
+
+    try tester.testCompressAndDecompress(
+        allocator,
+        uncompressed_values.items,
+        Method.MacaqueS,
+        error_bound,
+        shared_functions.isWithinErrorBound,
+    );
+}
+
+test "macaquev can compress and decompress within floating-point precision limits at different scales" {
+    const allocator = testing.allocator;
+    const error_bound = tester.generateBoundedRandomValue(f32, 0, 1e3, null);
+
+    var uncompressed_values = ArrayList(f64).empty;
+    defer uncompressed_values.deinit(allocator);
+
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1, 1, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e2, 1e2, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e4, 1e4, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e6, 1e6, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e8, 1e8, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e14, 1e14, null);
+
+    try tester.testCompressAndDecompress(
+        allocator,
+        uncompressed_values.items,
+        Method.MacaqueV,
+        error_bound,
+        shared_functions.isWithinErrorBound,
+    );
+}
+
+test "macaques reduce size for generated bounded time series" {
+    const allocator = testing.allocator;
+    // Generate a random error bound between 10 and 1000, which will be used for quantization.
+    const error_bound = @floor(tester.generateBoundedRandomValue(
+        f32,
+        1e1,
+        1e3,
+        null,
+    )) * 0.1;
+
+    var uncompressed_values = ArrayList(f64).empty;
+    defer uncompressed_values.deinit(allocator);
+
+    // Generate 500 random values within different ranges. Even if some values require 8 bytes
+    // to be stored, the quantization should reduce the size of the time series since some
+    // values require less than 8 bytes to be stored after quantization.
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1, 1, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e2, 1e2, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e4, 1e4, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e6, 1e6, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e8, 1e8, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e14, 1e14, null);
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    const method_configuration = try std.fmt.allocPrint(
+        allocator,
+        "{{\"abs_error_bound\": {d}}}",
+        .{error_bound},
+    );
+    defer allocator.free(method_configuration);
+
+    try compressMacaqueS(
+        allocator,
+        uncompressed_values.items,
+        &compressed_values,
+        method_configuration,
+    );
+
+    // Considering the range of the input data, the compressed values should always be smaller.
+    try testing.expect(uncompressed_values.items.len * 8 > compressed_values.items.len);
+}
+
+test "macaquev reduces size for generated bounded time series" {
+    const allocator = testing.allocator;
+    // Generate a random error bound between 10 and 1000, which will be used for quantization.
+    const error_bound = @floor(tester.generateBoundedRandomValue(
+        f32,
+        1e1,
+        1e3,
+        null,
+    )) * 0.1;
+
+    var uncompressed_values = ArrayList(f64).empty;
+    defer uncompressed_values.deinit(allocator);
+
+    // Generate 500 random values within different ranges. Even if some values require 8 bytes
+    // to be stored, the quantization should reduce the size of the time series since some
+    // values require less than 8 bytes to be stored after quantization.
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1, 1, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e2, 1e2, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e4, 1e4, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e6, 1e6, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e8, 1e8, null);
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, -1e14, 1e14, null);
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    const method_configuration = try std.fmt.allocPrint(
+        allocator,
+        "{{\"abs_error_bound\": {d}}}",
+        .{error_bound},
+    );
+    defer allocator.free(method_configuration);
+
+    try compressMacaqueV(
+        allocator,
+        uncompressed_values.items,
+        &compressed_values,
+        method_configuration,
+    );
+
+    // Considering the range of the input data, the compressed values should always be smaller.
+    try testing.expect(uncompressed_values.items.len * 8 > compressed_values.items.len);
+}
+
+test "macaquev preserves values when xor has more than 31 leading zeros" {
+    const allocator = testing.allocator;
+    const uncompressed_values = [5]f64{
+        22.7,
+        22.70000050919397,
+        21.700000077486038,
+        22.633333410819766,
+        22.616337399924696,
+    };
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    const method_configuration =
+        \\ {"abs_error_bound": 1e-07}
+    ;
+
+    try compressMacaqueV(
+        allocator,
+        uncompressed_values[0..],
+        &compressed_values,
+        method_configuration,
+    );
+
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
+    try decompressMacaqueV(
+        allocator,
+        compressed_values.items,
+        &decompressed_values,
+    );
+
+    try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
+    for (0..uncompressed_values.len) |index| {
+        try testing.expectApproxEqAbs(
+            uncompressed_values[index],
+            decompressed_values.items[index],
+            1e-07,
+        );
+    }
+}
+
+test "check macaques configuration parsing" {
+    // Tests the configuration parsing and functionality of the `compress` function.
+    // The test verifies that the provided configuration is correctly interpreted and
+    // that the `configuration.AbsoluteErrorBound` is expected in the function.
+    const allocator = testing.allocator;
+
+    const uncompressed_values = &[4]f64{ 19.0, 48.0, 29.0, 3.0 };
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    const method_configuration =
+        \\ {"abs_error_bound": 0.1}
+    ;
+
+    // The configuration is properly defined. No error expected.
+    try compressMacaqueS(
+        allocator,
+        uncompressed_values,
+        &compressed_values,
+        method_configuration,
+    );
+}
+
+test "check macaquev configuration parsing" {
+    // Tests the configuration parsing and functionality of the `compress` function.
+    // The test verifies that the provided configuration is correctly interpreted and
+    // that the `configuration.AbsoluteErrorBound` is expected in the function.
+    const allocator = testing.allocator;
+
+    const uncompressed_values = &[4]f64{ 19.0, 48.0, 29.0, 3.0 };
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    const method_configuration =
+        \\ {"abs_error_bound": 0.1}
+    ;
+
+    // The configuration is properly defined. No error expected.
+    try compressMacaqueV(
+        allocator,
+        uncompressed_values,
+        &compressed_values,
+        method_configuration,
+    );
+}

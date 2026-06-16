@@ -115,7 +115,7 @@ pub fn parse(
                 return error.InvalidConfiguration;
         },
         DecimalPrecision => {
-            if (parsed_value.decimal_precision <= 0 or parsed_value.decimal_precision >= 64)
+            if (parsed_value.decimal_precision == 0 or parsed_value.decimal_precision >= 64)
                 return error.InvalidConfiguration;
         },
         EmptyConfiguration => {},
@@ -152,6 +152,14 @@ pub fn defaultConfigurationBuilder(
             break :blk try getDefaultAbsoluteErrorConfiguration(
                 allocator,
                 random_f32,
+            );
+        },
+        .MacaqueS,
+        .MacaqueV,
+        => blk: {
+            break :blk try getDefaultAbsoluteErrorConfiguration(
+                allocator,
+                0.0,
             );
         },
 
@@ -202,6 +210,7 @@ pub fn defaultConfigurationBuilder(
         },
 
         // Methods with empty configuration.
+        .Uncompressed,
         .RunLengthEncoding,
         .Chimp64,
         .Chimp128,

@@ -34,7 +34,6 @@
 
 const std = @import("std");
 const math = std.math;
-const Io = std.Io;
 const testing = std.testing;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
@@ -218,30 +217,16 @@ pub fn compressBitPackedBUFF(
         compressed_values,
     );
 
-    // Prepare the bit writer for compressed output. From now on, we write using only the bit writer
-    // instead of the shared_functions.appendValue.
-    var bit_writer = try shared_structs.BitWriter.init(allocator, compressed_values);
-
-    // Write the first value's fractional part and sign.
-    try bit_writer.writeBits(
-        first_fixed_point_representation.fractional_part,
+    // Prepare the bit writer for compressed output. BulkBitWriter keeps the same MSB-first packed
+    // format as BitWriter, but buffers writes into larger byte chunks.
+    var bit_writer = try shared_structs.BulkBitWriter.init(allocator, compressed_values);
+    try writeBitPackedBuffPayload(
+        &bit_writer,
+        fixed_point_representation_array.items,
+        delta_encoded_integer_parts.items,
         decoded_decimal_precision,
+        maximum_number_of_bits_needed,
     );
-    try bit_writer.writeBits(@as(u1, @intCast(first_fixed_point_representation.sign)), 1);
-
-    // Apply bitpacking encoding for the rest of the values.
-    // 1) Delta encoded integer part with maximum_number_of_bits_needed bits.
-    // 2) Fractional part with decoded_decimal_precision bits.
-    // 3) Sign with 1 bit.
-    for (1..fixed_point_representation_array.items.len) |index| {
-        const fixed_point_representation = fixed_point_representation_array.items[index];
-        const encoded_delta_integer_part: u64 = delta_encoded_integer_parts.items[index - 1];
-
-        try bit_writer.writeBits(encoded_delta_integer_part, maximum_number_of_bits_needed);
-        try bit_writer.writeBits(fixed_point_representation.fractional_part, decoded_decimal_precision);
-        try bit_writer.writeBits(@as(u1, @intCast(fixed_point_representation.sign)), 1);
-    }
-
     try bit_writer.flushBits();
 }
 
@@ -278,9 +263,72 @@ pub fn decompressBitPackedBUFF(
     const shifted_bits: u6 = @intCast(53 - decoded_decimal_precision);
 
     // Read the first value's integer part from the fixed-point representation.
-    var integer_part: u64 = @bitCast(compressed_values[14..22].*);
-    const reader = Io.Reader.fixed(compressed_values[22..]);
-    var bit_reader = shared_structs.BitReader.init(reader);
+    const first_integer_part: u64 = @bitCast(compressed_values[14..22].*);
+
+    var bit_reader = shared_structs.BulkBitReader.init(compressed_values[22..]);
+    try readBitPackedBuffPayload(
+        allocator,
+        &bit_reader,
+        decompressed_values,
+        decoded_decimal_precision,
+        maximum_number_of_bits_needed_for_integers,
+        number_of_values,
+        minimum_integer_part,
+        first_integer_part,
+        shifted_bits,
+    );
+}
+
+/// Writes the bit-packed payload after the 22-byte BitPackedBUFF header. The first value contributes
+/// its fractional part and sign; each subsequent value contributes the delta-encoded integer part,
+/// fractional part, and sign.
+fn writeBitPackedBuffPayload(
+    bit_writer: *shared_structs.BulkBitWriter,
+    fixed_point_representations: []const FixedPointRepresentation,
+    delta_encoded_integer_parts: []const u64,
+    decoded_decimal_precision: u6,
+    maximum_number_of_bits_needed: u8,
+) !void {
+    const first_fixed_point_representation = fixed_point_representations[0];
+
+    // Write the first value's fractional part and sign.
+    try bit_writer.writeBits(
+        first_fixed_point_representation.fractional_part,
+        decoded_decimal_precision,
+    );
+    try bit_writer.writeBits(@as(u1, @intCast(first_fixed_point_representation.sign)), 1);
+
+    // Apply bitpacking encoding for the rest of the values.
+    // 1) Delta encoded integer part with maximum_number_of_bits_needed bits.
+    // 2) Fractional part with decoded_decimal_precision bits.
+    // 3) Sign with 1 bit.
+    for (1..fixed_point_representations.len) |index| {
+        const fixed_point_representation = fixed_point_representations[index];
+        const encoded_delta_integer_part: u64 = delta_encoded_integer_parts[index - 1];
+
+        try bit_writer.writeBits(encoded_delta_integer_part, maximum_number_of_bits_needed);
+        try bit_writer.writeBits(fixed_point_representation.fractional_part, decoded_decimal_precision);
+        try bit_writer.writeBits(@as(u1, @intCast(fixed_point_representation.sign)), 1);
+    }
+}
+
+/// Reads the bit-packed payload after the BitPackedBUFF header and appends reconstructed values to
+/// `decompressed_values`. Header fields are passed in by the caller after validation, and
+/// `bit_reader` must be positioned at the first fractional bit of the first value. The function
+/// mirrors `writeBitPackedBuffPayload`: first value fractional/sign bits are read directly, then
+/// each remaining value reads integer delta, fractional bits, and sign.
+fn readBitPackedBuffPayload(
+    allocator: Allocator,
+    bit_reader: *shared_structs.BulkBitReader,
+    decompressed_values: *ArrayList(f64),
+    decoded_decimal_precision: u8,
+    maximum_number_of_bits_needed_for_integers: u8,
+    number_of_values: u32,
+    minimum_integer_part: u64,
+    first_integer_part: u64,
+    shifted_bits: u6,
+) Error!void {
+    var integer_part = first_integer_part;
 
     // Read the first value's fractional part and sign.
     var fractional_part: u64 = bit_reader.readBitsNoEof(
