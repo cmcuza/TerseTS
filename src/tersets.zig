@@ -55,6 +55,7 @@ const rle_encoding = @import("lossless_compression/run_length_encoding.zig");
 const delta_encoding = @import("lossless_compression/bitpacked_delta_encoding.zig");
 const chimp64 = @import("lossless_compression/chimp64.zig");
 const chimp128 = @import("lossless_compression/chimp128.zig");
+const elf_plus = @import("lossless_compression/elf_plus.zig");
 
 const extractors = @import("utilities/extractors.zig");
 const tester = @import("tester.zig");
@@ -105,6 +106,7 @@ pub const Method = enum {
     DiscreteFourierTransform,
     MacaqueS,
     MacaqueV,
+    ElfPlus,
 };
 
 /// Compress `uncompressed_values` using `method` and its `configuration` and returns the results
@@ -322,6 +324,14 @@ pub fn compress(
                 configuration,
             );
         },
+        .ElfPlus => {
+            try elf_plus.compress(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                configuration,
+            );
+        },
         .Uncompressed => {
             for (uncompressed_values) |value| {
                 const value_as_bytes: [8]u8 = @bitCast(value);
@@ -420,6 +430,9 @@ pub fn decompress(
         },
         .MacaqueV => {
             try macaque.decompressMacaqueV(allocator, compressed_values_slice, &decompressed_values);
+        },
+        .ElfPlus => {
+            try elf_plus.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .Uncompressed => {
             if (compressed_values_slice.len % 8 != 0) return Error.CorruptedCompressedData;
@@ -584,6 +597,7 @@ pub fn extract(
         .Chimp128,
         .MacaqueS,
         .MacaqueV,
+        .ElfPlus,
         => {
             return Error.UnsupportedMethod;
         },
@@ -734,6 +748,7 @@ pub fn rebuild(
         .Chimp128,
         .MacaqueS,
         .MacaqueV,
+        .ElfPlus,
         => {
             return Error.UnsupportedMethod;
         },
@@ -782,7 +797,8 @@ test "extract and rebuild works for any compression method supported" {
             method == Method.Chimp64 or
             method == Method.Chimp128 or
             method == Method.MacaqueS or
-            method == Method.MacaqueV)
+            method == Method.MacaqueV or
+            method == Method.ElfPlus)
         {
             // These compression methods are not supported for extraction
             // of the coefficients and indices. This is because even small
