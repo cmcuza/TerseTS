@@ -67,56 +67,56 @@ pub fn compress(
         return;
     }
 
-    // The first and last point are in their own buckets
-    const inner_bucket_count: u32 = threshold - 2;
-    const points_per_bucket: u32 = @ceil((uncompressed_values.len - 2 / inner_bucket_count));
+    // The first and last points are always kept, so the remaining threshold - 2
+    // output points are chosen from the len - 2 interior points (indices 1..len-1).
+    const inner_threshold: usize = threshold - 2;
+    const inner_point_count = uncompressed_values.len - 2;
 
     var selected_point = DiscretePoint{ .index = 0, .value = uncompressed_values[0] };
     try shared_functions.appendValue(allocator, f64, uncompressed_values[0], compressed_values);
 
-    for (0..inner_bucket_count) |bucket_idx| {
-        // Calculate average of next bucket.
-        // Our second to last bucket is potentially cut off due to the threshold not
-        // dividing the number of points cleanly
-        var avg = 0;
-        var start = @floor((bucket_idx + 1) * points_per_bucket + 1);
-        var end = @floor((bucket_idx + 2) * points_per_bucket + 1);
-        end = math.clamp(end, 0, uncompressed_values.len);
+    for (0..inner_threshold) |bucket_idx| {
+        // Split the interior points proportionally so the buckets always cover exactly
+        // [1, len-1) with no overshoot, regardless of how evenly the points divide.
+        const start = 1 + bucket_idx * inner_point_count / inner_threshold;
+        const end = 1 + (bucket_idx + 1) * inner_point_count / inner_threshold;
 
-        for (start..end) |point_idx| {
-            avg = avg + uncompressed_values[point_idx];
+        // Average of the next bucket. For the final bucket this range collapses onto the
+        // last point, which is exactly the anchor we want to aim the triangle at.
+        const next_start = end;
+        const next_end = @min(
+            1 + (bucket_idx + 2) * inner_point_count / inner_threshold,
+            uncompressed_values.len,
+        );
+        var avg: f64 = 0;
+        for (next_start..next_end) |point_idx| {
+            avg += uncompressed_values[point_idx];
         }
-        avg = avg / (end - start);
-        const avg_point = DiscretePoint{ .index = (start + end) / 2, .value = avg };
+        avg /= @as(f64, @floatFromInt(next_end - next_start));
+        const avg_point = DiscretePoint{ .index = (next_start + next_end) / 2, .value = avg };
 
-        // current bucket
-        start = @floor(bucket_idx * points_per_bucket + 1);
-        end = @floor((bucket_idx + 1) * points_per_bucket + 1);
-        var max_area: f64 = calculateArea(selected_point, DiscretePoint{ .index = start, .value = uncompressed_values[start] }, avg_point);
+        // Pick the interior point in the current bucket that forms the largest triangle
+        // with the previously selected point and the next bucket's average.
         var best_point = DiscretePoint{ .index = start, .value = uncompressed_values[start] };
-
+        var max_area = calculateArea(selected_point, best_point, avg_point);
         for (start + 1..end) |point_idx| {
-            const curr_area = calculateArea(
-                selected_point,
-                DiscretePoint{ .index = point_idx, .value = uncompressed_values[point_idx] },
-                avg_point,
-            );
+            const candidate = DiscretePoint{ .index = point_idx, .value = uncompressed_values[point_idx] };
+            const curr_area = calculateArea(selected_point, candidate, avg_point);
             if (curr_area > max_area) {
                 max_area = curr_area;
-                best_point.index = point_idx;
-                best_point.value = uncompressed_values[point_idx];
+                best_point = candidate;
             }
         }
 
-        // save the point with the highest rank and use that as the next starting point
+        // Save the winning point and use it as the anchor for the next bucket.
         try shared_functions.appendValue(allocator, f64, best_point.value, compressed_values);
         try shared_functions.appendValue(allocator, usize, best_point.index, compressed_values);
         selected_point = best_point;
     }
 
-    // Anchor the line to original end point
+    // Anchor the line to the original end point.
     try shared_functions.appendValue(allocator, f64, uncompressed_values[uncompressed_values.len - 1], compressed_values);
-    try shared_functions.appendValue(allocator, usize, uncompressed_values.len, compressed_values);
+    try shared_functions.appendValue(allocator, usize, uncompressed_values.len - 1, compressed_values);
 }
 
 /// Decompress `compressed_values` produced by "Largest Triangle Three Buckets" and write the
@@ -192,4 +192,121 @@ pub fn rebuild(
     _ = compressed_values;
 }
 
-//TODO! Tests here
+test "lttb keeps all values when threshold is at least the input length" {
+    const allocator = testing.allocator;
+
+    // With a threshold greater than or equal to the number of points, every point is kept and the
+    // round-trip is lossless.
+    const uncompressed_values: []const f64 = &[_]f64{ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0 };
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
+
+    const method_configuration =
+        \\ {"output_threshold_number": 16}
+    ;
+
+    try compress(allocator, uncompressed_values, &compressed_values, method_configuration);
+    try decompress(allocator, compressed_values.items, &decompressed_values);
+
+    try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
+    for (uncompressed_values, decompressed_values.items) |expected, actual| {
+        try testing.expectEqual(expected, actual);
+    }
+}
+
+test "lttb downsamples with known result" {
+    const allocator = testing.allocator;
+
+    // Nine points are reduced to a threshold of four.
+    const uncompressed_values: []const f64 = &[_]f64{ 1.0, 2.0, 1.5, 3.0, 4.0, 3.5, 5.0, 6.0, 7.0 };
+    const threshold: usize = 4;
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
+
+    const method_configuration =
+        \\ {"output_threshold_number": 4}
+    ;
+
+    try compress(allocator, uncompressed_values, &compressed_values, method_configuration);
+
+    // The compressed representation stores the first value (8 bytes) followed by a (value, index)
+    // pair (16 bytes) for every other kept point, so exactly `threshold` points must be kept.
+    const kept_points = (compressed_values.items.len - 8) / 16 + 1;
+    try testing.expectEqual(threshold, kept_points);
+
+    // Reinterpret the byte stream as f64s: slot 0 is the first kept value, then the kept
+    // (value, index) pairs follow, so the kept values live at slots 0, 1, 3, 5.
+    const kept = mem.bytesAsSlice(f64, compressed_values.items);
+    try testing.expectEqual(uncompressed_values[0], kept[0]);
+    try testing.expectEqual(uncompressed_values[2], kept[1]);
+    try testing.expectEqual(uncompressed_values[5], kept[3]);
+    try testing.expectEqual(uncompressed_values[8], kept[5]);
+}
+
+test "lttb compress and decompress preserve length on larger data" {
+    const allocator = testing.allocator;
+
+    var prng = std.Random.DefaultPrng.init(0);
+    const random = prng.random();
+
+    var uncompressed_values = ArrayList(f64).empty;
+    defer uncompressed_values.deinit(allocator);
+    for (0..100) |_| {
+        try uncompressed_values.append(allocator, random.float(f64) * 100.0);
+    }
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
+
+    const method_configuration =
+        \\ {"output_threshold_number": 20}
+    ;
+
+    try compress(allocator, uncompressed_values.items, &compressed_values, method_configuration);
+    try decompress(allocator, compressed_values.items, &decompressed_values);
+
+    try testing.expectEqual(uncompressed_values.items.len, decompressed_values.items.len);
+}
+
+test "lttb returns an error for an invalid configuration" {
+    const allocator = testing.allocator;
+
+    // LTTB expects an OutputThresholdNumber configuration; any other shape is invalid.
+    const uncompressed_values: []const f64 = &[_]f64{ 1.0, 2.0, 3.0, 4.0 };
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    const method_configuration =
+        \\ {"abs_error_bound": 0.1}
+    ;
+
+    try testing.expectError(
+        Error.InvalidConfiguration,
+        compress(allocator, uncompressed_values, &compressed_values, method_configuration),
+    );
+}
+
+test "check lttb configuration parsing" {
+    // Verifies that a well-formed OutputThresholdNumber configuration is accepted by compress.
+    const allocator = testing.allocator;
+
+    const uncompressed_values: []const f64 = &[_]f64{ 19.0, 48.0, 28.0, 3.0 };
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    const method_configuration =
+        \\ {"output_threshold_number": 4}
+    ;
+
+    try compress(allocator, uncompressed_values, &compressed_values, method_configuration);
+}

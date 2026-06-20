@@ -107,6 +107,10 @@ pub fn parse(
             if (parsed_value.aggregate_error_bound < 0)
                 return error.InvalidConfiguration;
         },
+        OutputThresholdNumber => {
+            if (parsed_value.output_threshold_number < 0)
+                return error.InvalidConfiguration;
+        },
         EmptyConfiguration => {},
         else => return error.InvalidConfiguration,
     }
@@ -169,6 +173,14 @@ pub fn defaultConfigurationBuilder(
             );
         },
 
+        .LargestTriangleThreeBuckets => blk: {
+            const auc: u32 = 2; // Minimum allowed.
+            break :blk try getDefaultThresholdConfiguration(
+                allocator,
+                auc,
+            );
+        },
+
         // Methods with empty configuration.
         .RunLengthEncoding,
         .Chimp64,
@@ -206,6 +218,14 @@ fn getDefaultAUCConfiguration(allocator: Allocator, auc_error_bound: f32) ![]u8 
         allocator,
         "{{\"area_under_curve_error\": {d}}}",
         .{auc_error_bound},
+    );
+}
+
+fn getDefaultThresholdConfiguration(allocator: Allocator, output_number: u32) ![]u8 {
+    return try std.fmt.allocPrint(
+        allocator,
+        "{{\"output_threshold_number\": {d}}}",
+        .{output_number},
     );
 }
 
