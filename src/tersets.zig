@@ -520,7 +520,12 @@ pub fn extract(
             return Error.UnsupportedMethod;
         },
         .LargestTriangleThreeBuckets => {
-            return Error.UnsupportedMethod;
+            try lttb.extract(
+                allocator,
+                compressed_values_slice,
+                indices,
+                coefficients,
+            );
         },
     }
 }
@@ -667,7 +672,12 @@ pub fn rebuild(
             return Error.UnsupportedMethod;
         },
         .LargestTriangleThreeBuckets => {
-            return Error.UnsupportedMethod;
+            try lttb.rebuild(
+                allocator,
+                indices,
+                coefficients,
+                &compressed_values,
+            );
         },
     }
     try compressed_values.append(allocator, @intFromEnum(method));
@@ -709,8 +719,7 @@ test "extract and rebuild works for any compression method supported" {
             method == Method.SerfQT or
             method == Method.RunLengthEncoding or
             method == Method.Chimp64 or
-            method == Method.Chimp128 or
-            method == Method.LargestTriangleThreeBuckets)
+            method == Method.Chimp128)
         {
             // These compression methods are not supported for extraction
             // of the coefficients and indices. This is because even small

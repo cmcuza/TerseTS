@@ -19,6 +19,9 @@ const testing = std.testing;
 const ArrayList = std.ArrayList;
 const Allocator = mem.Allocator;
 
+const extractors = @import("../../utilities/extractors.zig");
+const rebuilders = @import("../../utilities/rebuilders.zig");
+
 const tersets = @import("../../tersets.zig");
 const configuration = @import("../../configuration.zig");
 const Method = tersets.Method;
@@ -172,11 +175,14 @@ pub fn extract(
     indices: *ArrayList(u64),
     coefficients: *ArrayList(f64),
 ) Error!void {
-    //TODO
-    _ = allocator;
-    _ = compressed_values;
-    _ = indices;
-    _ = coefficients;
+    // Delegate to CoefficientIndexTuplesWithStartCoefficient extractor.
+    // "Largest Triangle Three Buckets" uses the same representation as SwingFilter.
+    try extractors.extractCoefficientIndexTuplesWithStartCoefficient(
+        allocator,
+        compressed_values,
+        indices,
+        coefficients,
+    );
 }
 
 pub fn rebuild(
@@ -185,11 +191,14 @@ pub fn rebuild(
     coefficients: []const f64,
     compressed_values: *ArrayList(u8),
 ) Error!void {
-    //TODO
-    _ = allocator;
-    _ = indices;
-    _ = coefficients;
-    _ = compressed_values;
+    // Delegate to CoefficientIndexTuplesWithStartCoefficient rebuilder.
+    // "Largest Triangle Three Buckets" uses the same representation as SwingFilter.
+    try rebuilders.rebuildCoefficientIndexTuplesWithStartCoefficient(
+        allocator,
+        indices,
+        coefficients,
+        compressed_values,
+    );
 }
 
 test "lttb keeps all values when threshold is at least the input length" {
