@@ -153,6 +153,7 @@ class Method(Enum):
     SerfQT = 16
     Chimp64 = 17
     Chimp128 = 18
+    LargestTriangleThreeBuckets = 19
 
 
 # Public API.

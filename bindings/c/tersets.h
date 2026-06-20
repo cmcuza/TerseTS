@@ -28,6 +28,7 @@ enum Method {
   SerfQT                        = 16,
   Chimp64                       = 17,
   Chimp128                      = 18,
+  LargestTriangleThreeBuckets   = 19,
 };
 
 // A pointer to uncompressed values and the number of values.
