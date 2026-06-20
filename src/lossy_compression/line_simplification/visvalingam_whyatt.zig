@@ -257,7 +257,7 @@ pub fn rebuild(
     coefficients: []const f64,
     compressed_values: *ArrayList(u8),
 ) Error!void {
-    // Delegate to CoefficientIndexTuplesWithStartCoefficient extractor.
+    // Delegate to CoefficientIndexTuplesWithStartCoefficient rebuilder.
     // VisvalingamWhyatt uses the same representation as SwingFilter.
     try rebuilders.rebuildCoefficientIndexTuplesWithStartCoefficient(
         allocator,
