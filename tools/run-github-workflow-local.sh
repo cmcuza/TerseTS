@@ -14,7 +14,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Mirrors .github/workflows/ci.yml for local verification before pushing.
+# Approximates .github/workflows/ci.yml for local verification before pushing.
+# The C-binding only runs CLang for testing C-syntax. Therefore, it is skipped in this
+# script to avoid requiring CLang to be installed locally.
+
 
 set -eu
 
@@ -30,8 +33,7 @@ print_step() {
 
 # Accumulates names of missing commands and reports them all at once.
 assert_command_available() {
-    local missing_commands=""
-    local command_name
+    missing_commands=""
 
     for command_name in "$@"
     do
@@ -52,38 +54,50 @@ assert_command_available zig gcc julia python rustup cargo
 
 cd "$repo_root"
 
-# Build in both modes first so binding tests can load the zig-out artifacts.
+# Run Zig fmt to validate that the code is properly formatted.
 print_step "Zig fmt Check"
-zig fmt --check .
+if ! zig fmt --check .
+then
+    printf "Error: zig fmt check failed. Run 'zig fmt .' and re-run this script.\n" >&2
+    exit 1
+fi
+
+# Build TereTS in both modes to validate that it works correctly.
 print_step "Zig Build Debug"
 zig build -Doptimize="Debug"
 print_step "Zig Build ReleaseFast"
 zig build -Doptimize="ReleaseFast"
+
+# Build and test TerseTS in both modes to validate that they work correctly.
 print_step "Zig Build Test Debug"
 zig build test -Doptimize="Debug"
 print_step "Zig Build Test ReleaseFast"
 zig build test -Doptimize="ReleaseFast"
 
+# Test Julia binding.
 cd "$repo_root/bindings/julia"
 print_step "Julia Run Unittest"
 julia Tests.jl
 
+# Test Python binding.
 # Install from source, confirm the package resolves from site-packages, then test.
 cd "$repo_root/bindings/python"
 print_step "Python Install Binding"
 python -m pip install . -v
+# We need to move out of the bindings/python directory to ensure
+# that the installed package is imported instead of the local source code.
+cd "$repo_root"
 print_step "Python Verify Installed Binding Import"
 python - <<'PY'
 import pathlib
 import tersets
-
 library_path = str(pathlib.Path(tersets.__file__)).lower()
-print(library_path)
 assert "site-packages" in library_path or "dist-packages" in library_path
 PY
 print_step "Python Run Unittest"
-python -m unittest --verbose
+python -m unittest discover --verbose -s "$repo_root/bindings/python"
 
+# Test Rust binding.
 # Zig outputs .dylib files into zig-out that break Rust static linking on macOS.
 cd "$repo_root"
 print_step "Clear Zig Cache and Zig Out"
