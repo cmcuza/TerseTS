@@ -365,6 +365,14 @@ pub fn decompress(
     const compressed_values_slice = compressed_values[0 .. compressed_values.len - 1];
 
     switch (method) {
+        .Uncompressed => {
+            if (compressed_values_slice.len % 8 != 0) return Error.CorruptedCompressedData;
+            var offset: usize = 0;
+            while (offset < compressed_values_slice.len) : (offset += 8) {
+                const value: f64 = @bitCast(compressed_values_slice[offset..][0..8].*);
+                try decompressed_values.append(allocator, value);
+            }
+        },
         .PoorMansCompressionMidrange, .PoorMansCompressionMean => {
             try poor_mans_compression.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
@@ -430,14 +438,6 @@ pub fn decompress(
         },
         .MacaqueV => {
             try macaque.decompressMacaqueV(allocator, compressed_values_slice, &decompressed_values);
-        },
-        .Uncompressed => {
-            if (compressed_values_slice.len % 8 != 0) return Error.CorruptedCompressedData;
-            var offset: usize = 0;
-            while (offset < compressed_values_slice.len) : (offset += 8) {
-                const value: f64 = @bitCast(compressed_values_slice[offset..][0..8].*);
-                try decompressed_values.append(allocator, value);
-            }
         },
         .Camel => {
             try camel.decompress(allocator, compressed_values_slice, &decompressed_values);
@@ -587,20 +587,7 @@ pub fn extract(
         // corrupted streams or misinterpretation of the data during decompression.
         // In case of RLE, modifying the coefficients can disrupt the run-length
         // encoding scheme, also leading to incorrect decompression results.
-        .Uncompressed,
-        .BitPackedQuantization,
-        .BitPackedDeltaEncoding,
-        .SerfQT,
-        .RunLengthEncoding,
-        .BitPackedBUFF,
-        .Chimp64,
-        .Chimp128,
-        .MacaqueS,
-        .MacaqueV,
-        => {
-            return Error.UnsupportedMethod;
-        },
-        .Camel => {
+        .Uncompressed, .BitPackedQuantization, .BitPackedDeltaEncoding, .SerfQT, .RunLengthEncoding, .BitPackedBUFF, .Chimp64, .Chimp128, .MacaqueS, .MacaqueV, .Camel => {
             return Error.UnsupportedMethod;
         },
     }
@@ -740,20 +727,7 @@ pub fn rebuild(
         // corrupted streams or misinterpretation of the data during decompression.
         // In case of RLE, modifying the coefficients can disrupt the run-length
         // encoding scheme, also leading to incorrect decompression results.
-        .Uncompressed,
-        .BitPackedQuantization,
-        .BitPackedDeltaEncoding,
-        .BitPackedBUFF,
-        .SerfQT,
-        .RunLengthEncoding,
-        .Chimp64,
-        .Chimp128,
-        .MacaqueS,
-        .MacaqueV,
-        => {
-            return Error.UnsupportedMethod;
-        },
-        .Camel => {
+        .Uncompressed, .BitPackedQuantization, .BitPackedDeltaEncoding, .BitPackedBUFF, .SerfQT, .RunLengthEncoding, .Chimp64, .Chimp128, .MacaqueS, .MacaqueV, .Camel => {
             return Error.UnsupportedMethod;
         },
     }
