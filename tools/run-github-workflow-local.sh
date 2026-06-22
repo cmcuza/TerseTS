@@ -75,14 +75,16 @@ print_step "Zig Build Test ReleaseFast"
 zig build test -Doptimize="ReleaseFast"
 
 # Test C bindings.
-print_step "C-binding Syntax Check"
-if command -v clang >/dev/null 2>&1
-then
-    cd "$repo_root/bindings/c"
+print_step "Clang C-binding Syntax Check"
+cd "$repo_root/bindings/c"
+if command -v clang >/dev/null 2>&1; then
     command clang -Weverything tersets.h
 else
     printf "Skipping C-binding syntax check because Clang is not available.\n" >&2
 fi 
+
+print_step "GCC C-binding Syntax Check"
+gcc -Wall -Wextra tersets.h
 
 # Test Julia binding.
 cd "$repo_root/bindings/julia"
