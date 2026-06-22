@@ -15,8 +15,8 @@
 # limitations under the License.
 
 # Approximates .github/workflows/ci.yml for local verification before pushing.
-# The C-binding only runs CLang for testing C-syntax. Therefore, it is skipped in this
-# script to avoid requiring CLang to be installed locally.
+# The C-binding only runs Clang for testing C-syntax. Therefore, it is skipped in this
+# script to avoid requiring Clang to be installed locally.
 
 
 set -eu
@@ -73,6 +73,16 @@ print_step "Zig Build Test Debug"
 zig build test -Doptimize="Debug"
 print_step "Zig Build Test ReleaseFast"
 zig build test -Doptimize="ReleaseFast"
+
+# Test C bindings.
+print_step "C-binding Syntax Check"
+if command -v clang >/dev/null 2>&1
+then
+    cd "$repo_root/bindings/c"
+    command clang -Weverything tersets.h
+else
+    printf "Skipping C-binding syntax check because Clang is not available.\n" >&2
+fi 
 
 # Test Julia binding.
 cd "$repo_root/bindings/julia"
