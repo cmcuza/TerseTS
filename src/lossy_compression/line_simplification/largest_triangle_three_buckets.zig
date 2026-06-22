@@ -235,8 +235,6 @@ test "lttb downsamples with known result" {
 
     var compressed_values = ArrayList(u8).empty;
     defer compressed_values.deinit(allocator);
-    var decompressed_values = ArrayList(f64).empty;
-    defer decompressed_values.deinit(allocator);
 
     const method_configuration =
         \\ {"output_threshold_number": 4}
@@ -256,6 +254,195 @@ test "lttb downsamples with known result" {
     try testing.expectEqual(uncompressed_values[2], kept[1]);
     try testing.expectEqual(uncompressed_values[5], kept[3]);
     try testing.expectEqual(uncompressed_values[8], kept[5]);
+}
+
+test "lttb returns error for threshold below 2" {
+    const allocator = testing.allocator;
+
+    const uncompressed_values: []const f64 = &[_]f64{ 1.0, 2.0, 3.0 };
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    const method_configuration =
+        \\ {"output_threshold_number": 1}
+    ;
+
+    try testing.expectError(
+        Error.UnsupportedInput,
+        compress(allocator, uncompressed_values, &compressed_values, method_configuration),
+    );
+}
+
+test "lttb returns error for empty input" {
+    const allocator = testing.allocator;
+
+    const uncompressed_values: []const f64 = &[_]f64{};
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    const method_configuration =
+        \\ {"output_threshold_number": 10}
+    ;
+
+    try testing.expectError(
+        Error.UnsupportedInput,
+        compress(allocator, uncompressed_values, &compressed_values, method_configuration),
+    );
+}
+
+test "lttb returns error for single-point input" {
+    const allocator = testing.allocator;
+
+    const uncompressed_values: []const f64 = &[_]f64{5.0};
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    const method_configuration =
+        \\ {"output_threshold_number": 2}
+    ;
+
+    try testing.expectError(
+        Error.UnsupportedInput,
+        compress(allocator, uncompressed_values, &compressed_values, method_configuration),
+    );
+}
+
+test "lttb with threshold 2 keeps only first and last point" {
+    const allocator = testing.allocator;
+
+    // inner_threshold = 0, the loop never executes, only endpoints are kept.
+    const uncompressed_values: []const f64 = &[_]f64{ 1.0, 3.0, 5.0, 7.0, 9.0 };
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    const method_configuration =
+        \\ {"output_threshold_number": 2}
+    ;
+
+    try compress(allocator, uncompressed_values, &compressed_values, method_configuration);
+
+    // calculate the amount of points stored, verify that there are 2 (first and last point)
+    // 8 bytes for start value, 8 for end value, 8 for end index
+    const kept_points = (compressed_values.items.len - 8) / 16 + 1;
+    try testing.expectEqual(@as(usize, 2), kept_points);
+
+    // should keep the start and end value of uncompressed_values
+    const kept = mem.bytesAsSlice(f64, compressed_values.items);
+    try testing.expectEqual(uncompressed_values[0], kept[0]);
+    try testing.expectEqual(uncompressed_values[uncompressed_values.len - 1], kept[1]);
+}
+
+test "lttb with threshold equal to len-1 preserves round-trip" {
+    const allocator = testing.allocator;
+
+    // 5 points, threshold 4: inner_threshold = 2, inner_point_count = 3.
+    // Two buckets cover three interior points (indices 1,2,3).
+    const uncompressed_values: []const f64 = &[_]f64{ 1.0, 2.0, 1.5, 3.0, 5.0 };
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
+
+    const method_configuration =
+        \\ {"output_threshold_number": 4}
+    ;
+
+    try compress(allocator, uncompressed_values, &compressed_values, method_configuration);
+
+    const kept_points = (compressed_values.items.len - 8) / 16 + 1;
+    try testing.expectEqual(@as(usize, 4), kept_points);
+
+    // endpoints are always first and last
+    const kept = mem.bytesAsSlice(f64, compressed_values.items);
+    try testing.expectEqual(uncompressed_values[0], kept[0]);
+    try testing.expectEqual(uncompressed_values[4], kept[5]);
+
+    try decompress(allocator, compressed_values.items, &decompressed_values);
+    try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
+}
+
+test "lttb handles uneven bucket distribution" {
+    const allocator = testing.allocator;
+
+    // 12 points, threshold 5: inner_threshold = 3, inner_point_count = 10.
+    // Buckets: floor(0*10/3)=0, floor(1*10/3)=3, floor(2*10/3)=6, floor(3*10/3)=10
+    // Bucket sizes: 3, 3, 4 — uneven.
+    const uncompressed_values: []const f64 = &[_]f64{
+        0.0, 1.0, 2.0, 1.0, 0.0, 1.0, 2.0, 1.0, 0.0, 1.0, 2.0, 5.0,
+    };
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
+
+    const method_configuration =
+        \\ {"output_threshold_number": 5}
+    ;
+
+    try compress(allocator, uncompressed_values, &compressed_values, method_configuration);
+
+    const kept_points = (compressed_values.items.len - 8) / 16 + 1;
+    try testing.expectEqual(@as(usize, 5), kept_points);
+
+    try decompress(allocator, compressed_values.items, &decompressed_values);
+    try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
+}
+
+test "lttb handles collinear points" {
+    const allocator = testing.allocator;
+
+    // All points lie strictly on y = 2x + 1. Every triangle has area zero.
+    // The algorithm should still select a point from each bucket.
+    const uncompressed_values: []const f64 = &[_]f64{
+        1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 13.0, 15.0, 17.0,
+    };
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
+
+    const method_configuration =
+        \\ {"output_threshold_number": 4}
+    ;
+
+    try compress(allocator, uncompressed_values, &compressed_values, method_configuration);
+
+    const kept_points = (compressed_values.items.len - 8) / 16 + 1;
+    try testing.expectEqual(@as(usize, 4), kept_points);
+
+    try decompress(allocator, compressed_values.items, &decompressed_values);
+    try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
+}
+
+test "lttb round-trip with threshold 3 preserves length" {
+    const allocator = testing.allocator;
+
+    // Minimal downsampling: inner_threshold = 1, one interior point selected.
+    const uncompressed_values: []const f64 = &[_]f64{ 0.0, 10.0, 5.0, 20.0, 15.0 };
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
+
+    const method_configuration =
+        \\ {"output_threshold_number": 3}
+    ;
+
+    try compress(allocator, uncompressed_values, &compressed_values, method_configuration);
+
+    const kept_points = (compressed_values.items.len - 8) / 16 + 1;
+    try testing.expectEqual(@as(usize, 3), kept_points);
+
+    try decompress(allocator, compressed_values.items, &decompressed_values);
+    try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
 }
 
 test "lttb compress and decompress preserve length on larger data" {
