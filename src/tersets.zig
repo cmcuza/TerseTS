@@ -587,17 +587,7 @@ pub fn extract(
         // corrupted streams or misinterpretation of the data during decompression.
         // In case of RLE, modifying the coefficients can disrupt the run-length
         // encoding scheme, also leading to incorrect decompression results.
-        .Uncompressed, 
-        .BitPackedQuantization, 
-        .BitPackedDeltaEncoding, 
-        .SerfQT, 
-        .RunLengthEncoding, 
-        .BitPackedBUFF, 
-        .Chimp64, 
-        .Chimp128, 
-        .MacaqueS, 
-        .MacaqueV, 
-        .Camel => {
+        .Uncompressed, .BitPackedQuantization, .BitPackedDeltaEncoding, .SerfQT, .RunLengthEncoding, .BitPackedBUFF, .Chimp64, .Chimp128, .MacaqueS, .MacaqueV, .Camel => {
             return Error.UnsupportedMethod;
         },
     }
@@ -737,17 +727,7 @@ pub fn rebuild(
         // corrupted streams or misinterpretation of the data during decompression.
         // In case of RLE, modifying the coefficients can disrupt the run-length
         // encoding scheme, also leading to incorrect decompression results.
-        .Uncompressed, 
-        .BitPackedQuantization, 
-        .BitPackedDeltaEncoding, 
-        .BitPackedBUFF, 
-        .SerfQT, 
-        .RunLengthEncoding, 
-        .Chimp64, 
-        .Chimp128, 
-        .MacaqueS, 
-        .MacaqueV, 
-        .Camel => {
+        .Uncompressed, .BitPackedQuantization, .BitPackedDeltaEncoding, .BitPackedBUFF, .SerfQT, .RunLengthEncoding, .Chimp64, .Chimp128, .MacaqueS, .MacaqueV, .Camel => {
             return Error.UnsupportedMethod;
         },
     }
