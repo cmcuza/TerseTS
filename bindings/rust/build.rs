@@ -119,8 +119,8 @@ fn main() {
         }
 
         // 3. Rebuild the archive symbol table so the linker reliably pulls
-        //    compiler_rt.o on demand (the libtool re-pack can otherwise leave an
-        //    index that resolves only intermittently).
+        //compiler_rt.o on demand (the libtool re-pack can otherwise leave an
+        //index that resolves only intermittently).
         let status = Command::new("ranlib").arg(&lib).status().unwrap();
         if !status.success() {
             println!("cargo::error=Failed to regenerate libtersets.a symbol table with ranlib.");
