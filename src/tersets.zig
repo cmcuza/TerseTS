@@ -132,6 +132,12 @@ pub fn compress(
     }
 
     switch (method) {
+        .Uncompressed => {
+            for (uncompressed_values) |value| {
+                const value_as_bytes: [8]u8 = @bitCast(value);
+                try compressed_values.appendSlice(allocator, value_as_bytes[0..]);
+            }
+        },
         .PoorMansCompressionMidrange => {
             try poor_mans_compression.compressMidrange(
                 allocator,
@@ -323,12 +329,6 @@ pub fn compress(
                 &compressed_values,
                 configuration,
             );
-        },
-        .Uncompressed => {
-            for (uncompressed_values) |value| {
-                const value_as_bytes: [8]u8 = @bitCast(value);
-                try compressed_values.appendSlice(allocator, value_as_bytes[0..]);
-            }
         },
         .Camel => {
             try camel.compress(
