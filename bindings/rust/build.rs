@@ -64,6 +64,29 @@ fn main() {
     library_path.push("zig-out");
     library_path.push("lib");
 
+    // Zig's archiver emits Mach-O archive members that are not 8-byte aligned,
+    // which Apple's linker rejects ("64-bit mach-o member ... not 8-byte aligned
+    // in libtersets.a"). Re-pack the archive with cctools' `libtool`, which is
+    // bundled with the Xcode command-line tools and writes correctly aligned
+    // members. This runs automatically during `cargo build`, so macOS users need
+    // no extra steps. See https://github.com/ziglang/zig/issues/1981.
+    #[cfg(target_os = "macos")]
+    {
+        let lib = library_path.join("libtersets.a");
+        let fixed = library_path.join("libtersets.fixed.a");
+        let status = Command::new("libtool")
+            .args(["-static", "-o"])
+            .arg(&fixed)
+            .arg(&lib)
+            .status()
+            .unwrap();
+        if !status.success() {
+            println!("cargo::error=Failed to re-pack libtersets.a with libtool to fix Mach-O member alignment.");
+            process::exit(1);
+        }
+        std::fs::rename(&fixed, &lib).unwrap();
+    }
+
     println!("cargo::rustc-link-lib=static=tersets");
     println!("cargo::rustc-link-search=native={}", library_path.display());
 }
