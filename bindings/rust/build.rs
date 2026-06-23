@@ -78,7 +78,7 @@ fn main() {
     //      compiler_rt, bundled into the archive as `compiler_rt.o` via
     //      `bundle_compiler_rt = true` in build.zig. On x86_64 `f80` is a native
     //      x87 type, so these routines were never needed there. We require that
-    //      member to be present (failing loudly if not, so a missing runtime is a
+    //      member to be present (failing if not, so a missing runtime is a
     //      hard error instead of an intermittent "undefined symbols" link failure),
     //      and regenerate the archive symbol table with `ranlib` so the linker
     //      deterministically resolves those routines on demand. See ziglang/zig#15648.
@@ -119,8 +119,8 @@ fn main() {
         }
 
         // 3. Rebuild the archive symbol table so the linker reliably pulls
-        //compiler_rt.o on demand (the libtool re-pack can otherwise leave an
-        //index that resolves only intermittently).
+        // compiler_rt.o on demand (the libtool re-pack can otherwise leave an
+        // index that resolves only intermittently).
         let status = Command::new("ranlib").arg(&lib).status().unwrap();
         if !status.success() {
             println!("cargo::error=Failed to regenerate libtersets.a symbol table with ranlib.");
