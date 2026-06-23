@@ -55,6 +55,7 @@ const rle_encoding = @import("lossless_compression/run_length_encoding.zig");
 const delta_encoding = @import("lossless_compression/bitpacked_delta_encoding.zig");
 const chimp64 = @import("lossless_compression/chimp64.zig");
 const chimp128 = @import("lossless_compression/chimp128.zig");
+const camel = @import("lossless_compression/camel.zig");
 
 const extractors = @import("utilities/extractors.zig");
 const tester = @import("tester.zig");
@@ -105,6 +106,7 @@ pub const Method = enum {
     DiscreteFourierTransform,
     MacaqueS,
     MacaqueV,
+    Camel,
 };
 
 /// Compress `uncompressed_values` using `method` and its `configuration` and returns the results
@@ -328,6 +330,14 @@ pub fn compress(
                 try compressed_values.appendSlice(allocator, value_as_bytes[0..]);
             }
         },
+        .Camel => {
+            try camel.compress(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                configuration,
+            );
+        },
     }
     try compressed_values.append(allocator, @intFromEnum(method));
     return compressed_values;
@@ -355,6 +365,14 @@ pub fn decompress(
     const compressed_values_slice = compressed_values[0 .. compressed_values.len - 1];
 
     switch (method) {
+        .Uncompressed => {
+            if (compressed_values_slice.len % 8 != 0) return Error.CorruptedCompressedData;
+            var offset: usize = 0;
+            while (offset < compressed_values_slice.len) : (offset += 8) {
+                const value: f64 = @bitCast(compressed_values_slice[offset..][0..8].*);
+                try decompressed_values.append(allocator, value);
+            }
+        },
         .PoorMansCompressionMidrange, .PoorMansCompressionMean => {
             try poor_mans_compression.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
@@ -421,13 +439,8 @@ pub fn decompress(
         .MacaqueV => {
             try macaque.decompressMacaqueV(allocator, compressed_values_slice, &decompressed_values);
         },
-        .Uncompressed => {
-            if (compressed_values_slice.len % 8 != 0) return Error.CorruptedCompressedData;
-            var offset: usize = 0;
-            while (offset < compressed_values_slice.len) : (offset += 8) {
-                const value: f64 = @bitCast(compressed_values_slice[offset..][0..8].*);
-                try decompressed_values.append(allocator, value);
-            }
+        .Camel => {
+            try camel.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
     }
 
@@ -574,17 +587,7 @@ pub fn extract(
         // corrupted streams or misinterpretation of the data during decompression.
         // In case of RLE, modifying the coefficients can disrupt the run-length
         // encoding scheme, also leading to incorrect decompression results.
-        .Uncompressed,
-        .BitPackedQuantization,
-        .BitPackedDeltaEncoding,
-        .SerfQT,
-        .RunLengthEncoding,
-        .BitPackedBUFF,
-        .Chimp64,
-        .Chimp128,
-        .MacaqueS,
-        .MacaqueV,
-        => {
+        .Uncompressed, .BitPackedQuantization, .BitPackedDeltaEncoding, .SerfQT, .RunLengthEncoding, .BitPackedBUFF, .Chimp64, .Chimp128, .MacaqueS, .MacaqueV, .Camel => {
             return Error.UnsupportedMethod;
         },
     }
@@ -724,17 +727,7 @@ pub fn rebuild(
         // corrupted streams or misinterpretation of the data during decompression.
         // In case of RLE, modifying the coefficients can disrupt the run-length
         // encoding scheme, also leading to incorrect decompression results.
-        .Uncompressed,
-        .BitPackedQuantization,
-        .BitPackedDeltaEncoding,
-        .BitPackedBUFF,
-        .SerfQT,
-        .RunLengthEncoding,
-        .Chimp64,
-        .Chimp128,
-        .MacaqueS,
-        .MacaqueV,
-        => {
+        .Uncompressed, .BitPackedQuantization, .BitPackedDeltaEncoding, .BitPackedBUFF, .SerfQT, .RunLengthEncoding, .Chimp64, .Chimp128, .MacaqueS, .MacaqueV, .Camel => {
             return Error.UnsupportedMethod;
         },
     }
@@ -775,7 +768,9 @@ test "extract and rebuild works for any compression method supported" {
             method == Method.Chimp64 or
             method == Method.Chimp128 or
             method == Method.MacaqueS or
-            method == Method.MacaqueV)
+            method == Method.MacaqueV or
+            method == Method.Chimp128 or
+            method == Method.Camel)
         {
             // These compression methods are not supported for extraction
             // of the coefficients and indices. This is because even small
