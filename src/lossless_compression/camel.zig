@@ -66,38 +66,27 @@ pub fn compress(
     try shared_functions.appendValue(allocator, u64, @intCast(uncompressed_values.len), compressed_values);
     if (uncompressed_values.len == 0) return;
 
+    const first = uncompressed_values[0];
+    if (!fitsIntegerPart(first) or isNegativeZero(first)) return Error.UnsupportedInput;
     // Write the first value raw; the decimal count travels per-value as a 2-bit field.
-    try shared_functions.appendValue(allocator, f64, uncompressed_values[0], compressed_values);
+    try shared_functions.appendValue(allocator, f64, first, compressed_values);
 
     var bit_writer = try shared_structs.BulkBitWriter.init(allocator, compressed_values);
+    var prev_int: i64 = intPart(first);
 
-    var prev_int: ?i64 = if (fitsIntegerPart(uncompressed_values[0])) intPart(uncompressed_values[0]) else null;
     for (uncompressed_values[1..]) |v| {
-        const is_special = !fitsIntegerPart(v) or isNegativeZero(v);
-        var int_part: i64 = 0;
-        var frac: f64 = 0.0;
-        var lv: u8 = 0;
-        if (!is_special) {
-            int_part = intPart(v);
-            frac = fracPart(v);
-            lv = @min(calDecimalCount(v), decimal_places);
-            if (prev_int) |p| {
-                const diff_overflow = @subWithOverflow(int_part, p);
-                if (diff_overflow[1] != 0 or diff_overflow[0] < -65535 or diff_overflow[0] > 65535) {
-                    return Error.UnsupportedInput;
-                }
-            }
+        if (!fitsIntegerPart(v) or isNegativeZero(v)) return Error.UnsupportedInput;
+        const int_part = intPart(v);
+        const diff_overflow = @subWithOverflow(int_part, prev_int);
+        if (diff_overflow[1] != 0 or diff_overflow[0] < -65535 or diff_overflow[0] > 65535) {
+            return Error.UnsupportedInput;
         }
-        try bit_writer.writeBits(@as(u1, @intFromBool(is_special)), 1);
-        if (is_special) {
-            // Special values (NaN, Inf, -0.0, huge magnitude) are stored raw.
-            try bit_writer.writeBits(doubleToBits(v), 64);
-            continue;
-        }
-        try compressIntegerPart(prev_int, int_part, &bit_writer);
-        // Per-value decimal count as `lv - 1` in 2 bits (00→1, 01→2, 10→3, 11→4).
+        const int_signal: u1 = @intFromBool(v >= 0.0);
+        const lv = @min(calDecimalCount(v), decimal_places);
+        // Value sign (intSignal) in integer part; decimal count as `lv - 1` in 2 bits (00→1…11→4).
+        try compressIntegerPart(prev_int, int_part, int_signal, &bit_writer);
         try bit_writer.writeBits(@as(u2, @intCast(lv - 1)), 2);
-        try compressDecimalPart(frac, lv, &bit_writer);
+        try compressDecimalPart(@abs(fracPart(v)), lv, &bit_writer);
         prev_int = int_part;
     }
 
@@ -122,21 +111,19 @@ pub fn decompress(
     const first_value = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
     decompressed_values.appendAssumeCapacity(first_value);
 
-    var prev_int: ?i64 = if (fitsIntegerPart(first_value)) intPart(first_value) else null;
+    var prev_int: i64 = if (fitsIntegerPart(first_value)) intPart(first_value) else 0;
     var bit_reader = shared_structs.BulkBitReader.init(compressed_values[offset..]);
 
     while (decompressed_values.items.len < value_count) {
-        const is_special = bit_reader.readBitsNoEof(u1, 1) catch return Error.ByteStreamError;
-        if (is_special == 1) {
-            const bits = bit_reader.readBitsNoEof(u64, 64) catch return Error.ByteStreamError;
-            decompressed_values.appendAssumeCapacity(bitsToDouble(bits));
-            continue;
-        }
-        const int_part = try decompressIntegerPart(prev_int, &bit_reader);
+        const result = try decompressIntegerPart(prev_int, &bit_reader);
         const lv: u8 = @as(u8, bit_reader.readBitsNoEof(u2, 2) catch return Error.ByteStreamError) + 1;
-        const frac = try decompressDecimalPart(lv, &bit_reader);
-        decompressed_values.appendAssumeCapacity(@as(f64, @floatFromInt(int_part)) + frac);
-        prev_int = int_part;
+        const frac_magnitude = try decompressDecimalPart(lv, &bit_reader);
+        const reconstructed: f64 = if (result.int_signal == 1)
+            @as(f64, @floatFromInt(result.int_part)) + frac_magnitude
+        else
+            -(@as(f64, @floatFromInt(@abs(result.int_part))) + frac_magnitude);
+        decompressed_values.appendAssumeCapacity(reconstructed);
+        prev_int = result.int_part;
     }
 }
 
@@ -190,39 +177,32 @@ fn doubleToBits(x: f64) u64 {
 }
 
 /// Writes the compressed integer part of one value into `writer` using delta-encoding.
-/// When `prev_int` is null the full 64-bit double is stored raw; otherwise the difference
-/// `int_part - prev_int` is encoded with a 2-bit code for `{-1, 0, 1}` and a sign+range+magnitude
+/// First writes `int_signal` (1 = non-negative value, 0 = negative), then encodes
+/// `int_part - prev_int` with a 2-bit code for `{-1, 0, 1}` and a sign+range+magnitude
 /// encoding for larger differences (Algorithm 1 of the paper).
-fn compressIntegerPart(prev_int: ?i64, int_part: i64, writer: *shared_structs.BulkBitWriter) !void {
-    if (prev_int == null) {
-        try writer.writeBits(doubleToBits(@as(f64, @floatFromInt(int_part))), 64);
+fn compressIntegerPart(prev_int: i64, int_part: i64, int_signal: u1, writer: *shared_structs.BulkBitWriter) !void {
+    try writer.writeBits(int_signal, 1);
+    const diff = int_part - prev_int;
+    const abs_diff = @abs(diff);
+    if (abs_diff <= 1) {
+        // Encode diff+1 in 2 bits (0: -1, 1: 0, 2: 1).
+        const code = @as(u2, @intCast(@as(u3, @intCast(diff + 1)) & 0b11));
+        try writer.writeBits(code, 2);
     } else {
-        const diff = int_part - prev_int.?;
-        const abs_diff = @abs(diff);
-        if (abs_diff <= 1) {
-            // Encode diff+1 in 2 bits (0: -1, 1: 0, 2: 1).
-            const code = @as(u2, @intCast(@as(u3, @intCast(diff + 1)) & 0b11));
-            try writer.writeBits(code, 2);
-        } else {
-            // Range marker `3` (0b11) signals the sign+flag+magnitude encoding.
-            try writer.writeBits(@as(u2, 0b11), 2);
-            try writer.writeBits(@as(u1, @intFromBool(diff >= 0)), 1);
-            const flag = @as(u1, @intFromBool(abs_diff >= 8));
-            try writer.writeBits(flag, 1);
-            try writer.writeBits(@as(u64, @intCast(abs_diff)), if (flag == 0) 3 else 16);
-        }
+        // Range marker `3` (0b11) signals the sign+flag+magnitude encoding.
+        try writer.writeBits(@as(u2, 0b11), 2);
+        try writer.writeBits(@as(u1, @intFromBool(diff >= 0)), 1);
+        const flag = @as(u1, @intFromBool(abs_diff >= 8));
+        try writer.writeBits(flag, 1);
+        try writer.writeBits(@as(u64, @intCast(abs_diff)), if (flag == 0) 3 else 16);
     }
 }
 
-/// Compresses the fractional part of one value using the Camel XOR scheme (Algorithm 2).
-/// Writes a sign bit and a flag; when the magnitude is at least one quantization step the XOR
-/// center bits and `dxor_prime` are written (flag 1), otherwise the rounded magnitude is stored
-/// directly (flag 0).
-fn compressDecimalPart(frac: f64, l: u8, writer: *shared_structs.BulkBitWriter) !void {
-    const is_negative = frac < 0.0;
-    try writer.writeBits(@as(u1, @intFromBool(is_negative)), 1);
-    const magnitude = @abs(frac);
-
+/// Compresses the fractional magnitude of one value using the Camel XOR scheme (Algorithm 2).
+/// `magnitude` must be non-negative (sign is carried by `int_signal` in the integer part).
+/// Writes a flag; when the magnitude is at least one quantization step the XOR center bits and
+/// `dxor_prime` are written (flag 1), otherwise the rounded magnitude is stored directly (flag 0).
+fn compressDecimalPart(magnitude: f64, l: u8, writer: *shared_structs.BulkBitWriter) !void {
     const step = math.pow(f64, 2.0, -@as(f64, @floatFromInt(l)));
     if (magnitude >= step) {
         try writer.writeBits(@as(u1, 1), 1);
@@ -305,31 +285,30 @@ fn bitsToDouble(bits: u64) f64 {
     return @as(f64, @bitCast(bits));
 }
 
+const IntPartResult = struct { int_part: i64, int_signal: u1 };
+
 /// Reads and decodes the integer part of one value from `reader`, inverting `compressIntegerPart`.
-fn decompressIntegerPart(prev_int: ?i64, reader: *shared_structs.BulkBitReader) Error!i64 {
-    if (prev_int == null) {
-        const bits = reader.readBitsNoEof(u64, 64) catch return Error.ByteStreamError;
-        return intPart(bitsToDouble(bits));
-    } else {
-        const range = reader.readBitsNoEof(u2, 2) catch return Error.ByteStreamError;
-        const diff = switch (range) {
-            0, 1, 2 => @as(i64, @intCast(range)) - 1,
-            3 => blk: {
-                const sign_bit = reader.readBitsNoEof(u1, 1) catch return Error.ByteStreamError;
-                const flag = reader.readBitsNoEof(u1, 1) catch return Error.ByteStreamError;
-                const bits = reader.readBitsNoEof(u64, if (flag == 0) 3 else 16) catch return Error.ByteStreamError;
-                var d = @as(i64, @intCast(bits));
-                if (sign_bit == 0) d = -d;
-                break :blk d;
-            },
-        };
-        return prev_int.? + diff;
-    }
+/// Returns the decoded `int_part` and the `int_signal` (1 = non-negative value, 0 = negative).
+fn decompressIntegerPart(prev_int: i64, reader: *shared_structs.BulkBitReader) Error!IntPartResult {
+    const int_signal = reader.readBitsNoEof(u1, 1) catch return Error.ByteStreamError;
+    const range = reader.readBitsNoEof(u2, 2) catch return Error.ByteStreamError;
+    const diff = switch (range) {
+        0, 1, 2 => @as(i64, @intCast(range)) - 1,
+        3 => blk: {
+            const sign_bit = reader.readBitsNoEof(u1, 1) catch return Error.ByteStreamError;
+            const flag = reader.readBitsNoEof(u1, 1) catch return Error.ByteStreamError;
+            const bits = reader.readBitsNoEof(u64, if (flag == 0) 3 else 16) catch return Error.ByteStreamError;
+            var d = @as(i64, @intCast(bits));
+            if (sign_bit == 0) d = -d;
+            break :blk d;
+        },
+    };
+    return .{ .int_part = prev_int + diff, .int_signal = @intCast(int_signal) };
 }
 
-/// Decompresses the fractional part produced by `compressDecimalPart`, inverting the XOR scheme.
+/// Decompresses the fractional magnitude produced by `compressDecimalPart`, inverting the XOR
+/// scheme. Returns a non-negative value; the caller applies the sign from `int_signal`.
 fn decompressDecimalPart(l: u8, reader: *shared_structs.BulkBitReader) Error!f64 {
-    const is_negative = reader.readBitsNoEof(u1, 1) catch return Error.ByteStreamError;
     const flag = reader.readBitsNoEof(u1, 1) catch return Error.ByteStreamError;
     const factor = math.pow(f64, 10.0, @as(f64, @floatFromInt(l)));
     var magnitude: f64 = undefined;
@@ -347,7 +326,7 @@ fn decompressDecimalPart(l: u8, reader: *shared_structs.BulkBitReader) Error!f64
         const dxor_prime = try readDxorPrime(l, reader);
         magnitude = @as(f64, @floatFromInt(dxor_prime)) / factor;
     }
-    return if (is_negative == 1) -magnitude else magnitude;
+    return magnitude;
 }
 
 /// Reads `dxor_prime` encoded by `writeDxorPrime`, using the same per-`l` prefix+value tables.
@@ -411,28 +390,30 @@ test "camel roundtrips with l=4" {
     try tester.expectLosslessRoundTrip(testing.allocator, compress, decompress, uncompressed_values);
 }
 
-test "camel roundtrips special floating-point values" {
-    const payload_nan: f64 = @bitCast(@as(u64, 0x7ff8000000000001));
-    const uncompressed_values = &[_]f64{
-        1.0,
+test "camel returns UnsupportedInput for special floating-point values" {
+    const specials = [_]f64{
         math.nan(f64),
-        payload_nan,
         math.inf(f64),
         -math.inf(f64),
         math.floatMax(f64),
         -math.floatMax(f64),
+        -0.0,
     };
-    try tester.expectLosslessRoundTrip(testing.allocator, compress, decompress, uncompressed_values);
+    for (specials) |special| {
+        var buffer = ArrayList(u8).empty;
+        defer buffer.deinit(testing.allocator);
+        const result = compress(testing.allocator, &[_]f64{ 1.0, special }, &buffer, "{}");
+        try testing.expectError(Error.UnsupportedInput, result);
+    }
 }
 
-test "camel round-trip integer-only, the edge cases and negative zero" {
+test "camel round-trip integer-only and edge cases" {
     const uncompressed_values = &[_]f64{
-        -65535.0, // the largest negative integer difference that fits in 16 bits
+        -65535.0, // largest negative integer difference that fits in 16 bits
         0.0,
-        -0.0,
         5.0,
         -7.0,
-        65528.0, // maximal integer difference that fits in 16 bits
+        65528.0, // maximal integer difference that fits in 16 bits (65528 - (-7) = 65535)
     };
     try tester.expectLosslessRoundTrip(testing.allocator, compress, decompress, uncompressed_values);
 }
