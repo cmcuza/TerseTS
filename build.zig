@@ -59,7 +59,7 @@ pub fn build(b: *std.Build) void {
     });
 
     if (linking == LinkMode.static) {
-        library.bundle_compiler_rt = true;
+        library.bundle_compiler_rt = target.result.os.tag != .macos;
     }
 
     b.installArtifact(library);
