@@ -125,7 +125,6 @@ pub fn decompress(allocator: Allocator, compressed_values: []const u8, decompres
             }
             const xor_bits = (bit_reader.readBitsNoEof(u64, window) catch return Error.ByteStreamError) << trailing;
             current_value_bits ^= xor_bits;
-
         }
         const value: f64 = @bitCast(current_value_bits);
         decompressed_values.appendAssumeCapacity(value);
