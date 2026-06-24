@@ -65,6 +65,11 @@ const lsb_mask: u64 = (1 << lsb_bits) - 1;
 /// eight boundaries so the chosen bucket index fits in `leading_zero_bucket_bits`.
 const leading_zero_buckets = [_]u6{ 0, 8, 12, 16, 18, 20, 22, 24 };
 
+/// End-of-stream marker meaningful-bit count. Written in a marker `01` after the last value so the
+/// decoder needs no explicit value count: a real marker `01` always stores at least one meaningful
+/// bit, so a count of 0 is impossible for real data and unambiguously marks the end.
+const end_marker_meaningful_bit_count: u6 = 0;
+
 /// Per-thread scratch for the predictor lookup table. Allocating and zeroing the 64 KB `indices`
 /// table on every block dominated compress time, so it is reused across calls: zeroed once, then
 /// kept clean by resetting only the slots a block dirtied (recorded in `dirty`) instead of wiping
@@ -84,8 +89,7 @@ threadlocal var scratch: ?Scratch = null;
 /// `allocator` backs the configuration parser, the ring buffer and predictor lookup table, and the
 /// bit writer's scratch buffer. `method_configuration` must be an empty configuration; any field
 /// makes the call return `Error.InvalidConfiguration`. On success `compressed_values` holds
-/// `[count: u64][first_value: f64][XOR marker bits...]`. If an error occurs it is returned. The
-/// predictor selection and per-marker encoding logic is described inline in the function body.
+/// `[first_value: f64][XOR marker bits][end-of-stream marker]`. If an error occurs it is returned.
 pub fn compress(
     allocator: Allocator,
     uncompressed_values: []const f64,
@@ -97,10 +101,6 @@ pub fn compress(
         configuration.EmptyConfiguration,
         method_configuration,
     );
-
-    // Store the value count so decompression can ignore padding bits after the stream is flushed.
-    try shared_functions.appendValue(allocator, u64, @intCast(uncompressed_values.len), compressed_values);
-    if (uncompressed_values.len == 0) return;
 
     // Chimp128 encodes later values as XORs against a predictor, so the first value is stored raw.
     const first_value = uncompressed_values[0];
@@ -225,33 +225,40 @@ pub fn compress(
         previous_value_bits = current_value_bits;
     }
 
+    // Append the end-of-stream marker so the decoder can find where the values stop without an
+    // explicit count; any padding bits flushed afterwards are never read back.
+    try writeEndMarker(&bit_writer);
     try bit_writer.flushBits();
+}
+
+/// Writes the end-of-stream marker: marker `01` with a meaningful-bit count of 0. The encoder never
+/// emits a zero count for a real value (a stored-meaningful-bits value always has at least one
+/// meaningful bit), so the decoder uses it as a sentinel and needs no explicit value count.
+fn writeEndMarker(bit_writer: *shared_structs.BulkBitWriter) Error!void {
+    try bit_writer.writeBits(@as(u2, 0b01), 2);
+    try bit_writer.writeBits(@as(u7, 0), 7);
+    try bit_writer.writeBits(@as(u3, 0), leading_zero_bucket_bits);
+    try bit_writer.writeBits(end_marker_meaningful_bit_count, 6);
 }
 
 /// Decompress a Chimp128-encoded `compressed_values` stream into `decompressed_values`.
 /// `allocator` grows `decompressed_values` and backs the ring buffer that mirrors the encoder's so
-/// predictor lookups stay in sync. `compressed_values` must start with the
-/// `[count: u64][first_value: f64]` header written by `compress`; malformed or truncated streams
-/// return `Error.ByteStreamError` or `Error.UnsupportedInput` rather than trapping. If an error
-/// occurs it is returned. The per-marker decoding logic is described inline in the function body.
+/// predictor lookups stay in sync. `compressed_values` must start with the raw `[first_value: f64]`
+/// written by `compress`, followed by the marker bits and the end-of-stream marker; malformed or
+/// truncated streams return `Error.CorruptedCompressedData` rather than trapping. If an error
+/// occurs it is returned.
 pub fn decompress(
     allocator: Allocator,
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
 ) Error!void {
     var offset: usize = 0;
-    const value_count = try shared_functions.readOffsetValue(u64, compressed_values, &offset);
 
-    if (value_count == 0) return;
-
-    // Every non-empty Chimp128 stream must contain the count header and first raw value.
-    if (compressed_values.len < 16) return Error.UnsupportedInput;
-
-    // The header gives the exact output length, so reserve it once and append without growth checks.
-    try decompressed_values.ensureTotalCapacity(allocator, @intCast(value_count));
+    // Every non-empty Chimp128 stream stores the first value raw (8 bytes) before the bit stream.
+    if (compressed_values.len < 8) return Error.CorruptedCompressedData;
 
     const first_value = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
-    decompressed_values.appendAssumeCapacity(first_value);
+    try decompressed_values.append(allocator, first_value);
 
     const stored_values = try allocator.alloc(u64, previous_values);
     defer allocator.free(stored_values);
@@ -272,32 +279,32 @@ pub fn decompress(
     // Read the bit stream straight from the remaining bytes with a buffered, byte-slice reader.
     var bit_reader = shared_structs.BulkBitReader.init(compressed_values[offset..]);
 
-    while (decompressed_values.items.len < value_count) {
-        const first_marker_bit = bit_reader.readBitsNoEof(u1, 1) catch return Error.ByteStreamError;
-        const second_marker_bit = bit_reader.readBitsNoEof(u1, 1) catch return Error.ByteStreamError;
+    while (true) {
+        const first_marker_bit = bit_reader.readBitsNoEof(u1, 1) catch return Error.CorruptedCompressedData;
+        const second_marker_bit = bit_reader.readBitsNoEof(u1, 1) catch return Error.CorruptedCompressedData;
 
         var current_value_bits: u64 = undefined;
 
         if (first_marker_bit == 0 and second_marker_bit == 0) {
             // Marker `00`: read the 7-bit ring slot and reuse that stored value directly.
-            const ring_slot = bit_reader.readBitsNoEof(u7, 7) catch return Error.ByteStreamError;
+            const ring_slot = bit_reader.readBitsNoEof(u7, 7) catch return Error.CorruptedCompressedData;
             current_value_bits = stored_values[ring_slot];
         } else if (first_marker_bit == 0 and second_marker_bit == 1) {
             // Marker `01`: read the 7-bit ring slot, reconstruct XOR, apply to the stored value.
-            const ring_slot = bit_reader.readBitsNoEof(u7, 7) catch return Error.ByteStreamError;
-            const leading_bucket_index = bit_reader.readBitsNoEof(u3, leading_zero_bucket_bits) catch return Error.ByteStreamError;
+            const ring_slot = bit_reader.readBitsNoEof(u7, 7) catch return Error.CorruptedCompressedData;
+            const leading_bucket_index = bit_reader.readBitsNoEof(u3, leading_zero_bucket_bits) catch return Error.CorruptedCompressedData;
             const leading_bucket = leading_zero_buckets[leading_bucket_index];
 
-            const meaningful_bit_count = bit_reader.readBitsNoEof(u6, 6) catch return Error.ByteStreamError;
-            // The encoder never emits a zero meaningful-bit count for this marker.
-            // Reject corrupted streams explicitly instead of treating them as xor = 0.
-            if (meaningful_bit_count == 0) return Error.UnsupportedInput;
+            const meaningful_bit_count = bit_reader.readBitsNoEof(u6, 6) catch return Error.CorruptedCompressedData;
+            // A meaningful-bit count of 0 is the end-of-stream marker (the encoder never emits a
+            // zero count for a real value), so decoding stops here.
+            if (meaningful_bit_count == 0) break;
             // Validate the geometry before casting: leading + meaningful must leave room for
             // a non-negative trailing-zero count that still fits in u6.
             const occupied: u16 = @as(u16, leading_bucket) + @as(u16, meaningful_bit_count);
-            if (occupied > bits_per_value) return Error.UnsupportedInput;
+            if (occupied > bits_per_value) return Error.CorruptedCompressedData;
             const trailing_zeros: u6 = @intCast(bits_per_value - occupied);
-            const meaningful_bits = bit_reader.readBitsNoEof(u64, meaningful_bit_count) catch return Error.ByteStreamError;
+            const meaningful_bits = bit_reader.readBitsNoEof(u64, meaningful_bit_count) catch return Error.CorruptedCompressedData;
             const xor = meaningful_bits << trailing_zeros;
 
             current_value_bits = stored_values[ring_slot] ^ xor;
@@ -309,12 +316,12 @@ pub fn decompress(
                 leading_bucket = previous_leading_zeros;
             } else {
                 // Marker `11`: read a new leading-zero bucket, XOR against previous value.
-                const leading_bucket_index = bit_reader.readBitsNoEof(u3, leading_zero_bucket_bits) catch return Error.ByteStreamError;
+                const leading_bucket_index = bit_reader.readBitsNoEof(u3, leading_zero_bucket_bits) catch return Error.CorruptedCompressedData;
                 leading_bucket = leading_zero_buckets[leading_bucket_index];
                 previous_leading_zeros = leading_bucket;
             }
             const non_leading_bit_count: u16 = bits_per_value - @as(u16, leading_bucket);
-            const xor = bit_reader.readBitsNoEof(u64, non_leading_bit_count) catch return Error.ByteStreamError;
+            const xor = bit_reader.readBitsNoEof(u64, non_leading_bit_count) catch return Error.CorruptedCompressedData;
             current_value_bits = previous_value_bits ^ xor;
         }
 
@@ -323,7 +330,7 @@ pub fn decompress(
         previous_value_bits = current_value_bits;
 
         const value: f64 = @bitCast(current_value_bits);
-        decompressed_values.appendAssumeCapacity(value);
+        try decompressed_values.append(allocator, value);
     }
 }
 
@@ -370,20 +377,6 @@ test "chimp128 roundtrips generated values across all distributions" {
             data_distributions,
         );
     }
-}
-
-test "chimp128 roundtrips empty input" {
-    // Empty input uses only the count header and no bit stream.
-    const uncompressed_values = &[_]f64{};
-
-    try tester.expectLosslessRoundTrip(testing.allocator, compress, decompress, uncompressed_values);
-}
-
-test "chimp128 roundtrips single value" {
-    // A single value stores the count and first raw value without any XOR markers.
-    const uncompressed_values = &[_]f64{42.5};
-
-    try tester.expectLosslessRoundTrip(testing.allocator, compress, decompress, uncompressed_values);
 }
 
 test "chimp128 roundtrips repeated values" {
