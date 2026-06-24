@@ -145,7 +145,7 @@ test "gorilla can always compress and decompress" {
     };
 
     // This function evaluates Gorilla using all data distribution stored in
-    // `data_distribution`. The error bound is ignored as RLE does not use it.
+    // `data_distribution`. The error bound is ignored as Gorilla does not use it.
     try tester.testLosslessMethod(
         allocator,
         Method.Gorilla,
@@ -160,7 +160,7 @@ test "gorilla compresses repeated values" {
     defer uncompressed_values.deinit(allocator);
 
     // Generate a random number of `distinct_elements` that will be repeated a random number of times
-    // to test that RLE can compress repeated values.
+    // to test that Gorilla can compress repeated values.
     const distinct_elements: usize = tester.generateBoundRandomInteger(
         usize,
         tester.global_at_least,
@@ -201,8 +201,7 @@ test "gorilla compresses repeated values" {
     ));
 }
 
-test "check rle configuration parsing" {
-    // Tests the configuration parsing and functionality of the `compressMidrange` function.
+test "check gorilla configuration parsing" {
     // The test verifies that the provided configuration is correctly interpreted and
     // that the `configuration.EmptyConfiguration` is expected in the function.
     const allocator = testing.allocator;
