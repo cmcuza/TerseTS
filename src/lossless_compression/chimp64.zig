@@ -61,8 +61,7 @@ const end_marker_meaningful_bit_count: u6 = 0;
 /// backs the configuration parser and the bit writer's scratch buffer. `method_configuration` must
 /// be an empty configuration; any field makes the call return `Error.InvalidConfiguration`. On
 /// success `compressed_values` holds `[first_value: f64][XOR marker bits][end-of-stream marker]`.
-/// If an error occurs it is returned. The XOR-prediction and per-marker encoding logic is
-/// described inline in the function body.
+/// If an error occurs it is returned.
 pub fn compress(
     allocator: Allocator,
     uncompressed_values: []const f64,
@@ -156,15 +155,13 @@ fn writeEndMarker(bit_writer: *shared_structs.BulkBitWriter) Error!void {
 /// grows `decompressed_values` as values are recovered. `compressed_values` must start with the raw
 /// `[first_value: f64]` written by `compress`, followed by the marker bits and the end-of-stream
 /// marker; malformed or truncated streams return `Error.CorruptedCompressedData` rather than
-/// trapping. If an error occurs it is returned. The per-marker decoding logic is described inline
-/// in the function body.
+/// trapping. If an error occurs it is returned.
 pub fn decompress(
     allocator: Allocator,
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
 ) Error!void {
     var offset: usize = 0;
-    if (compressed_values.len == 0) return;
 
     // Every non-empty Chimp64 stream stores the first value raw (8 bytes) before the bit stream.
     if (compressed_values.len < 8) return Error.CorruptedCompressedData;
