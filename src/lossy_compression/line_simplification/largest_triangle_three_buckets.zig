@@ -12,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Implementation of the Largest Triangle Three Buckets (LTTB) downsampling algorithm from the thesis
+//! "Steinarsson, S. Downsampling Time Series for Visual Representation.
+//! M.Sc. thesis, University of Iceland, 2013.
+//! https://hdl.handle.net/1946/15343".
+
 const std = @import("std");
 const mem = std.mem;
 const math = std.math;

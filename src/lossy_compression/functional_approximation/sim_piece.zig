@@ -170,7 +170,7 @@ pub fn decompress(
     const current_metadata = segments_metadata.getLast();
     try decompressSegment(
         allocator,
-        current_metadata.?,
+        current_metadata,
         current_index,
         last_index,
         decompressed_values,

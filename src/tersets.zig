@@ -689,7 +689,7 @@ pub fn getMaxMethodIndex() usize {
     const method_info = @typeInfo(Method).@"enum";
 
     var max_index: usize = 0;
-    for (method_info.field_names, 0..) |_, i| {
+    for (method_info.fields, 0..) |_, i| {
         max_index = if (i > max_index) i else max_index;
     }
 
@@ -712,8 +712,8 @@ test "extract and rebuild works for any compression method supported" {
     );
 
     // Test each method.
-    inline for (@typeInfo(Method).@"enum".field_values) |field_value| {
-        const method: Method = @enumFromInt(field_value);
+    inline for (std.meta.fields(Method)) |method_field| {
+        const method: Method = @enumFromInt(method_field.value);
 
         if (method == Method.BitPackedQuantization or
             method == Method.SerfQT or
