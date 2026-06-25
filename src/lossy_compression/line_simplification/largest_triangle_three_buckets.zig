@@ -60,7 +60,7 @@ pub fn compress(
     if (threshold < 2) return Error.UnsupportedInput;
 
     // Series is already at or below the target size: keep every point
-    // and just output (value, index) pairs normally
+    // and just output (value, index) pairs normally.
     if (uncompressed_values.len <= threshold) {
         try shared_functions.appendValue(allocator, f64, uncompressed_values[0], compressed_values);
         for (1..uncompressed_values.len) |i| {
@@ -169,6 +169,12 @@ pub fn decompress(allocator: Allocator, compressed_values: []const u8, decompres
     }
 }
 
+/// Extracts `indices` and `coefficients` from "Largest Triangle Three Buckets" `compressed_values`.
+/// The binary representation follows the same pattern as "Visvalingam-Whyatt" and "SwingFilter",
+/// so this function calls `extractCoefficientIndexTuplesWithStartCoefficient`.
+/// All structural and corruption checks are performed by the delegated function.
+/// Any loss of index information can lead to failures during later decompression.
+/// The `allocator` handles the memory of the output arrays. Allocation errors are propagated.
 pub fn extract(
     allocator: Allocator,
     compressed_values: []const u8,
@@ -185,6 +191,12 @@ pub fn extract(
     );
 }
 
+/// Rebuilds "Largest Triangle Three Buckets" `compressed_values` from the provided `indices` and `coefficients`.
+/// The representation matches "Visvalingam-Whyatt" and "SwingFilter",
+/// so the function delegates to `rebuildCoefficientIndexTuplesWithStartCoefficient`.
+/// All format validation and corruption checks are performed by that routine.
+/// Any loss or misalignment of indices may cause failures when decoding the rebuilt representation.
+/// The `allocator` handles the memory of the output arrays. Allocation errors are propagated.
 pub fn rebuild(
     allocator: Allocator,
     indices: []const u64,
@@ -325,12 +337,12 @@ test "lttb with threshold 2 keeps only first and last point" {
 
     try compress(allocator, uncompressed_values, &compressed_values, method_configuration);
 
-    // calculate the amount of points stored, verify that there are 2 (first and last point)
-    // 8 bytes for start value, 8 for end value, 8 for end index
+    // Calculate the amount of points stored, verify that there are 2 (first and last point).
+    // 8 bytes for start value, 8 for end value, 8 for end index.
     const kept_points = (compressed_values.items.len - 8) / 16 + 1;
     try testing.expectEqual(@as(usize, 2), kept_points);
 
-    // should keep the start and end value of uncompressed_values
+    // Should keep the start and end value of uncompressed_values.
     const kept = mem.bytesAsSlice(f64, compressed_values.items);
     try testing.expectEqual(uncompressed_values[0], kept[0]);
     try testing.expectEqual(uncompressed_values[uncompressed_values.len - 1], kept[1]);
@@ -357,7 +369,7 @@ test "lttb with threshold equal to len-1 preserves round-trip" {
     const kept_points = (compressed_values.items.len - 8) / 16 + 1;
     try testing.expectEqual(@as(usize, 4), kept_points);
 
-    // endpoints are always first and last
+    // Endpoints are always first and last.
     const kept = mem.bytesAsSlice(f64, compressed_values.items);
     try testing.expectEqual(uncompressed_values[0], kept[0]);
     try testing.expectEqual(uncompressed_values[4], kept[5]);
@@ -370,7 +382,7 @@ test "lttb handles uneven bucket distribution" {
     const allocator = testing.allocator;
 
     // 12 points, threshold 5: inner_threshold = 3, inner_point_count = 10.
-    // Buckets: floor(0*10/3)=0, floor(1*10/3)=3, floor(2*10/3)=6, floor(3*10/3)=10
+    // Buckets: floor(0*10/3)=0, floor(1*10/3)=3, floor(2*10/3)=6, floor(3*10/3)=10.
     // Bucket sizes: 3, 3, 4 — uneven.
     const uncompressed_values: []const f64 = &[_]f64{
         0.0, 1.0, 2.0, 1.0, 0.0, 1.0, 2.0, 1.0, 0.0, 1.0, 2.0, 5.0,
