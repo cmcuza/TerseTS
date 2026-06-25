@@ -24,16 +24,12 @@
 const std = @import("std");
 const math = std.math;
 const mem = std.mem;
-const Io = std.Io;
 const testing = std.testing;
-const Reader = std.Io.Reader;
-const Writer = std.Io.Writer;
 const ArrayList = std.ArrayList;
 const Allocator = mem.Allocator;
 
 const tersets = @import("../../tersets.zig");
 const shared_structs = @import("../../utilities/shared_structs.zig");
-const BitWriter = shared_structs.BitWriter;
 const configuration = @import("../../configuration.zig");
 const Method = tersets.Method;
 const Error = tersets.Error;
@@ -119,15 +115,52 @@ pub fn compress(
         try quantized_values.append(allocator, quantized_value);
     }
 
-    // Step 5: Bit-pack quantized values using fixed-length header scheme.
+    // Bit-wise packing with fixed-length header. BulkBitWriter preserves the BitWriter stream
+    // layout while buffering writes into larger byte chunks.
+    var bit_writer = try shared_structs.BulkBitWriter.init(allocator, compressed_values);
+    try writeQuantizedValues(&bit_writer, quantized_values.items);
+    try bit_writer.flushBits();
+}
+
+/// Decompress `compressed_values` produced by "Bucket Quantization" and "Bit-Packing". The function
+/// writes the result to `decompressed_values`. If an error occurs it is returned.
+pub fn decompress(
+    allocator: Allocator,
+    compressed_values: []const u8,
+    decompressed_values: *ArrayList(f64),
+) Error!void {
+    // Ensure the compressed values are not empty, i.e., at least the header is present.
+    if (compressed_values.len < 16) return Error.UnsupportedInput;
+
+    // Read minimum_value and bucket_size from the header.
+    const minimum_value: f64 = @bitCast(compressed_values[0..8].*);
+    const bucket_size: f64 = @bitCast(compressed_values[8..16].*);
+
+    // Read the packed values directly from the remaining byte slice. BulkBitReader matches the
+    // MSB-first packed format while avoiding the per-byte stream wrapper overhead.
+    var bit_reader = shared_structs.BulkBitReader.init(compressed_values[16..]);
+    try readQuantizedValues(
+        allocator,
+        &bit_reader,
+        minimum_value,
+        bucket_size,
+        decompressed_values,
+    );
+}
+
+/// Writes `quantized_values` using the fixed-length prefix format used by BitPackedQuantization.
+/// Each value is preceded by two control bits that select an 8-, 16-, 32-, or 64-bit payload.
+/// `BulkBitWriter` keeps the byte stream compatible with the original bit-level layout while
+/// reducing per-byte write overhead.
+fn writeQuantizedValues(
+    bit_writer: *shared_structs.BulkBitWriter,
+    quantized_values: []const u64,
+) !void {
     const small_limit = 0xFF; // Fits in 8 bits.
     const medium_limit = 0xFFFF; // Fits in 16 bits.
     const large_limit = 0xFFFFFFFF; // Fits in 32 bits.
 
-    // Bit-wise packing with fixed-length header.
-    var bit_writer = try shared_structs.BitWriter.init(allocator, compressed_values);
-
-    for (quantized_values.items) |val| {
+    for (quantized_values) |val| {
         if (val <= small_limit) {
             try bit_writer.writeBits(@as(u1, 0b0), 1); // header '0'.
             try bit_writer.writeBits(@as(u1, 0b0), 1); // header '0'.
@@ -146,35 +179,23 @@ pub fn compress(
             try bit_writer.writeBits(@as(u64, @intCast(val)), 64); // 64-bit value.
         }
     }
-
-    try bit_writer.flushBits();
 }
 
-/// Decompress `compressed_values` produced by "Bucket Quantization" and "Bit-Packing". The function
-/// writes the result to `decompressed_values`. If an error occurs it is returned.
-pub fn decompress(
+/// Reads quantized values from `bit_reader` and appends reconstructed f64 values to
+/// `decompressed_values`. The reader must be positioned at the first packed control bit after the
+/// 16-byte `[minimum_value][bucket_size]` header. Decoding stops when the reader reaches padding or
+/// the end of the byte stream, matching the existing format which does not store an explicit value
+/// count in this method's header.
+fn readQuantizedValues(
     allocator: Allocator,
-    compressed_values: []const u8,
+    bit_reader: *shared_structs.BulkBitReader,
+    minimum_value: f64,
+    bucket_size: f64,
     decompressed_values: *ArrayList(f64),
 ) Error!void {
-    // Ensure the compressed values are not empty, i.e., at least the header is present.
-    if (compressed_values.len < 16) return Error.UnsupportedInput;
-
-    // Read minimum_value and bucket_size from the header.
-    const minimum_value: f64 = @bitCast(compressed_values[0..8].*);
-    const bucket_size: f64 = @bitCast(compressed_values[8..16].*);
-
-    // Create a bit reader from remaining bytes.
-    const reader = Reader.fixed(compressed_values[16..]);
-    var bit_reader = shared_structs.BitReader.init(reader);
+    const bits_ordered_minimum_value = shared_functions.floatBitsOrdered(minimum_value);
     var decompressed_value: f64 = 0.0;
 
-    // Convert minimum_value to its ordered bit representation.
-    // “Ordered bit representation” means a transformation that makes float bits sortable as integers.
-    // This ensures correct decoding when using raw bit differences.
-    const bits_ordered_minimum_value = shared_functions.floatBitsOrdered(minimum_value);
-
-    // Read each quantized value based on fixed-length header.
     while (true) {
         // Read two control bits that encode the length of the upcoming value.
         // If the stream ends before reading them, we break the loop.
