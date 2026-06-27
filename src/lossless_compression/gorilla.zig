@@ -32,7 +32,7 @@ const shared_structs = @import("../utilities/shared_structs.zig");
 /// Compresses the `uncompressed_values` using "Gorilla". The function writes the
 /// result to `compressed_values`. The `method_configuration` is expected to be `EmptyConfiguration`,
 /// otherwise an error is returned instead of ignoring the configuration. The `allocator` is used
-/// to allocate the `method_configuration` p arser's memory. If an error occurs it is returned.
+/// to allocate the `method_configuration` parser's memory. If an error occurs it is returned.
 pub fn compress(
     allocator: Allocator,
     uncompressed_values: []const f64,
