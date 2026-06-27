@@ -45,10 +45,11 @@ pub fn compress(
         method_configuration,
     );
 
+    // Store the value count so decompression can ignore padding bits after the stream is flushed.
     try shared_functions.appendValue(allocator, u64, @intCast(uncompressed_values.len), compressed_values);
     if (uncompressed_values.len == 0) return;
 
-    // Store first value and xor subsequent values against it
+    // Store first value uncompressed
     const first_value: f64 = uncompressed_values[0];
     try shared_functions.appendValue(allocator, f64, first_value, compressed_values);
 
@@ -57,6 +58,8 @@ pub fn compress(
     var bit_writer = try shared_structs.BulkBitWriter.init(allocator, compressed_values);
 
     var prev_value_bits: u64 = @bitCast(first_value);
+
+    // Gorilla tracks the number of leading zeros and trailing zeros to set the header
     var leading_zeros: u8 = dtype_bit_len + 1;
     var trailing_zeros: u8 = dtype_bit_len + 1;
     var meaningful_len: u8 = 0;
@@ -64,14 +67,15 @@ pub fn compress(
         const current_value_bits: u64 = @bitCast(value);
         const xor = prev_value_bits ^ current_value_bits;
         if (xor == 0) {
+            // write 0b0 for repeated value
             try bit_writer.writeBits(@as(u1, 0), 1);
         } else {
-            // write header
             try bit_writer.writeBits(@as(u1, 1), 1);
+            // compute leading and trailing zeros
             const l: u5 = @min(@clz(xor), 31);
             const t: u8 = @ctz(xor);
             if (l >= leading_zeros and t >= trailing_zeros) {
-                // nested region
+                // nested region, don't change leading/trailing count
                 try bit_writer.writeBits(@as(u1, 0), 1);
             } else {
                 // not nested, need to first record the new leading/trailing count
@@ -82,6 +86,7 @@ pub fn compress(
                 leading_zeros = l;
                 trailing_zeros = t;
             }
+            // store meaningful bits from xor value
             const meaningful = xor >> @intCast(trailing_zeros);
             try bit_writer.writeBits(meaningful, meaningful_len);
             prev_value_bits = current_value_bits;
@@ -117,10 +122,16 @@ pub fn decompress(allocator: Allocator, compressed_values: []const u8, decompres
     while (decompressed_values.items.len < value_count) {
         const ident_bit = bit_reader.readBitsNoEof(u1, 1) catch return Error.ByteStreamError;
         if (ident_bit != 0) {
+            // change current value if header begins with 1
             const window_bit = bit_reader.readBitsNoEof(u1, 1) catch return Error.ByteStreamError;
             if (window_bit != 0) {
+                // change current leading and trailing count
                 leading = bit_reader.readBitsNoEof(u6, 5) catch return Error.ByteStreamError;
                 window = (bit_reader.readBitsNoEof(u7, 6) catch return Error.ByteStreamError) + 1;
+                if (@as(u8, leading) + @as(u8, window) > dtype_bit_len) {
+                    // leading zeros and window should be <= dtype bits, otherwise header is corrupted
+                    return Error.CorruptedCompressedData;
+                }
                 trailing = @intCast(dtype_bit_len - leading - window);
             }
             const xor_bits = (bit_reader.readBitsNoEof(u64, window) catch return Error.ByteStreamError) << trailing;
@@ -199,6 +210,26 @@ test "gorilla compresses repeated values" {
         decompressed_values.items,
         0.0,
     ));
+}
+
+test "gorilla correctly errors for malformed headers" {
+    const allocator = testing.allocator;
+
+    const corrupt_compressed = &[_]u8{ 
+        // vlen bytes
+        0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        // first literal
+        0xDE, 0xAD, 0xFA, 0xDE, 0x00, 0x00, 0x00, 0x00,
+        // corrupt header
+        0xFF, 0xFF, 0xFF, 0xFF,
+    };
+    var uncompressed_values = ArrayList(f64).empty;
+    defer uncompressed_values.deinit(allocator);
+
+    try std.testing.expectError(
+        Error.CorruptedCompressedData,
+        decompress(allocator, corrupt_compressed, &uncompressed_values)
+    );
 }
 
 test "check gorilla configuration parsing" {
