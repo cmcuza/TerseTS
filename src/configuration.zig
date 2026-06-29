@@ -126,7 +126,7 @@ pub fn parse(
                 return error.InvalidConfiguration;
         },
         OutputThresholdNumber => {
-            if (parsed_value.output_threshold_number < 0)
+            if (parsed_value.output_threshold_number == 0)
                 return error.InvalidConfiguration;
         },
         EmptyConfiguration => {},

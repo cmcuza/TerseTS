@@ -34,6 +34,7 @@ const Error = tersets.Error;
 
 const shared_structs = @import("../../utilities/shared_structs.zig");
 const shared_functions = @import("../../utilities/shared_functions.zig");
+const tester = @import("../../tester.zig");
 
 const DiscretePoint = shared_structs.DiscretePoint;
 
@@ -428,14 +429,11 @@ test "lttb round-trip with threshold 3 preserves length" {
 test "lttb compress and decompress preserve length on larger data" {
     const allocator = testing.allocator;
 
-    var prng = std.Random.DefaultPrng.init(0);
-    const random = prng.random();
+    const random = tester.getDefaultRandomGenerator();
 
     var uncompressed_values = ArrayList(f64).empty;
     defer uncompressed_values.deinit(allocator);
-    for (0..100) |_| {
-        try uncompressed_values.append(allocator, random.float(f64) * 100.0);
-    }
+    try tester.generateBoundedRandomValues(allocator, &uncompressed_values, 0, 100, random);
 
     var compressed_values = ArrayList(u8).empty;
     defer compressed_values.deinit(allocator);
