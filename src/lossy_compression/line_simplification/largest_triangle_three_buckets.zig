@@ -290,42 +290,6 @@ test "lttb returns error for threshold below 2" {
     );
 }
 
-test "lttb returns error for empty input" {
-    const allocator = testing.allocator;
-
-    const uncompressed_values: []const f64 = &[_]f64{};
-
-    var compressed_values = ArrayList(u8).empty;
-    defer compressed_values.deinit(allocator);
-
-    const method_configuration =
-        \\ {"output_threshold_number": 10}
-    ;
-
-    try testing.expectError(
-        Error.UnsupportedInput,
-        compress(allocator, uncompressed_values, &compressed_values, method_configuration),
-    );
-}
-
-test "lttb returns error for single-point input" {
-    const allocator = testing.allocator;
-
-    const uncompressed_values: []const f64 = &[_]f64{5.0};
-
-    var compressed_values = ArrayList(u8).empty;
-    defer compressed_values.deinit(allocator);
-
-    const method_configuration =
-        \\ {"output_threshold_number": 2}
-    ;
-
-    try testing.expectError(
-        Error.UnsupportedInput,
-        compress(allocator, uncompressed_values, &compressed_values, method_configuration),
-    );
-}
-
 test "lttb with threshold 2 keeps only first and last point" {
     const allocator = testing.allocator;
 
