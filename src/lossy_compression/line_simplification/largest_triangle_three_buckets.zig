@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Implementation of the Largest Triangle Three Buckets (LTTB) downsampling algorithm from the thesis
-//! "Steinarsson, S. Downsampling Time Series for Visual Representation.
+//! Implementation of the Largest Triangle Three Buckets (LTTB) downsampling algorithm
+//! from the thesis "Steinarsson, S. Downsampling Time Series for Visual Representation.
 //! M.Sc. thesis, University of Iceland, 2013.
 //! https://hdl.handle.net/1946/15343".
 
@@ -59,9 +59,8 @@ pub fn compress(
 
     const threshold: u32 = parsed_configuration.output_threshold_number;
 
-    // Return an error for empty value slice or for a threshold that is too low,
-    // because at least 2 points are always necessary, as they anchor the line.
-    if (uncompressed_values.len < 2) return Error.UnsupportedInput;
+    // Return an error  for a threshold that is too low, because at least
+    // 2 points are always necessary, as they anchor the line.
     if (threshold < 2) return Error.UnsupportedInput;
 
     // Series is already at or below the target size: keep every point
