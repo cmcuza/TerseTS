@@ -24,4 +24,3 @@ zig-out
 binding/binding/src/ 
 bindings/python/dist
 bindings/rust/target
-test
