@@ -44,7 +44,7 @@ const calculateArea = shared_functions.calculateTriangleArea;
 /// points which form the greatest triangle between an anchor point of the previous bucket and the average point
 /// of the next bucket. The function writes the result to `compressed_values`. The `allocator` is used to
 /// allocate memory for `method_configuration` parser. The `method_configuration` is expected to be of
-/// `OutputThresholdNumber` type otherwise an `InvalidConfiguration` error is return.
+/// `OutputThresholdNumber` type otherwise an `InvalidConfiguration` error is returned.
 /// If any other error occurs during the execution of the method, it is returned.
 pub fn compress(
     allocator: Allocator,
@@ -58,8 +58,7 @@ pub fn compress(
         method_configuration,
     );
 
-    const threshold: u32 = parsed_configuration.output_threshold_number;
-
+    const threshold: usize = @intCast(parsed_configuration.output_threshold_number);
     // Return an error  for a threshold that is too low, because at least
     // 2 points are always necessary, as they anchor the line.
     if (threshold < 2) return Error.UnsupportedInput;
@@ -133,7 +132,9 @@ pub fn decompress(allocator: Allocator, compressed_values: []const u8, decompres
     // The compressed representation is composed of two values after getting the first since all
     // segments are connected. Therefore, the condition checks that after the first value, the rest
     // of the values are in pairs (value, index) and that they are all of type 64-bit float.
-    if ((compressed_values.len - 8) % 16 != 0) return Error.UnsupportedInput;
+    if (compressed_values.len < 8 or
+        (compressed_values.len - 8) % 16 != 0)
+        return Error.UnsupportedInput;
 
     const compressed_lines_and_index = mem.bytesAsSlice(f64, compressed_values);
 

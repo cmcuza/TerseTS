@@ -222,10 +222,10 @@ pub fn defaultConfigurationBuilder(
 
         // Methods using lower downsampling bounds.
         .LargestTriangleThreeBuckets => blk: {
-            const auc: u32 = 2; // Minimum allowed.
+            const default_threshold: u32 = 2; // Minimum allowed.
             break :blk try getDefaultThresholdConfiguration(
                 allocator,
-                auc,
+                default_threshold,
             );
         },
 
