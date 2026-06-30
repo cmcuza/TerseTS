@@ -46,6 +46,13 @@ pub const HistogramBinsNumber = struct {
     histogram_bins_number: u32,
 };
 
+/// Configuration for downsampling methods specifying the number of data
+/// points to be returned.
+/// Example: { "output_threshold_number": 500 }
+pub const OutputThresholdNumber = struct {
+    output_threshold_number: u32,
+};
+
 /// Configuration for methods that require an aggregate error type and bound.
 /// Example: { "aggregate_error_type": "rmse", "aggregate_error_bound": 5.0 }
 pub const AggregateError = struct {
@@ -116,6 +123,10 @@ pub fn parse(
         },
         DecimalPrecision => {
             if (parsed_value.decimal_precision == 0 or parsed_value.decimal_precision >= 64)
+                return error.InvalidConfiguration;
+        },
+        OutputThresholdNumber => {
+            if (parsed_value.output_threshold_number == 0)
                 return error.InvalidConfiguration;
         },
         EmptyConfiguration => {},
@@ -209,6 +220,15 @@ pub fn defaultConfigurationBuilder(
             );
         },
 
+        // Methods using lower downsampling bounds.
+        .LargestTriangleThreeBuckets => blk: {
+            const default_threshold: u32 = 2; // Minimum allowed.
+            break :blk try getDefaultThresholdConfiguration(
+                allocator,
+                default_threshold,
+            );
+        },
+
         // Methods with empty configuration.
         .Uncompressed,
         .RunLengthEncoding,
@@ -256,6 +276,14 @@ fn getDefaultDomainTransformationConfiguration(allocator: Allocator, number_of_c
         allocator,
         "{{\"number_of_coefficients\": {d}}}",
         .{number_of_coefficients},
+    );
+}
+
+fn getDefaultThresholdConfiguration(allocator: Allocator, output_number: u32) ![]u8 {
+    return try std.fmt.allocPrint(
+        allocator,
+        "{{\"output_threshold_number\": {d}}}",
+        .{output_number},
     );
 }
 
