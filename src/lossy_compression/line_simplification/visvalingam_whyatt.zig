@@ -456,14 +456,24 @@ test "vw compress and compress with random data" {
     // slices of the removed points from `previous_point_index`..`current_point_index` should be less than `error_bound`.
     const compressed_representation = mem.bytesAsSlice(f64, compressed_values.items);
 
-    var index: usize = 0;
-    var previous_point_index: usize = 0;
-    while (index < compressed_representation.len - 1) : (index += 2) {
-        const current_point_index = @as(usize, @bitCast(compressed_representation[index + 2]));
+    var kept_indices = ArrayList(usize).empty;
+    defer kept_indices.deinit(allocator);
+    try kept_indices.append(allocator, 0);
 
+    var index: usize = 0;
+    while (index < compressed_representation.len - 1) : (index += 2) {
+        try kept_indices.append(allocator, @as(usize, @bitCast(compressed_representation[index + 2])));
+    }
+
+    for (1..kept_indices.items.len - 1) |i| {
         // Check if the point is within the error bound.
-        try testAreaWithinErrorBound(uncompressed_values.items[previous_point_index .. current_point_index + 1], error_bound);
-        previous_point_index = current_point_index;
+        const area = calculateAreaFromValues(
+            uncompressed_values.items,
+            kept_indices.items[i - 1],
+            kept_indices.items[i],
+            kept_indices.items[i + 1],
+        );
+        try testing.expect(area >= error_bound);
     }
 }
 
