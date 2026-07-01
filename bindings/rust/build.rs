@@ -134,19 +134,12 @@ fn main() {
         }
     }
 
-    // On aarch64-macos, force every member of the archive into the link. ld's default
-    // selective, index-driven extraction does not force-load `compiler_rt.o` for math
-    // routines such as `_roundq` (referenced by `std.json`'s f128 integer validation):
-    // Rust's own `compiler_builtins` satisfies the standard soft-float builtins, so ld
-    // never pulls our `compiler_rt.o`, leaving `_roundq` (which is not a compiler-rt
-    // builtin and has no Rust substitute) undefined. Whole-archive linking includes every
-    // member unconditionally so all bundled soft-float and math symbols resolve. The
-    // `libtool` re-pack above is still required so ld can parse the member at all.
-    if target_os == "macos" && target_arch == "aarch64" {
-        println!("cargo::rustc-link-lib=static:+whole-archive=tersets");
-    } else {
-        println!("cargo::rustc-link-lib=static=tersets");
-    }
+    // NOTE: `+whole-archive` was tried here and made things worse on aarch64-macos:
+    // `-force_load` pulls in our `compiler_rt.o`, whose strong soft-float defs then shadow
+    // Rust's own (working) `compiler_builtins` weak defs, so the entire `xf` family plus
+    // `_roundq` went undefined instead of just `_roundq`. Reverted to a plain static link;
+    // the `_roundq` gap is being addressed at its source (std.json's f128 integer path).
+    println!("cargo::rustc-link-lib=static=tersets");
     println!("cargo::rustc-link-search=native={}", library_path.display());
 }
 
