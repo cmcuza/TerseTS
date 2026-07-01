@@ -79,10 +79,8 @@ fn main() {
     // Apple's `ld` requires 64-bit Mach-O archive members to start on an 8-byte boundary,
     // but Zig's archiver leaves `compiler_rt.o` at a 4-byte offset, which `ld` rejects.
     // Re-pack the archive with Apple's `libtool`, which re-lays-out the members with the
-    // required padding (without modifying the object contents) and writes a sorted symbol
-    // index. A CI diagnostic confirmed on the real toolchain that this alone moves
-    // `compiler_rt.o` from offset %8==4 to %8==0, and that a following `ranlib` leaves every
-    // member offset byte-identical, so `ranlib` is not run. Alignment is verified below.
+    // required padding (moving `compiler_rt.o` from offset %8==4 to %8==0, verified below,
+    // without modifying the object contents).
     if target_os == "macos" && target_arch == "aarch64" {
         let lib = library_path.join("libtersets.a");
         let fixed = library_path.join("libtersets.fixed.a");
@@ -97,6 +95,20 @@ fn main() {
             println!(
                 "cargo::error=Failed to re-pack libtersets.a with libtool: {}",
                 String::from_utf8_lossy(&output.stderr)
+            );
+            process::exit(1);
+        }
+
+        // Rebuild the archive symbol index against the re-packed member offsets. `libtool`
+        // aligns the members but leaves a `__.SYMDEF` that `ld` cannot use for extraction;
+        // without this step `ld` never pulls `compiler_rt.o` and the whole soft-float family
+        // (___addxf3 … _roundq) goes undefined at link time. This was confirmed by an A/B CI
+        // run that removed `ranlib` and reproduced exactly that failure, so it is required.
+        let ranlib_output = Command::new("ranlib").arg(&fixed).output().unwrap();
+        if !ranlib_output.status.success() {
+            println!(
+                "cargo::error=Failed to index libtersets.a with ranlib: {}",
+                String::from_utf8_lossy(&ranlib_output.stderr)
             );
             process::exit(1);
         }
@@ -116,8 +128,8 @@ fn main() {
         {
             println!(
                 "cargo::error=compiler_rt.o is not 8-byte aligned in libtersets.a \
-                 (payload offset {offset}, offset % 8 = {}); the libtool re-pack did not \
-                 produce a linkable archive.",
+                 (payload offset {offset}, offset % 8 = {}); the libtool/ranlib re-pack did \
+                 not produce a linkable archive.",
                 offset % 8
             );
             process::exit(1);
