@@ -76,70 +76,45 @@ fn main() {
     library_path.push("zig-out");
     library_path.push("lib");
 
-    // Apple's `ld` requires 64-bit Mach-O archive members to start on an 8-byte boundary,
-    // but Zig's archiver leaves `compiler_rt.o` at a 4-byte offset, which `ld` rejects.
-    // Re-pack the archive with Apple's `libtool`, which re-lays-out the members with the
-    // required padding (moving `compiler_rt.o` from offset %8==4 to %8==0, verified below,
-    // without modifying the object contents).
+    // Apple's `ld` requires 64-bit Mach-O archive members to start on an 8-byte boundary, but
+    // Zig's archiver leaves `compiler_rt.o` at a 4-byte offset (ziglang/zig#1981), which `ld`
+    // rejects — the soft-float and `_roundq` symbols it defines then go undefined at link time.
+    //
+    // We align the member in place ourselves rather than shelling out to `libtool`: newer macOS
+    // `libtool` (26.x cctools) does not fix a misaligned member, it silently *drops* it, which
+    // is worse. `compiler_rt.o` is the last archive member, so growing its extended name to push
+    // the payload to an 8-byte boundary shifts only its own bytes; every other member header —
+    // and the `__.SYMDEF` index that points at those headers — is left byte-identical, so no
+    // index rebuild is needed and the object contents are untouched.
     if target_os == "macos" && target_arch == "aarch64" {
         let lib = library_path.join("libtersets.a");
-        let fixed = library_path.join("libtersets.fixed.a");
-        let output = Command::new("libtool")
-            .args(["-static", "-o"])
-            .arg(&fixed)
-            .arg(&lib)
-            .output()
-            .unwrap();
-
-        if !output.status.success() {
-            println!(
-                "cargo::error=Failed to re-pack libtersets.a with libtool: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            process::exit(1);
-        }
-
-        // Rebuild the archive symbol index against the re-packed member offsets. `libtool`
-        // aligns the members but leaves a `__.SYMDEF` that `ld` cannot use for extraction;
-        // without this step `ld` never pulls `compiler_rt.o` and the whole soft-float family
-        // (___addxf3 … _roundq) goes undefined at link time. This was confirmed by an A/B CI
-        // run that removed `ranlib` and reproduced exactly that failure, so it is required.
-        let ranlib_output = Command::new("ranlib").arg(&fixed).output().unwrap();
-        if !ranlib_output.status.success() {
-            println!(
-                "cargo::error=Failed to index libtersets.a with ranlib: {}",
-                String::from_utf8_lossy(&ranlib_output.stderr)
-            );
-            process::exit(1);
-        }
-
-        std::fs::rename(&fixed, &lib).unwrap();
-
-        // Postcondition: confirm the re-pack actually placed `compiler_rt.o` on an 8-byte
-        // boundary, so `ld` can load it and resolve the soft-float and `_roundq` symbols it
-        // defines. This turns a future `libtool`/toolchain regression into a precise
-        // build-time error instead of a confusing "undefined symbols" link failure. Only
-        // alignment is checked, not presence: a static build bundles `compiler_rt` by
-        // default, so if the member is absent there is nothing to align and the linker
-        // remains the authority.
         let archive = std::fs::read(&lib).unwrap();
-        if let Some(offset) = archive_member_payload_offset(&archive, "compiler_rt")
+        if let Some(aligned) = align_compiler_rt(&archive) {
+            std::fs::write(&lib, &aligned).unwrap();
+        }
+
+        // Postcondition: confirm `compiler_rt.o` is now on an 8-byte boundary so `ld` can load
+        // it. This turns any future change in the archive layout into a precise build-time
+        // error instead of a confusing "undefined symbols" link failure. Only alignment is
+        // checked, not presence: a static build bundles `compiler_rt` by default, so if the
+        // member is absent there is nothing to align and the linker remains the authority.
+        let check = std::fs::read(&lib).unwrap();
+        if let Some(offset) = archive_member_payload_offset(&check, "compiler_rt")
             && offset % 8 != 0
         {
             println!(
                 "cargo::error=compiler_rt.o is not 8-byte aligned in libtersets.a \
-                 (payload offset {offset}, offset % 8 = {}); the libtool/ranlib re-pack did \
-                 not produce a linkable archive.",
+                 (payload offset {offset}, offset % 8 = {}); in-place alignment did not \
+                 produce a linkable archive.",
                 offset % 8
             );
             process::exit(1);
         }
     }
 
-    // A plain static link works because `libtool` (above) makes `compiler_rt.o` loadable, so
-    // `ld` resolves the soft-float and `_roundq` symbols from it via normal archive
-    // extraction. NOTE: do not switch this to `+whole-archive` — it was tried and made things
-    // worse on aarch64-macos, because `-force_load` pulls in `compiler_rt.o`'s strong
+    // A plain static link resolves `compiler_rt.o` via normal archive extraction now that the
+    // member is aligned. NOTE: do not switch this to `+whole-archive` — it was tried and made
+    // things worse on aarch64-macos, because `-force_load` pulls in `compiler_rt.o`'s strong
     // soft-float defs, which then shadow Rust's own (working) `compiler_builtins` weak defs,
     // leaving the whole `xf` family plus `_roundq` undefined instead of resolving them.
     println!("cargo::rustc-link-lib=static=tersets");
@@ -188,4 +163,76 @@ fn archive_member_payload_offset(archive: &[u8], needle: &str) -> Option<usize> 
     }
 
     None
+}
+
+/// Rewrite `archive` so the `compiler_rt.o` member's Mach-O payload starts on an 8-byte
+/// boundary, by growing its extended name (`#1/<len>`) with NUL padding. Returns the rewritten
+/// archive, or `None` if the member is absent, already aligned, or not the last member (Zig
+/// places it last; only that case leaves every other member header — and the `__.SYMDEF` index
+/// pointing at those headers — unshifted, so no index rebuild is required).
+fn align_compiler_rt(archive: &[u8]) -> Option<Vec<u8>> {
+    const MAGIC: &[u8] = b"!<arch>\n";
+    if !archive.starts_with(MAGIC) {
+        return None;
+    }
+
+    let mut offset = MAGIC.len();
+    while offset + 60 <= archive.len() {
+        let hdr_off = offset;
+        let header = &archive[hdr_off..hdr_off + 60];
+        let name = std::str::from_utf8(&header[0..16]).ok()?.trim_end();
+        let size: usize = std::str::from_utf8(&header[48..58])
+            .ok()?
+            .trim()
+            .parse()
+            .ok()?;
+        let data_start = hdr_off + 60;
+
+        let (name_len, member_name, payload) = match name.strip_prefix("#1/") {
+            Some(len) => {
+                let name_len: usize = len.trim().parse().ok()?;
+                let raw = archive.get(data_start..data_start + name_len)?;
+                let real = std::str::from_utf8(raw).ok()?.trim_end_matches('\0');
+                (name_len, real.to_owned(), data_start + name_len)
+            }
+            None => (0, name.trim_end_matches('/').to_owned(), data_start),
+        };
+        let next = data_start + size + (size & 1);
+
+        if member_name.contains("compiler_rt") {
+            let delta = (8 - (payload % 8)) % 8;
+            // Bail out (leaving the archive untouched) unless this is a last, extended-name
+            // member we can safely pad; the postcondition check in `main` then fails loudly.
+            if delta == 0 || name_len == 0 || next < archive.len() {
+                return None;
+            }
+
+            let member_end = data_start + size;
+            let mut out = Vec::with_capacity(archive.len() + delta + 1);
+            out.extend_from_slice(&archive[..hdr_off]);
+
+            let mut new_header = header.to_vec();
+            write_ar_field(&mut new_header[0..16], &format!("#1/{}", name_len + delta));
+            write_ar_field(&mut new_header[48..58], &format!("{}", size + delta));
+            out.extend_from_slice(&new_header);
+
+            out.extend_from_slice(&archive[data_start..data_start + name_len]);
+            out.extend(std::iter::repeat_n(0u8, delta));
+            out.extend_from_slice(&archive[payload..member_end]);
+            if out.len() % 2 == 1 {
+                out.push(b'\n');
+            }
+            return Some(out);
+        }
+
+        offset = next;
+    }
+
+    None
+}
+
+/// Write `value` into an `ar` header field: left-justified and space-padded.
+fn write_ar_field(field: &mut [u8], value: &str) {
+    field.fill(b' ');
+    field[..value.len()].copy_from_slice(value.as_bytes());
 }
