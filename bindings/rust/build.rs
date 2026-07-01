@@ -22,6 +22,11 @@ fn main() {
     let current_directory = env::current_dir().unwrap();
     let repository_root = current_directory.parent().unwrap().parent().unwrap();
 
+    // Cargo's target variables describe the artifact being built, while Rust `cfg`
+    // values in a build script describe the host running the build.
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
+    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
+
     // Make the optimization level of TerseTS and Rust bindings match.
     let build_profile = env::var("PROFILE").unwrap();
     let optimize = match build_profile.as_str() {
@@ -44,11 +49,18 @@ fn main() {
     };
 
     // Build the TerseTS library into a statically linked library.
-    let output = Command::new("zig")
-        .current_dir(repository_root)
-        .args(["build", "-Dlinking=static", "-Dpic=true", optimize])
-        .output()
-        .unwrap();
+    let mut zig = Command::new("zig");
+    zig.current_dir(repository_root)
+        .args(["build", "-Dlinking=static", "-Dpic=true", optimize]);
+
+    if target_os == "macos" && target_arch == "aarch64" {
+        let deployment_target =
+            env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| "11.0".to_owned());
+        println!("cargo::rerun-if-env-changed=MACOSX_DEPLOYMENT_TARGET");
+        zig.arg(format!("-Dtarget=aarch64-macos.{deployment_target}"));
+    }
+
+    let output = zig.output().unwrap();
 
     if !output.status.success() {
         // Output is captured by cargo and used as commands.
@@ -65,9 +77,7 @@ fn main() {
     library_path.push("lib");
 
     // Re-packing the archive with Apple's `libtool` adds the required padding without modifying
-    // the object contents. Cargo's target variables are used instead of Rust `cfg` values.
-    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
-    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
+    // the object contents.
     if target_os == "macos" && target_arch == "aarch64" {
         let lib = library_path.join("libtersets.a");
         let fixed = library_path.join("libtersets.fixed.a");
@@ -82,6 +92,17 @@ fn main() {
             println!(
                 "cargo::error=Failed to re-pack libtersets.a with libtool: {}",
                 String::from_utf8_lossy(&output.stderr)
+            );
+            process::exit(1);
+        }
+
+        // `libtool` preserves compiler_rt.o but does not index its soft-float symbols in this
+        // archive. Rebuild the table of contents so ld can resolve symbols such as ___addxf3.
+        let ranlib_output = Command::new("ranlib").arg(&fixed).output().unwrap();
+        if !ranlib_output.status.success() {
+            println!(
+                "cargo::error=Failed to index libtersets.a with ranlib: {}",
+                String::from_utf8_lossy(&ranlib_output.stderr)
             );
             process::exit(1);
         }
