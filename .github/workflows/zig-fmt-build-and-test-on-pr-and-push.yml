@@ -93,6 +93,60 @@ jobs:
     - name: Cargo Build
       run: cargo build --verbose --release --all-targets
       working-directory: bindings/rust
+
+    # TEMPORARY diagnostic (remove before merge, together with .github/ci-diagnostics/):
+    # observe compiler_rt.o archive-member alignment and soft-float symbol resolution on
+    # the real Apple toolchain across the raw -> libtool -> ranlib stages. continue-on-error
+    # keeps it from ever blocking the real clippy/doc/test steps below.
+    - name: macOS compiler_rt archive diagnostic
+      if: runner.os == 'macOS'
+      continue-on-error: true
+      shell: bash
+      run: |
+        set -u
+        echo "== Toolchain =="
+        zig version
+        xcrun --show-sdk-version 2>/dev/null || true
+        ld -v 2>&1 | head -2 || true
+
+        work="$(mktemp -d)"
+        echo
+        echo "== Build raw static archive for aarch64-macos.11.0 (no libtool/ranlib) =="
+        zig build -Dlinking=static -Dpic=true -Doptimize=ReleaseFast \
+          -Dtarget=aarch64-macos.11.0 --prefix "$work/out" --cache-dir "$work/cache"
+        cp "$work/out/lib/libtersets.a" "$work/raw.a"
+
+        echo
+        echo "== Apply 'libtool -static' (expect the 8-byte alignment warning on stderr) =="
+        libtool -static -o "$work/libtool.a" "$work/raw.a"
+
+        echo
+        echo "== Apply 'ranlib' on top of libtool =="
+        cp "$work/libtool.a" "$work/ranlib.a"
+        ranlib "$work/ranlib.a"
+
+        echo
+        echo "== Member offsets: raw -> libtool -> ranlib =="
+        python3 .github/ci-diagnostics/ar_offsets.py \
+          "$work/raw.a" "$work/libtool.a" "$work/ranlib.a"
+
+        echo
+        echo "== _roundq / ___addxf3 across stages (T=defined, U=undefined) =="
+        for stage in raw libtool ranlib; do
+          echo "[$stage.a]"
+          nm -A -arch arm64 "$work/$stage.a" 2>/dev/null \
+            | grep -E ' _roundq$| ___addxf3$' | sort -u | sed 's/^/  /' || true
+        done
+
+        echo
+        echo "== Actual cargo-built archive (final, as linked by cargo test) =="
+        real="zig-out/lib/libtersets.a"
+        if [ -f "$real" ]; then
+          python3 .github/ci-diagnostics/ar_offsets.py "$real"
+        else
+          echo "  not found: $real"
+        fi
+
     - name: Cargo Clippy
       run: cargo clippy --verbose --release --all-targets
       working-directory: bindings/rust
