@@ -121,16 +121,16 @@ fn main() {
         // not presence: a static build bundles `compiler_rt` by default, so if the member is
         // absent there is nothing to align and the linker remains the authority.
         let archive = std::fs::read(&lib).unwrap();
-        if let Some(offset) = archive_member_payload_offset(&archive, "compiler_rt") {
-            if offset % 8 != 0 {
-                println!(
-                    "cargo::error=compiler_rt.o is not 8-byte aligned in libtersets.a \
-                     (payload offset {offset}, offset % 8 = {}); the libtool/ranlib re-pack \
-                     did not produce a linkable archive.",
-                    offset % 8
-                );
-                process::exit(1);
-            }
+        if let Some(offset) = archive_member_payload_offset(&archive, "compiler_rt")
+            && offset % 8 != 0
+        {
+            println!(
+                "cargo::error=compiler_rt.o is not 8-byte aligned in libtersets.a \
+                 (payload offset {offset}, offset % 8 = {}); the libtool/ranlib re-pack \
+                 did not produce a linkable archive.",
+                offset % 8
+            );
+            process::exit(1);
         }
     }
 
