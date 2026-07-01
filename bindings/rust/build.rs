@@ -76,37 +76,28 @@ fn main() {
     library_path.push("zig-out");
     library_path.push("lib");
 
-    // Apple's `ld` requires 64-bit Mach-O archive members to start on an 8-byte boundary, but
-    // Zig's archiver leaves `compiler_rt.o` at a 4-byte offset (ziglang/zig#1981), which `ld`
-    // rejects — the soft-float and `_roundq` symbols it defines then go undefined at link time.
-    //
-    // We align the member in place ourselves rather than shelling out to `libtool`: newer macOS
-    // `libtool` (26.x cctools) does not fix a misaligned member, it silently *drops* it, which
-    // is worse. `compiler_rt.o` is the last archive member, so growing its extended name to push
-    // the payload to an 8-byte boundary shifts only its own bytes; every other member header —
-    // and the `__.SYMDEF` index that points at those headers — is left byte-identical, so no
-    // index rebuild is needed and the object contents are untouched.
+    // On aarch64-macOS, Zig leaves the bundled `compiler_rt.o` member misaligned inside the
+    // static archive, which Apple's linker cannot read. Nudge it onto an 8-byte boundary before
+    // linking. The full rationale is documented above `align_compiler_rt` below.
     if target_os == "macos" && target_arch == "aarch64" {
-        let lib = library_path.join("libtersets.a");
-        let archive = std::fs::read(&lib).unwrap();
-        if let Some(aligned) = align_compiler_rt(&archive) {
-            std::fs::write(&lib, &aligned).unwrap();
+        let archive_path = library_path.join("libtersets.a");
+        let original_archive = std::fs::read(&archive_path).unwrap();
+        if let Some(aligned_archive) = align_compiler_rt(&original_archive) {
+            std::fs::write(&archive_path, &aligned_archive).unwrap();
         }
 
-        // Postcondition: confirm `compiler_rt.o` is now on an 8-byte boundary so `ld` can load
-        // it. This turns any future change in the archive layout into a precise build-time
-        // error instead of a confusing "undefined symbols" link failure. Only alignment is
-        // checked, not presence: a static build bundles `compiler_rt` by default, so if the
-        // member is absent there is nothing to align and the linker remains the authority.
-        let check = std::fs::read(&lib).unwrap();
-        if let Some(offset) = archive_member_payload_offset(&check, "compiler_rt")
-            && offset % 8 != 0
+        // Confirm the postcondition: `compiler_rt.o` now starts on an 8-byte boundary. If a
+        // future Zig version changes the archive layout so this no longer holds, fail here with
+        // a clear message instead of letting the linker fail later with cryptic "undefined
+        // symbols". A missing member is not an error: a static build bundles `compiler_rt` by
+        // default, so if it is ever absent there is simply nothing to align.
+        let final_archive = std::fs::read(&archive_path).unwrap();
+        if let Some(payload_offset) = compiler_rt_payload_offset(&final_archive)
+            && payload_offset % MACHO_MEMBER_ALIGNMENT != 0
         {
             println!(
-                "cargo::error=compiler_rt.o is not 8-byte aligned in libtersets.a \
-                 (payload offset {offset}, offset % 8 = {}); in-place alignment did not \
-                 produce a linkable archive.",
-                offset % 8
+                "cargo::error=compiler_rt.o is not 8-byte aligned in libtersets.a (payload \
+                 offset {payload_offset}); in-place alignment did not produce a linkable archive."
             );
             process::exit(1);
         }
@@ -121,118 +112,151 @@ fn main() {
     println!("cargo::rustc-link-search=native={}", library_path.display());
 }
 
-/// Return the byte offset of the Mach-O payload of the first `ar` archive member whose name
-/// contains `needle`, or `None` if the archive cannot be parsed or no such member exists.
-/// Used to verify archive-member alignment; see the postcondition check in `main`.
-fn archive_member_payload_offset(archive: &[u8], needle: &str) -> Option<usize> {
-    const MAGIC: &[u8] = b"!<arch>\n";
-    if !archive.starts_with(MAGIC) {
-        return None;
-    }
+// Apple's linker requires every 64-bit Mach-O member of a static archive to begin on an 8-byte
+// boundary.
+const MACHO_MEMBER_ALIGNMENT: usize = 8;
 
-    let mut offset = MAGIC.len();
-    while offset + 60 <= archive.len() {
-        let header = &archive[offset..offset + 60];
-        let name = std::str::from_utf8(&header[0..16]).ok()?.trim_end();
-        let size: usize = std::str::from_utf8(&header[48..58])
-            .ok()?
-            .trim()
-            .parse()
-            .ok()?;
-        let data_start = offset + 60;
+// A System V / BSD `ar` archive — the format Zig's archiver emits — is the 8-byte magic
+// `!<arch>\n` followed by a sequence of members. Each member is a fixed 60-byte ASCII header
+// followed by its bytes, and every member begins on an even offset.
+const AR_MAGIC: &[u8] = b"!<arch>\n";
+const AR_HEADER_LEN: usize = 60;
+// Byte ranges of the two header fields we read: the member name, and its data length (a decimal
+// string that counts the extended-name bytes plus the object payload).
+const AR_NAME_FIELD: std::ops::Range<usize> = 0..16;
+const AR_SIZE_FIELD: std::ops::Range<usize> = 48..58;
 
-        // BSD/Mach-O archives store a name longer than 16 bytes as "#1/<len>", placing the
-        // real name in the first <len> bytes of the member data; the object payload follows
-        // it and `size` counts both the name and the payload.
-        let (member_name, payload_offset) = match name.strip_prefix("#1/") {
-            Some(len) => {
-                let name_len: usize = len.parse().ok()?;
-                let raw = archive.get(data_start..data_start + name_len)?;
-                let real = std::str::from_utf8(raw).ok()?.trim_end_matches('\0');
-                (real.to_owned(), data_start + name_len)
-            }
-            None => (name.trim_end_matches('/').to_owned(), data_start),
-        };
-
-        if member_name.contains(needle) {
-            return Some(payload_offset);
-        }
-
-        // Member data is padded to an even boundary before the next header.
-        offset = data_start + size + (size & 1);
-    }
-
-    None
+/// One member of an `ar` archive, located while walking the archive.
+struct ArchiveMember {
+    /// Byte offset of this member's 60-byte header within the archive.
+    header_offset: usize,
+    /// The member's file name, e.g. `"compiler_rt.o"`.
+    name: String,
+    /// For an extended (`#1/<len>`) name, the number of name bytes stored at the start of the
+    /// member's data; `0` when the name is stored directly in the header.
+    extended_name_len: usize,
+    /// Value of the header's data-length field: the extended-name bytes plus the object payload.
+    data_len: usize,
+    /// Byte offset where the member's object payload (the Mach-O object) begins.
+    payload_offset: usize,
 }
 
-/// Rewrite `archive` so the `compiler_rt.o` member's Mach-O payload starts on an 8-byte
-/// boundary, by growing its extended name (`#1/<len>`) with NUL padding. Returns the rewritten
-/// archive, or `None` if the member is absent, already aligned, or not the last member (Zig
-/// places it last; only that case leaves every other member header — and the `__.SYMDEF` index
-/// pointing at those headers — unshifted, so no index rebuild is required).
-fn align_compiler_rt(archive: &[u8]) -> Option<Vec<u8>> {
-    const MAGIC: &[u8] = b"!<arch>\n";
-    if !archive.starts_with(MAGIC) {
+/// Walk an `ar` archive and return its members in order, or `None` if `bytes` is not an `ar`
+/// archive or a header cannot be parsed.
+fn parse_archive_members(bytes: &[u8]) -> Option<Vec<ArchiveMember>> {
+    if !bytes.starts_with(AR_MAGIC) {
         return None;
     }
 
-    let mut offset = MAGIC.len();
-    while offset + 60 <= archive.len() {
-        let hdr_off = offset;
-        let header = &archive[hdr_off..hdr_off + 60];
-        let name = std::str::from_utf8(&header[0..16]).ok()?.trim_end();
-        let size: usize = std::str::from_utf8(&header[48..58])
+    let mut members = Vec::new();
+    let mut cursor = AR_MAGIC.len();
+    while cursor + AR_HEADER_LEN <= bytes.len() {
+        let header = &bytes[cursor..cursor + AR_HEADER_LEN];
+        let name_field = std::str::from_utf8(&header[AR_NAME_FIELD]).ok()?.trim_end();
+        let data_len: usize = std::str::from_utf8(&header[AR_SIZE_FIELD])
             .ok()?
             .trim()
             .parse()
             .ok()?;
-        let data_start = hdr_off + 60;
+        let data_offset = cursor + AR_HEADER_LEN;
 
-        let (name_len, member_name, payload) = match name.strip_prefix("#1/") {
+        // A name longer than 16 bytes uses the extended form `#1/<len>`, storing the real name in
+        // the first `<len>` bytes of the data with the object payload right after it. A short name
+        // sits in the header itself, padded with a trailing '/'.
+        let (extended_name_len, name, payload_offset) = match name_field.strip_prefix("#1/") {
             Some(len) => {
                 let name_len: usize = len.trim().parse().ok()?;
-                let raw = archive.get(data_start..data_start + name_len)?;
-                let real = std::str::from_utf8(raw).ok()?.trim_end_matches('\0');
-                (name_len, real.to_owned(), data_start + name_len)
+                let raw_name = bytes.get(data_offset..data_offset + name_len)?;
+                let name = std::str::from_utf8(raw_name)
+                    .ok()?
+                    .trim_end_matches('\0')
+                    .to_owned();
+                (name_len, name, data_offset + name_len)
             }
-            None => (0, name.trim_end_matches('/').to_owned(), data_start),
+            None => (0, name_field.trim_end_matches('/').to_owned(), data_offset),
         };
-        let next = data_start + size + (size & 1);
 
-        if member_name.contains("compiler_rt") {
-            let delta = (8 - (payload % 8)) % 8;
-            // Bail out (leaving the archive untouched) unless this is a last, extended-name
-            // member we can safely pad; the postcondition check in `main` then fails loudly.
-            if delta == 0 || name_len == 0 || next < archive.len() {
-                return None;
-            }
+        members.push(ArchiveMember {
+            header_offset: cursor,
+            name,
+            extended_name_len,
+            data_len,
+            payload_offset,
+        });
 
-            let member_end = data_start + size;
-            let mut out = Vec::with_capacity(archive.len() + delta + 1);
-            out.extend_from_slice(&archive[..hdr_off]);
-
-            let mut new_header = header.to_vec();
-            write_ar_field(&mut new_header[0..16], &format!("#1/{}", name_len + delta));
-            write_ar_field(&mut new_header[48..58], &format!("{}", size + delta));
-            out.extend_from_slice(&new_header);
-
-            out.extend_from_slice(&archive[data_start..data_start + name_len]);
-            out.extend(std::iter::repeat_n(0u8, delta));
-            out.extend_from_slice(&archive[payload..member_end]);
-            if out.len() % 2 == 1 {
-                out.push(b'\n');
-            }
-            return Some(out);
-        }
-
-        offset = next;
+        // Member data is padded to an even length before the next header begins.
+        cursor = data_offset + data_len + (data_len % 2);
     }
 
-    None
+    Some(members)
 }
 
-/// Write `value` into an `ar` header field: left-justified and space-padded.
-fn write_ar_field(field: &mut [u8], value: &str) {
+/// Byte offset of the `compiler_rt.o` payload in `bytes`, or `None` if the archive cannot be
+/// parsed or the member is absent. Used to verify alignment after the rewrite.
+fn compiler_rt_payload_offset(bytes: &[u8]) -> Option<usize> {
+    let members = parse_archive_members(bytes)?;
+    let member = members
+        .iter()
+        .find(|member| member.name.contains("compiler_rt"))?;
+    Some(member.payload_offset)
+}
+
+
+/// Rewrite `bytes` so the `compiler_rt.o` member's payload starts on an 8-byte boundary, and
+/// return the new archive. Returns `None` — leaving the caller to keep the original archive
+/// unchanged — if the member is absent, already aligned, or not in the expected last /
+/// extended-name form that makes this rewrite safe.
+fn align_compiler_rt(bytes: &[u8]) -> Option<Vec<u8>> {
+    let members = parse_archive_members(bytes)?;
+    let index = members
+        .iter()
+        .position(|member| member.name.contains("compiler_rt"))?;
+    let member = &members[index];
+
+    let misalignment = member.payload_offset % MACHO_MEMBER_ALIGNMENT;
+    if misalignment == 0 {
+        return None; // Already aligned; nothing to do.
+    }
+    let padding = MACHO_MEMBER_ALIGNMENT - misalignment;
+
+    // The rewrite is only safe when this is the last member and uses an extended name: only then
+    // does growing the name leave every other header — and the `__.SYMDEF` index — unmoved.
+    let is_last_member = index == members.len() - 1;
+    if member.extended_name_len == 0 || !is_last_member {
+        return None;
+    }
+
+    let name_offset = member.header_offset + AR_HEADER_LEN;
+    let payload_end = member.payload_offset + (member.data_len - member.extended_name_len);
+
+    let mut aligned = Vec::with_capacity(bytes.len() + padding + 1);
+    // Everything before this member is copied unchanged.
+    aligned.extend_from_slice(&bytes[..member.header_offset]);
+
+    // Copy the 60-byte header, then overwrite the name and data-length fields to account for the
+    // extra padding. The other header fields (timestamp, uid/gid, mode) pass through as-is.
+    let mut header = bytes[member.header_offset..name_offset].to_vec();
+    let padded_name = format!("#1/{}", member.extended_name_len + padding);
+    let padded_data_len = format!("{}", member.data_len + padding);
+    write_ar_header_field(&mut header[AR_NAME_FIELD], &padded_name);
+    write_ar_header_field(&mut header[AR_SIZE_FIELD], &padded_data_len);
+    aligned.extend_from_slice(&header);
+
+    // The original name bytes, then the extra NUL padding, then the object payload copied verbatim.
+    aligned.extend_from_slice(&bytes[name_offset..name_offset + member.extended_name_len]);
+    aligned.extend(std::iter::repeat_n(0u8, padding));
+    aligned.extend_from_slice(&bytes[member.payload_offset..payload_end]);
+
+    // Members are padded to an even length.
+    if aligned.len() % 2 == 1 {
+        aligned.push(b'\n');
+    }
+    Some(aligned)
+}
+
+/// Overwrite an `ar` header field in place with `value`, left-justified and space-padded — the
+/// fixed-width ASCII convention `ar` uses for its header fields.
+fn write_ar_header_field(field: &mut [u8], value: &str) {
     field.fill(b' ');
     field[..value.len()].copy_from_slice(value.as_bytes());
 }
