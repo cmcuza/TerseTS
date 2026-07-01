@@ -72,6 +72,14 @@ pub const DecimalPrecision = struct {
     decimal_precision: u8,
 };
 
+/// Configuration for lossy_compression/functional_approximation/shrink.zig
+/// Base Semantics + Residual + Adaptive Error Bound
+pub const ShrinkConfiguration = struct {
+    base_error_bound: f32,
+    residual_error_bound: f32,
+    lambda: f32,
+};
+
 /// Empty configuration for methods that do not require any parameters.
 pub const EmptyConfiguration = struct {};
 
@@ -121,6 +129,13 @@ pub fn parse(
         EmptyConfiguration => {},
         DomainTransformation => {
             if (parsed_value.number_of_coefficients == 0)
+                return error.InvalidConfiguration;
+        },
+        ShrinkConfiguration => {
+            if (parsed_value.base_error_bound <= 0 or
+                parsed_value.residual_error_bound < 0 or
+                parsed_value.residual_error_bound > parsed_value.base_error_bound or
+                parsed_value.lambda <= 0 or parsed_value.lambda > 1)
                 return error.InvalidConfiguration;
         },
         else => return error.InvalidConfiguration,
@@ -216,6 +231,15 @@ pub fn defaultConfigurationBuilder(
         .Chimp128,
         .BitPackedDeltaEncoding,
         => try allocator.dupe(u8, "{}"),
+
+        .Shrink => blk: {
+            break :blk try getDefaultShrinkConfiguration(
+                allocator,
+                random_f32, // base_error_bound
+                random_f32 * 0.5, // residual_error_bound <= base
+                0.5, // lambda
+            );
+        },
     };
 }
 
@@ -256,6 +280,19 @@ fn getDefaultDomainTransformationConfiguration(allocator: Allocator, number_of_c
         allocator,
         "{{\"number_of_coefficients\": {d}}}",
         .{number_of_coefficients},
+    );
+}
+
+fn getDefaultShrinkConfiguration(
+    allocator: Allocator,
+    base: f32,
+    residual: f32,
+    lambda: f32,
+) ![]u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "{{\"base_error_bound\": {d}, \"residual_error_bound\": {d}, \"lambda\": {d}}}",
+        .{ base, residual, lambda },
     );
 }
 

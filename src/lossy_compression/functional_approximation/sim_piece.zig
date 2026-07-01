@@ -410,7 +410,7 @@ fn computeSegmentsMetadata(
 /// Sim-Piece Phase 2. Merge the elements in `segments_metadata` using Alg. 2 and store the
 /// results in `merged_segments_metadata`. The segments are merged based on the intercept value.
 /// The `allocator` is used to allocate memory for the intermediate representations needed.
-fn mergeSegmentsMetadata(
+pub fn mergeSegmentsMetadata(
     allocator: Allocator,
     segments_metadata: ArrayList(shared_structs.SegmentMetadata),
     merged_segments_metadata: *ArrayList(shared_structs.SegmentMetadata),
