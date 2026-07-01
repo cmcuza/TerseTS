@@ -77,9 +77,12 @@ fn main() {
     library_path.push("lib");
 
     // Apple's `ld` requires 64-bit Mach-O archive members to start on an 8-byte boundary,
-    // but Zig's archiver leaves `compiler_rt.o` at a 4-byte offset. Re-pack the archive with
-    // Apple's `libtool`, which re-lays-out the members with the required padding without
-    // modifying the object contents. The alignment is verified explicitly after the re-pack.
+    // but Zig's archiver leaves `compiler_rt.o` at a 4-byte offset, which `ld` rejects.
+    // Re-pack the archive with Apple's `libtool`, which re-lays-out the members with the
+    // required padding (without modifying the object contents) and writes a sorted symbol
+    // index. A CI diagnostic confirmed on the real toolchain that this alone moves
+    // `compiler_rt.o` from offset %8==4 to %8==0, and that a following `ranlib` leaves every
+    // member offset byte-identical, so `ranlib` is not run. Alignment is verified below.
     if target_os == "macos" && target_arch == "aarch64" {
         let lib = library_path.join("libtersets.a");
         let fixed = library_path.join("libtersets.fixed.a");
@@ -98,47 +101,35 @@ fn main() {
             process::exit(1);
         }
 
-        // Rebuild the archive index. This index is not what makes the link succeed: the
-        // whole-archive link below ignores it and includes every member unconditionally, so
-        // `ranlib` is not the reason `ld` can resolve the soft-float symbols. It is retained
-        // because it also re-normalizes the member layout after `libtool`; whether it is
-        // still strictly required under whole-archive linking has not been separately proven.
-        let ranlib_output = Command::new("ranlib").arg(&fixed).output().unwrap();
-        if !ranlib_output.status.success() {
-            println!(
-                "cargo::error=Failed to index libtersets.a with ranlib: {}",
-                String::from_utf8_lossy(&ranlib_output.stderr)
-            );
-            process::exit(1);
-        }
-
         std::fs::rename(&fixed, &lib).unwrap();
 
         // Postcondition: confirm the re-pack actually placed `compiler_rt.o` on an 8-byte
-        // boundary. The whole-archive link below already fails loudly if `ld` cannot parse
-        // the member, but this turns a future `libtool`/`ranlib` regression into a precise
-        // build-time error instead of a confusing link failure. Only alignment is checked,
-        // not presence: a static build bundles `compiler_rt` by default, so if the member is
-        // absent there is nothing to align and the linker remains the authority.
+        // boundary, so `ld` can load it and resolve the soft-float and `_roundq` symbols it
+        // defines. This turns a future `libtool`/toolchain regression into a precise
+        // build-time error instead of a confusing "undefined symbols" link failure. Only
+        // alignment is checked, not presence: a static build bundles `compiler_rt` by
+        // default, so if the member is absent there is nothing to align and the linker
+        // remains the authority.
         let archive = std::fs::read(&lib).unwrap();
         if let Some(offset) = archive_member_payload_offset(&archive, "compiler_rt")
             && offset % 8 != 0
         {
             println!(
                 "cargo::error=compiler_rt.o is not 8-byte aligned in libtersets.a \
-                 (payload offset {offset}, offset % 8 = {}); the libtool/ranlib re-pack \
-                 did not produce a linkable archive.",
+                 (payload offset {offset}, offset % 8 = {}); the libtool re-pack did not \
+                 produce a linkable archive.",
                 offset % 8
             );
             process::exit(1);
         }
     }
 
-    // NOTE: `+whole-archive` was tried here and made things worse on aarch64-macos:
-    // `-force_load` pulls in our `compiler_rt.o`, whose strong soft-float defs then shadow
-    // Rust's own (working) `compiler_builtins` weak defs, so the entire `xf` family plus
-    // `_roundq` went undefined instead of just `_roundq`. Reverted to a plain static link;
-    // the `_roundq` gap is being addressed at its source (std.json's f128 integer path).
+    // A plain static link works because `libtool` (above) makes `compiler_rt.o` loadable, so
+    // `ld` resolves the soft-float and `_roundq` symbols from it via normal archive
+    // extraction. NOTE: do not switch this to `+whole-archive` — it was tried and made things
+    // worse on aarch64-macos, because `-force_load` pulls in `compiler_rt.o`'s strong
+    // soft-float defs, which then shadow Rust's own (working) `compiler_builtins` weak defs,
+    // leaving the whole `xf` family plus `_roundq` undefined instead of resolving them.
     println!("cargo::rustc-link-lib=static=tersets");
     println!("cargo::rustc-link-search=native={}", library_path.display());
 }
