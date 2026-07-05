@@ -128,14 +128,15 @@ pub fn decompress(
     defer base_segments_metadata.deinit(allocator);
     const series_length = try readBase(allocator, compressed_values, &offset, &base_segments_metadata);
 
+    var stored = ArrayList(u64).empty;
+    defer stored.deinit(allocator);
+    const header = try readResiduals(allocator, compressed_values, &offset, &stored);
+
     var residuals = ArrayList(i64).empty;
     defer residuals.deinit(allocator);
-    const residual_error_bound = try readResiduals(
-        allocator,
-        compressed_values,
-        &offset,
-        &residuals,
-    );
+    for (stored.items) |value| {
+        try residuals.append(allocator, @as(i64, @intCast(value - 1)) + header.r_min);
+    }
 
     // Combine residuals and base segments.
     var current_index: usize = 0;
@@ -152,35 +153,129 @@ pub fn decompress(
             current_index,
             next_start_index,
             residuals.items,
-            residual_error_bound,
+            header.error_bound,
             decompressed_values,
         );
         current_index = next_start_index;
     }
 }
 
+/// Extracts `indices` and `coefficients` from Shrink's `compressed_values`.
+/// The compressed stream consists of a base section followed by a residuals section.
+/// The base section encodes: a segment count (usize), for each segment: (start_index, intercept,
+/// lower_bound_slope, upper_bound_slope), and the series length (usize).
+/// The residuals section encodes: residual_error_bound (f32), r_min (i64), residuals_count (usize),
+/// and optionally an Elias-Gamma-encoded block of shifted residual values.
+/// A `indices` ArrayList stores the segment count, all start indices, the series length,
+/// r_min (bitcast to u64), the residuals count, and the decoded Elias-Gamma stored values.
+/// A `coefficients` ArrayList stores the per-segment (intercept, lower_bound_slope,
+/// upper_bound_slope) values and the residual_error_bound.
+/// Any loss or misalignment of the indices may produce a stream that cannot be decompressed or
+/// yields incorrect results. Only structural checks are performed by the underlying reader
+/// functions. The caller must ensure semantic validity. If the compressed stream does not
+/// follow the expected representation, `Error.CorruptedCompressedData` is returned.
+/// The `allocator` handles the memory allocations of the output arrays.
+/// Allocation errors are propagated.
 pub fn extract(
     allocator: Allocator,
     compressed_values: []const u8,
     indices: *ArrayList(u64),
     coefficients: *ArrayList(f64),
 ) Error!void {
-    _ = allocator;
-    _ = indices;
-    _ = coefficients;
-    _ = compressed_values;
+    var offset: usize = 0;
+
+    // Extract the base segments
+    var base_segments_metadata = ArrayList(SegmentMetadata).empty;
+    defer base_segments_metadata.deinit(allocator);
+    const series_length = try readBase(allocator, compressed_values, &offset, &base_segments_metadata);
+
+    try indices.append(allocator, base_segments_metadata.items.len);
+    for (base_segments_metadata.items) |segment| {
+        try indices.append(allocator, segment.start_index);
+        try coefficients.append(allocator, segment.intercept);
+        try coefficients.append(allocator, segment.lower_bound_slope);
+        try coefficients.append(allocator, segment.upper_bound_slope);
+    }
+    try indices.append(allocator, series_length);
+
+    // Extract the residuals section
+    var stored = ArrayList(u64).empty;
+    defer stored.deinit(allocator);
+    const header = try readResiduals(allocator, compressed_values, &offset, &stored);
+
+    try coefficients.append(allocator, @as(f64, @floatCast(header.error_bound)));
+    try indices.append(allocator, @as(u64, @bitCast(header.r_min)));
+    try indices.append(allocator, header.count);
+
+    for (stored.items) |value| {
+        try indices.append(allocator, value);
+    }
 }
 
+/// Rebuilds Shrink's `compressed_values` from the provided `indices` and `coefficients`.
+/// The encoding matches the layout produced by `extract`. The function reconstructs the
+/// base section (segment count, per-segment metadata, series length) followed by the
+/// residuals section (residual_error_bound, r_min, residuals count, Elias-Gamma-encoded
+/// block). The `indices` array provides the integer metadata and stored residual values,
+/// while the `coefficients` array provides the floating-point parameters.
+/// Any loss or misalignment of the indices or coefficients, such as incorrect segment
+/// count, mismatched residual count, or corrupted slope bounds, may produce a compressed
+/// stream that cannot be decompressed or yields incorrect results. Only structural validation
+/// is performed. Semantic consistency must be ensured by the caller. If the arrays do not
+/// match the expected layout, `Error.CorruptedCompressedData` is returned. The `allocator`
+/// handles the memory allocations of the output array. Allocation errors are propagated.
 pub fn rebuild(
     allocator: Allocator,
     indices: []const u64,
     coefficients: []const f64,
     compressed_values: *ArrayList(u8),
 ) Error!void {
-    _ = allocator;
-    _ = indices;
-    _ = coefficients;
-    _ = compressed_values;
+    // --- Base section ---
+    const segments_count = indices[0];
+    try shared_functions.appendValue(allocator, usize, segments_count, compressed_values);
+
+    var idx: usize = 1;
+    var ci: usize = 0;
+    for (0..segments_count) |_| {
+        const start_index = indices[idx];
+        idx += 1;
+        const intercept = coefficients[ci];
+        const lower_bound_slope = coefficients[ci + 1];
+        const upper_bound_slope = coefficients[ci + 2];
+        ci += 3;
+
+        try shared_functions.appendValue(allocator, usize, start_index, compressed_values);
+        try shared_functions.appendValue(allocator, f64, intercept, compressed_values);
+        try shared_functions.appendValue(allocator, f64, lower_bound_slope, compressed_values);
+        try shared_functions.appendValue(allocator, f64, upper_bound_slope, compressed_values);
+    }
+
+    const series_length = indices[idx];
+    idx += 1;
+    try shared_functions.appendValue(allocator, usize, series_length, compressed_values);
+
+    // --- Residuals section ---
+    const residual_error_bound: f64 = coefficients[ci];
+    try shared_functions.appendValue(allocator, f32, @as(f32, @floatCast(residual_error_bound)), compressed_values);
+
+    const r_min: i64 = @as(i64, @bitCast(indices[idx]));
+    idx += 1;
+    try shared_functions.appendValue(allocator, i64, r_min, compressed_values);
+
+    const residuals_count = indices[idx];
+    idx += 1;
+    try shared_functions.appendValue(allocator, usize, residuals_count, compressed_values);
+
+    if (residuals_count > 0) {
+        const stored_values = indices[idx .. idx + residuals_count];
+
+        var encoded = ArrayList(u8).empty;
+        defer encoded.deinit(allocator);
+        try shared_functions.encodeEliasGamma(allocator, stored_values, &encoded);
+
+        try shared_functions.appendValue(allocator, usize, encoded.items.len, compressed_values);
+        try compressed_values.appendSlice(allocator, encoded.items);
+    }
 }
 
 /// SHRINK Phase 1. Computes the `segments_metadata` (cones) for `uncompressed_values` using an
@@ -482,7 +577,7 @@ fn writeResiduals(
     // Find the minimum quantized residual to shift residuals toward zero,
     // aligning with the SHRINK paper (Section III-D, Eq. 6).
     var r_min: i64 = 0;
-    for (residuals.items) |r| {
+    for (residuals) |r| {
         if (r < r_min) r_min = r;
     }
 
@@ -507,35 +602,33 @@ fn writeResiduals(
     try compressed_values.appendSlice(allocator, encoded_residuals.items);
 }
 
-/// Reads the residual stream written by `writeResiduals` from `compressed_values`, starting at
-/// `offset.*`, which is advanced past the consumed bytes. Returns the residual error bound used
-/// during quantization. The `allocator` is used to allocate `residuals`.
+/// Header fields from the residuals section of the compressed stream.
+const ResidualsHeader = struct {
+    error_bound: f32,
+    /// The minimum quantized residual value, used to shift residuals toward zero.
+    r_min: i64,
+    count: usize,
+};
+
+/// Reads the residual section header and, if present, decodes the Elias-Gamma block into
+/// `stored`. The allocator is used for decoding. Returns the header fields.
 fn readResiduals(
     allocator: Allocator,
     compressed_values: []const u8,
     offset: *usize,
-    residuals: *ArrayList(i64),
-) Error!f32 {
-    const residual_error_bound = try shared_functions.readOffsetValue(f32, compressed_values, offset);
+    stored: *ArrayList(u64),
+) Error!ResidualsHeader {
+    const error_bound = try shared_functions.readOffsetValue(f32, compressed_values, offset);
     const r_min = try shared_functions.readOffsetValue(i64, compressed_values, offset);
-    const residuals_count = try shared_functions.readOffsetValue(usize, compressed_values, offset);
-    if (residuals_count == 0) return residual_error_bound;
-
-    const encoded_len = try shared_functions.readOffsetValue(usize, compressed_values, offset);
-    const encoded_slice = compressed_values[offset.* .. offset.* + encoded_len];
-    offset.* += encoded_len;
-
-    var shifted_values = ArrayList(u64).empty;
-    defer shifted_values.deinit(allocator);
-    try shared_functions.decodeEliasGamma(allocator, encoded_slice, &shifted_values);
-
-    if (shifted_values.items.len != residuals_count) return Error.CorruptedCompressedData;
-
-    for (shifted_values.items) |value| {
-        // Reverse the +1 shift and add back r_min to recover the signed quantized residual.
-        try residuals.append(allocator, @as(i64, @intCast(value - 1)) + r_min);
+    const count = try shared_functions.readOffsetValue(usize, compressed_values, offset);
+    if (count > 0) {
+        const encoded_len = try shared_functions.readOffsetValue(usize, compressed_values, offset);
+        const encoded_slice = compressed_values[offset.* .. offset.* + encoded_len];
+        offset.* += encoded_len;
+        try shared_functions.decodeEliasGamma(allocator, encoded_slice, stored);
+        if (stored.items.len != count) return Error.CorruptedCompressedData;
     }
-    return residual_error_bound;
+    return .{ .error_bound = error_bound, .r_min = r_min, .count = count };
 }
 
 /// Reconstructs the decompressed values for indices `[start_index, end_index)` covered by
