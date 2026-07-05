@@ -337,9 +337,9 @@ fn quantize(value: f64, error_bound: f32) f64 {
 /// a candidate slope (Algorithm 5) and computes the quantized residual (Algorithm 6, Eq. 6) for
 /// every point covered by that segment. The residuals are appended, in series order, to
 /// `residuals` as signed integers representing the quantization bucket index relative to the
-/// segment's residual range, ready for ZigZag/Elias-Gamma encoding. If `residual_error_bound` is
-/// zero, no residuals are computed and `residuals` stays empty, meaning decompression will only
-/// be able to reconstruct the (looser) base approximation.
+/// segment's residual range, ready for r_min-shifted Elias-Gamma encoding.
+/// If `residual_error_bound` is zero, no residuals are computed and `residuals` stays empty,
+/// meaning decompression will only be able to reconstruct the (looser) base approximation.
 fn computeResiduals(
     allocator: Allocator,
     uncompressed_values: []const f64,
@@ -370,7 +370,9 @@ fn computeResiduals(
                 current_metadata.intercept;
             const residual = uncompressed_values[i] - predicted;
 
-            // Eq. (6).
+            // Section III-D, Eq. 6. The minimum quantized residual is subtracted in
+            // `writeResiduals` to shift all values toward zero before
+            // Elias-Gamma encoding, matching the paper's approach.
             const quantized: i64 = @intFromFloat(@floor(residual / residual_error_bound));
             try residuals.append(allocator, quantized);
         }
@@ -464,35 +466,42 @@ fn readBase(
 }
 
 /// Writes `residuals` to `compressed_values`, prefixed by the `residual_error_bound` used to
-/// quantize them and the number of residuals. Residuals are ZigZag-encoded to map signed values
-/// to non-negative integers, shifted by one since Elias-Gamma encoding is undefined for zero
-/// (see `shared_functions.encodeEliasGamma`), and then Elias-Gamma encoded, which is effective
-/// here since quantized residuals are small in magnitude and concentrated near zero (SHRINK paper,
-/// Section III-D). If `residuals` is empty, only the (zero) residual error bound and a zero count
-/// are written; decompression then returns the base approximation unchanged.
-///
-/// The original SHRINK paper uses Turbo Range Coder (TRC), an arithmetic encoder built on top of
-/// the Burrows-Wheeler, to compress the residuals.
+/// quantize them, the minimum quantized residual `r_min` for shifting, and the number of residuals.
+/// Residuals are shifted by `r_min` to produce unsigned values in `[0, K]`, incremented by one
+/// since Elias-Gamma encoding is undefined for zero (see `shared_functions.encodeEliasGamma`),
+/// and then Elias-Gamma encoded. This follows the SHRINK paper (Section III-D) which subtracts
+/// the minimum residual before quantizing. If `residuals` is empty, only the (zero) residual error
+/// bound, a zero r_min, and a zero count are written; decompression then returns the base
+/// approximation unchanged.
 fn writeResiduals(
     allocator: Allocator,
     residuals: []const i64,
     residual_error_bound: f32,
     compressed_values: *ArrayList(u8),
 ) Error!void {
+    // Find the minimum quantized residual to shift residuals toward zero,
+    // aligning with the SHRINK paper (Section III-D, Eq. 6).
+    var r_min: i64 = 0;
+    for (residuals.items) |r| {
+        if (r < r_min) r_min = r;
+    }
+
     try shared_functions.appendValue(allocator, f32, residual_error_bound, compressed_values);
+    try shared_functions.appendValue(allocator, i64, r_min, compressed_values);
     try shared_functions.appendValue(allocator, usize, residuals.len, compressed_values);
     if (residuals.len == 0) return;
 
-    var zigzag_values = ArrayList(u64).empty;
-    defer zigzag_values.deinit(allocator);
+    var shifted_values = ArrayList(u64).empty;
+    defer shifted_values.deinit(allocator);
     for (residuals) |residual| {
-        // Shift by one since Elias-Gamma encoding is undefined for zero.
-        try zigzag_values.append(allocator, shared_functions.encodeZigZag(residual) + 1);
+        // Shift by r_min to produce non-negative values, then add one since
+        // Elias-Gamma encoding is undefined for zero.
+        try shifted_values.append(allocator, @as(u64, @intCast(residual - r_min)) + 1);
     }
 
     var encoded_residuals = ArrayList(u8).empty;
     defer encoded_residuals.deinit(allocator);
-    try shared_functions.encodeEliasGamma(allocator, zigzag_values.items, &encoded_residuals);
+    try shared_functions.encodeEliasGamma(allocator, shifted_values.items, &encoded_residuals);
 
     try shared_functions.appendValue(allocator, usize, encoded_residuals.items.len, compressed_values);
     try compressed_values.appendSlice(allocator, encoded_residuals.items);
@@ -508,6 +517,7 @@ fn readResiduals(
     residuals: *ArrayList(i64),
 ) Error!f32 {
     const residual_error_bound = try shared_functions.readOffsetValue(f32, compressed_values, offset);
+    const r_min = try shared_functions.readOffsetValue(i64, compressed_values, offset);
     const residuals_count = try shared_functions.readOffsetValue(usize, compressed_values, offset);
     if (residuals_count == 0) return residual_error_bound;
 
@@ -515,15 +525,15 @@ fn readResiduals(
     const encoded_slice = compressed_values[offset.* .. offset.* + encoded_len];
     offset.* += encoded_len;
 
-    var zigzag_values = ArrayList(u64).empty;
-    defer zigzag_values.deinit(allocator);
-    try shared_functions.decodeEliasGamma(allocator, encoded_slice, &zigzag_values);
+    var shifted_values = ArrayList(u64).empty;
+    defer shifted_values.deinit(allocator);
+    try shared_functions.decodeEliasGamma(allocator, encoded_slice, &shifted_values);
 
-    if (zigzag_values.items.len != residuals_count) return Error.CorruptedCompressedData;
+    if (shifted_values.items.len != residuals_count) return Error.CorruptedCompressedData;
 
-    for (zigzag_values.items) |value| {
-        // Reverse the +1 shift applied in `writeResiduals` before ZigZag-decoding.
-        try residuals.append(allocator, shared_functions.decodeZigZag(value - 1));
+    for (shifted_values.items) |value| {
+        // Reverse the +1 shift and add back r_min to recover the signed quantized residual.
+        try residuals.append(allocator, @as(i64, @intCast(value - 1)) + r_min);
     }
     return residual_error_bound;
 }
