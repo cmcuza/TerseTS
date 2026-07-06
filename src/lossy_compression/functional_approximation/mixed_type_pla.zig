@@ -112,11 +112,33 @@ pub fn compress(
     defer state.deinit();
     state.run(normalized_values);
 
+    // Verify the emitted stream against the original values and repair pieces whose
+    // reconstruction violates the error bound. The polygon geometry operates on normalized
+    // data whose error budget can drop below its floating-point drift when the input spans
+    // many orders of magnitude, so the guarantee is enforced on the final, denormalized
+    // reconstruction instead.
+    var output_knots = ArrayList(ContinousPoint).empty;
+    defer output_knots.deinit(allocator);
+    try output_knots.appendSlice(allocator, state.output_segments.items);
+    var output_flags = ArrayList(bool).empty;
+    defer output_flags.deinit(allocator);
+    try output_flags.appendSlice(allocator, state.connectivity_flags.items);
+    try verifyAndRepairSegments(
+        allocator,
+        &output_knots,
+        &output_flags,
+        uncompressed_values,
+        normalized_values,
+        norm_offset,
+        norm_scale,
+        adjusted_error_bound,
+    );
+
     // Serialize with the normalization header.
     try serializeSegments(
         allocator,
-        state.output_segments.items,
-        state.connectivity_flags.items,
+        output_knots.items,
+        output_flags.items,
         uncompressed_values.len,
         norm_offset,
         norm_scale,
@@ -173,14 +195,14 @@ pub fn decompress(
     for (0..original_length) |i| {
         const t: f64 = @floatFromInt(i);
 
-        // Find preferred segment: one whose start_time == t, or the first segment that contains t.
+        // Find preferred segment: one whose start time == t, or the first segment that contains t.
         var preferred: ?LineSegment = null;
         for (line_segments.items) |seg| {
-            if (seg.start_time <= t and t <= seg.end_time) {
+            if (seg.start.index <= t and t <= seg.end.index) {
                 if (preferred == null) {
                     preferred = seg;
                 }
-                if (@abs(seg.start_time - t) < 1e-10) {
+                if (@abs(seg.start.index - t) < 1e-10) {
                     preferred = seg;
                     break;
                 }
@@ -603,13 +625,11 @@ fn readSegments(
         const end_point = segment_data[it];
         it += 1;
 
-        const line = ext_poly.linearFromTwoPoints(start_point, end_point);
         const connected = knot_flags[knot_idx];
 
         try line_segments.append(allocator, .{
-            .start_time = start_point.index,
-            .end_time = end_point.index,
-            .line = line,
+            .start = start_point,
+            .end = end_point,
         });
 
         if (connected) {
@@ -629,13 +649,305 @@ fn readSegments(
     // Handle last segment if there are remaining points.
     if (it < segment_data.len) {
         const end_point = segment_data[it];
-        const line = ext_poly.linearFromTwoPoints(start_point, end_point);
 
         try line_segments.append(allocator, .{
-            .start_time = start_point.index,
-            .end_time = end_point.index,
-            .line = line,
+            .start = start_point,
+            .end = end_point,
         });
+    }
+}
+
+/// One primal-space piece of the output stream together with the indices of its start and end
+/// knots in the knot array. `verifyAndRepairSegments` uses the records to re-check each piece
+/// against the error bound and to splice replacement pieces while keeping the knots of
+/// unaffected pieces bit-identical.
+const SegmentRecord = struct {
+    start_knot: usize,
+    end_knot: usize,
+    segment: LineSegment,
+    /// First and last integer timestamps reconstructed from this piece, or `-1` when the piece
+    /// is never selected during reconstruction.
+    first_owned: i64 = -1,
+    last_owned: i64 = -1,
+    violated: bool = false,
+};
+
+/// Primal-space piece defined by explicit start and end knots, used while splicing repaired
+/// pieces into the output stream.
+const KnotPair = struct {
+    start: ContinousPoint,
+    end: ContinousPoint,
+};
+
+/// Mirrors the knot iteration of `readSegments` but additionally records the indices of each
+/// piece's start and end knots so that `verifyAndRepairSegments` can splice the knot array
+/// without re-deriving (and thereby perturbing) the knots of unaffected pieces.
+fn buildSegmentRecords(
+    allocator: Allocator,
+    knots: []const ContinousPoint,
+    flags: []const bool,
+    records: *ArrayList(SegmentRecord),
+) Error!void {
+    if (knots.len < 2) return;
+
+    var it: usize = 0;
+    var knot_idx: usize = 1;
+    var start_idx: usize = it;
+    it += 1;
+
+    while (knot_idx < flags.len and it < knots.len) {
+        const end_idx = it;
+        it += 1;
+
+        try records.append(allocator, .{
+            .start_knot = start_idx,
+            .end_knot = end_idx,
+            .segment = .{ .start = knots[start_idx], .end = knots[end_idx] },
+        });
+
+        if (flags[knot_idx]) {
+            start_idx = end_idx;
+        } else {
+            if (it < knots.len) {
+                start_idx = it;
+                it += 1;
+            }
+        }
+
+        knot_idx += 1;
+    }
+
+    if (it < knots.len) {
+        try records.append(allocator, .{
+            .start_knot = start_idx,
+            .end_knot = it,
+            .segment = .{ .start = knots[start_idx], .end = knots[it] },
+        });
+    }
+}
+
+/// Appends pieces that interpolate the normalized raw values over the integer timestamp range
+/// `[first, last]`. When the single line through `(first, last)` violates `check_bound` at an
+/// interior timestamp (checked in denormalized space, exactly as `decompress` evaluates), the
+/// range is bisected recursively. Recursion terminates because a piece spanning at most one
+/// step has no interior timestamps and its endpoints store the exact normalized raw values.
+fn appendInterpolationPieces(
+    allocator: Allocator,
+    first: usize,
+    last: usize,
+    uncompressed_values: []const f64,
+    normalized_values: []const f64,
+    norm_offset: f64,
+    norm_scale: f64,
+    check_bound: f64,
+    pieces: *ArrayList(KnotPair),
+) Error!void {
+    const start = ContinousPoint{
+        .index = @floatFromInt(first),
+        .value = normalized_values[first],
+    };
+    const end = ContinousPoint{
+        .index = @floatFromInt(last),
+        .value = normalized_values[last],
+    };
+
+    if (last - first > 1) {
+        const segment = LineSegment{ .start = start, .end = end };
+        var within_bound = true;
+        var t = first + 1;
+        while (t < last) : (t += 1) {
+            const denormalized =
+                segment.evaluate(@floatFromInt(t)) * norm_scale + norm_offset;
+            if (@abs(uncompressed_values[t] - denormalized) > check_bound) {
+                within_bound = false;
+                break;
+            }
+        }
+        if (!within_bound) {
+            const mid = first + (last - first) / 2;
+            try appendInterpolationPieces(
+                allocator,
+                first,
+                mid,
+                uncompressed_values,
+                normalized_values,
+                norm_offset,
+                norm_scale,
+                check_bound,
+                pieces,
+            );
+            try appendInterpolationPieces(
+                allocator,
+                mid,
+                last,
+                uncompressed_values,
+                normalized_values,
+                norm_offset,
+                norm_scale,
+                check_bound,
+                pieces,
+            );
+            return;
+        }
+    }
+
+    try pieces.append(allocator, .{ .start = start, .end = end });
+}
+
+/// Rewrites `knots` and `flags` from an ordered list of pieces. Consecutive pieces that share
+/// an identical end/start knot are stored as connected (one shared knot); all other pieces are
+/// stored as disjoint (two knots). `first_flag` preserves the type flag of the first knot,
+/// which `readSegments` skips during reconstruction.
+fn rewriteKnotsAndFlags(
+    allocator: Allocator,
+    pieces: []const KnotPair,
+    first_flag: bool,
+    knots: *ArrayList(ContinousPoint),
+    flags: *ArrayList(bool),
+) Error!void {
+    var new_knots = ArrayList(ContinousPoint).empty;
+    defer new_knots.deinit(allocator);
+    var new_flags = ArrayList(bool).empty;
+    defer new_flags.deinit(allocator);
+
+    for (pieces, 0..) |piece, i| {
+        if (i == 0) {
+            try new_knots.append(allocator, piece.start);
+            try new_knots.append(allocator, piece.end);
+            try new_flags.append(allocator, first_flag);
+        } else {
+            const previous_end = pieces[i - 1].end;
+            if (previous_end.index == piece.start.index and
+                previous_end.value == piece.start.value)
+            {
+                try new_flags.append(allocator, true);
+                try new_knots.append(allocator, piece.end);
+            } else {
+                try new_flags.append(allocator, false);
+                try new_knots.append(allocator, piece.start);
+                try new_knots.append(allocator, piece.end);
+            }
+        }
+    }
+
+    knots.clearRetainingCapacity();
+    try knots.appendSlice(allocator, new_knots.items);
+    flags.clearRetainingCapacity();
+    try flags.appendSlice(allocator, new_flags.items);
+}
+
+/// Verifies the emitted knot stream against the original (denormalized) values and repairs any
+/// piece whose reconstruction violates `check_bound`. Reconstruction is simulated exactly as
+/// `decompress` performs it, including the preference for pieces whose start time matches the
+/// timestamp, so every violation is attributed to the piece that reconstruction actually uses.
+/// Violating pieces are replaced by pieces interpolating the normalized raw values over the
+/// integer timestamps they reconstruct, bisected until the bound holds
+/// (`appendInterpolationPieces`); unaffected pieces keep their knots bit-identical. The result
+/// is re-verified, and if a violation persists (or reconstruction is structurally broken), the
+/// whole stream is replaced by an exact polyline through all points. This guarantees the
+/// max-error bound regardless of accumulated floating-point drift in the polygon geometry, at
+/// the cost of extra knots on numerically adverse inputs.
+fn verifyAndRepairSegments(
+    allocator: Allocator,
+    knots: *ArrayList(ContinousPoint),
+    flags: *ArrayList(bool),
+    uncompressed_values: []const f64,
+    normalized_values: []const f64,
+    norm_offset: f64,
+    norm_scale: f64,
+    check_bound: f64,
+) Error!void {
+    if (uncompressed_values.len == 0 or knots.items.len < 2) return;
+
+    const max_repair_attempts: usize = 2;
+    var attempt: usize = 0;
+    var structurally_broken = false;
+    while (attempt <= max_repair_attempts) : (attempt += 1) {
+        var records = ArrayList(SegmentRecord).empty;
+        defer records.deinit(allocator);
+        try buildSegmentRecords(allocator, knots.items, flags.items, &records);
+        if (records.items.len == 0) {
+            structurally_broken = true;
+            break;
+        }
+
+        // Simulate reconstruction: attribute every timestamp to the piece `decompress` uses
+        // and flag pieces whose denormalized reconstruction violates the bound.
+        var any_violation = false;
+        for (uncompressed_values, 0..) |raw_value, i| {
+            const t: f64 = @floatFromInt(i);
+            var owner: ?usize = null;
+            for (records.items, 0..) |rec, j| {
+                if (rec.segment.start.index <= t and t <= rec.segment.end.index) {
+                    if (owner == null) owner = j;
+                    if (@abs(rec.segment.start.index - t) < 1e-10) {
+                        owner = j;
+                        break;
+                    }
+                }
+            }
+            if (owner == null) {
+                structurally_broken = true;
+                break;
+            }
+            const rec = &records.items[owner.?];
+            if (rec.first_owned < 0) rec.first_owned = @intCast(i);
+            rec.last_owned = @intCast(i);
+            const denormalized =
+                rec.segment.evaluate(t) * norm_scale + norm_offset;
+            if (@abs(raw_value - denormalized) > check_bound) {
+                rec.violated = true;
+                any_violation = true;
+            }
+        }
+        if (structurally_broken) break;
+        if (!any_violation) return;
+        if (attempt == max_repair_attempts) break;
+
+        // Splice: keep unaffected pieces bit-identical, replace violating pieces by
+        // interpolating pieces over the timestamps they reconstruct. A violating piece that
+        // never reconstructs a timestamp is redundant and dropped.
+        var pieces = ArrayList(KnotPair).empty;
+        defer pieces.deinit(allocator);
+        for (records.items) |rec| {
+            if (!rec.violated) {
+                try pieces.append(allocator, .{
+                    .start = knots.items[rec.start_knot],
+                    .end = knots.items[rec.end_knot],
+                });
+            } else if (rec.first_owned >= 0) {
+                try appendInterpolationPieces(
+                    allocator,
+                    @intCast(rec.first_owned),
+                    @intCast(rec.last_owned),
+                    uncompressed_values,
+                    normalized_values,
+                    norm_offset,
+                    norm_scale,
+                    check_bound,
+                    &pieces,
+                );
+            }
+        }
+        const first_flag = if (flags.items.len > 0) flags.items[0] else true;
+        try rewriteKnotsAndFlags(allocator, pieces.items, first_flag, knots, flags);
+    }
+
+    // Fallback: encode the series as an exact polyline through every normalized value. Every
+    // reconstructed value then equals the raw value up to normalization rounding, which is the
+    // best this format can represent.
+    knots.clearRetainingCapacity();
+    flags.clearRetainingCapacity();
+    for (normalized_values, 0..) |normalized_value, i| {
+        try knots.append(allocator, .{
+            .index = @floatFromInt(i),
+            .value = normalized_value,
+        });
+        try flags.append(allocator, true);
+    }
+    if (normalized_values.len == 1) {
+        try knots.append(allocator, knots.items[0]);
+        try flags.append(allocator, true);
     }
 }
 
@@ -689,16 +1001,23 @@ const Ck = struct {
     }
 };
 
-/// Primal-space line segment over `[start_time, end_time]` with line model `line`;
-/// used by decompression reconstruction.
+/// Primal-space line segment through the knots `start` and `end`; used by decompression
+/// reconstruction.
 const LineSegment = struct {
-    start_time: f64,
-    end_time: f64,
-    line: ext_poly.LinearFunction,
+    start: ContinousPoint,
+    end: ContinousPoint,
 
-    /// Evaluate segment line at time `t`.
+    /// Evaluate the segment's line at time `t`. The line is interpolated from the `start` knot
+    /// rather than evaluated as `slope * t + intercept`: an intercept is anchored at time zero,
+    /// so for large `t` and steep slopes evaluating it directly cancels catastrophically, while
+    /// the offset form keeps the rounding error proportional to the value range of the segment.
     fn evaluate(self: LineSegment, t: f64) f64 {
-        return ext_poly.evaluateLinear(self.line, t);
+        if (@abs(self.end.index - self.start.index) < 1e-10) {
+            return self.start.value;
+        }
+        const slope =
+            (self.end.value - self.start.value) / (self.end.index - self.start.index);
+        return self.start.value + (t - self.start.index) * slope;
     }
 };
 
