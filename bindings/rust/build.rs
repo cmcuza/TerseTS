@@ -150,15 +150,18 @@ fn parse_archive_members(bytes: &[u8]) -> Option<Vec<ArchiveMember>> {
 
     let mut members = Vec::new();
     let mut cursor = AR_MAGIC.len();
-    while cursor + AR_HEADER_LEN <= bytes.len() {
-        let header = &bytes[cursor..cursor + AR_HEADER_LEN];
+    while cursor < bytes.len() {
+        let header_end = cursor.checked_add(AR_HEADER_LEN)?;
+        let header = bytes.get(cursor..header_end)?;
         let name_field = std::str::from_utf8(&header[AR_NAME_FIELD]).ok()?.trim_end();
         let data_len: usize = std::str::from_utf8(&header[AR_SIZE_FIELD])
             .ok()?
             .trim()
             .parse()
             .ok()?;
-        let data_offset = cursor + AR_HEADER_LEN;
+        let data_offset = header_end;
+        let data_end = data_offset.checked_add(data_len)?;
+        bytes.get(data_offset..data_end)?;
 
         // A name longer than 16 bytes uses the extended form `#1/<len>`, storing the real name in
         // the first `<len>` bytes of the data with the object payload right after it. A short name
@@ -166,12 +169,16 @@ fn parse_archive_members(bytes: &[u8]) -> Option<Vec<ArchiveMember>> {
         let (extended_name_len, name, payload_offset) = match name_field.strip_prefix("#1/") {
             Some(len) => {
                 let name_len: usize = len.trim().parse().ok()?;
-                let raw_name = bytes.get(data_offset..data_offset + name_len)?;
+                let name_end = data_offset.checked_add(name_len)?;
+                if name_end > data_end {
+                    return None;
+                }
+                let raw_name = bytes.get(data_offset..name_end)?;
                 let name = std::str::from_utf8(raw_name)
                     .ok()?
                     .trim_end_matches('\0')
                     .to_owned();
-                (name_len, name, data_offset + name_len)
+                (name_len, name, name_end)
             }
             None => (0, name_field.trim_end_matches('/').to_owned(), data_offset),
         };
@@ -185,7 +192,10 @@ fn parse_archive_members(bytes: &[u8]) -> Option<Vec<ArchiveMember>> {
         });
 
         // Member data is padded to an even length before the next header begins.
-        cursor = data_offset + data_len + (data_len % 2);
+        cursor = data_end.checked_add(data_len % 2)?;
+        if cursor > bytes.len() {
+            return None;
+        }
     }
 
     Some(members)
@@ -200,7 +210,6 @@ fn compiler_rt_payload_offset(bytes: &[u8]) -> Option<usize> {
         .find(|member| member.name.contains("compiler_rt"))?;
     Some(member.payload_offset)
 }
-
 
 /// Rewrite `bytes` so the `compiler_rt.o` member's payload starts on an 8-byte boundary, and
 /// return the new archive. Returns `None` — leaving the caller to keep the original archive
@@ -226,20 +235,24 @@ fn align_compiler_rt(bytes: &[u8]) -> Option<Vec<u8>> {
         return None;
     }
 
-    let name_offset = member.header_offset + AR_HEADER_LEN;
-    let payload_end = member.payload_offset + (member.data_len - member.extended_name_len);
+    let name_offset = member.header_offset.checked_add(AR_HEADER_LEN)?;
+    let payload_len = member.data_len.checked_sub(member.extended_name_len)?;
+    let payload_end = member.payload_offset.checked_add(payload_len)?;
 
-    let mut aligned = Vec::with_capacity(bytes.len() + padding + 1);
+    let capacity = bytes.len().checked_add(padding)?.checked_add(1)?;
+    let mut aligned = Vec::with_capacity(capacity);
     // Everything before this member is copied unchanged.
     aligned.extend_from_slice(&bytes[..member.header_offset]);
 
     // Copy the 60-byte header, then overwrite the name and data-length fields to account for the
     // extra padding. The other header fields (timestamp, uid/gid, mode) pass through as-is.
     let mut header = bytes[member.header_offset..name_offset].to_vec();
-    let padded_name = format!("#1/{}", member.extended_name_len + padding);
-    let padded_data_len = format!("{}", member.data_len + padding);
-    write_ar_header_field(&mut header[AR_NAME_FIELD], &padded_name);
-    write_ar_header_field(&mut header[AR_SIZE_FIELD], &padded_data_len);
+    let padded_name_len = member.extended_name_len.checked_add(padding)?;
+    let padded_member_len = member.data_len.checked_add(padding)?;
+    let padded_name = format!("#1/{padded_name_len}");
+    let padded_data_len = padded_member_len.to_string();
+    write_ar_header_field(&mut header[AR_NAME_FIELD], &padded_name)?;
+    write_ar_header_field(&mut header[AR_SIZE_FIELD], &padded_data_len)?;
     aligned.extend_from_slice(&header);
 
     // The original name bytes, then the extra NUL padding, then the object payload copied verbatim.
@@ -255,8 +268,13 @@ fn align_compiler_rt(bytes: &[u8]) -> Option<Vec<u8>> {
 }
 
 /// Overwrite an `ar` header field in place with `value`, left-justified and space-padded — the
-/// fixed-width ASCII convention `ar` uses for its header fields.
-fn write_ar_header_field(field: &mut [u8], value: &str) {
+/// fixed-width ASCII convention `ar` uses for its header fields. Returns `None` if `value` does
+/// not fit instead of panicking on malformed archive metadata.
+fn write_ar_header_field(field: &mut [u8], value: &str) -> Option<()> {
+    if value.len() > field.len() {
+        return None;
+    }
     field.fill(b' ');
     field[..value.len()].copy_from_slice(value.as_bytes());
+    Some(())
 }
