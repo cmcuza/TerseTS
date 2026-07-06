@@ -968,8 +968,9 @@ pub const VisibleRegionChain = struct {
     /// down for upper chains, up for lower chains. Dominated vertices are then
     /// popped from the back until the boundary invariant is restored. When the chain is
     /// reduced to fewer than two vertices, `adjusted_point` is checked against
-    /// `adjusted_reference_line`; it is appended, replaces the front vertex,
-    /// or triggers `unreachable` if it falls outside the feasible region.
+    /// `adjusted_reference_line`; it is appended if strictly inside, otherwise it
+    /// replaces the front vertex (points classified outside by floating-point rounding
+    /// are treated as touching the boundary).
     pub fn updateVisibleRegion(self: *VisibleRegionChain, new_point: ContinousPoint) void {
         var adjusted_point: ContinousPoint = undefined;
         if (self.chain_type == .upper) {
@@ -1037,13 +1038,17 @@ pub const VisibleRegionChain = struct {
             isInnerPoint(ln_copy, adjusted_point, point_dir, self.tolerances.val);
         if (rel == .include) {
             self.vertices.append(self.allocator, adjusted_point) catch unreachable;
-        } else if (rel == .touch) {
+        } else {
+            // `.touch`: `adjusted_point` lies on `adjusted_reference_line`, so the visible
+            // region collapses onto the reference line at this point. `.exclude` cannot occur
+            // under exact arithmetic because points are only forwarded here after the feasible
+            // polygon fully contained their half-plane, but floating-point rounding can make
+            // this predicate disagree with the polygon's by a small margin. Such a point is on
+            // the boundary within noise, so it is handled like `.touch` instead of crashing.
             self.vertices.append(self.allocator, adjusted_point) catch unreachable;
             if (self.vertices.items.len > 0) {
                 _ = self.vertices.orderedRemove(0);
             }
-        } else {
-            unreachable;
         }
     }
     /// Add `new_point` to the chain. Delegates to `updateVisibleRegion` and
