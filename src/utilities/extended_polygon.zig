@@ -958,10 +958,10 @@ pub const VisibleRegionChain = struct {
         seed_dual_point: ParameterSpacePoint,
         seed_data_point: ContinousPoint,
         shift_time: f64,
-    ) void {
+    ) Allocator.Error!void {
         self.vertices.clearRetainingCapacity();
         self.reference_line = linearFromParamPoint(seed_dual_point, shift_time);
-        self.updateVisibleRegion(seed_data_point);
+        try self.updateVisibleRegion(seed_data_point);
     }
     /// Add `new_point` to the chain, maintaining the visible region invariant.
     /// `adjusted_point` is `new_point` shifted by `chain_limits.threshold`:
@@ -971,7 +971,7 @@ pub const VisibleRegionChain = struct {
     /// `adjusted_reference_line`; it is appended if strictly inside, otherwise it
     /// replaces the front vertex (points classified outside by floating-point rounding
     /// are treated as touching the boundary).
-    pub fn updateVisibleRegion(self: *VisibleRegionChain, new_point: ContinousPoint) void {
+    pub fn updateVisibleRegion(self: *VisibleRegionChain, new_point: ContinousPoint) Allocator.Error!void {
         var adjusted_point: ContinousPoint = undefined;
         if (self.chain_type == .upper) {
             adjusted_point = .{
@@ -986,7 +986,7 @@ pub const VisibleRegionChain = struct {
         }
 
         if (self.vertices.items.len == 0) {
-            self.vertices.append(self.allocator, adjusted_point) catch unreachable;
+            try self.vertices.append(self.allocator, adjusted_point);
             return;
         }
 
@@ -1011,7 +1011,7 @@ pub const VisibleRegionChain = struct {
             );
 
             if (vertex_relation == .include) {
-                self.vertices.append(self.allocator, adjusted_point) catch unreachable;
+                try self.vertices.append(self.allocator, adjusted_point);
                 return;
             } else {
                 _ = self.vertices.pop();
@@ -1037,7 +1037,7 @@ pub const VisibleRegionChain = struct {
         const rel =
             isInnerPoint(ln_copy, adjusted_point, point_dir, self.tolerances.val);
         if (rel == .include) {
-            self.vertices.append(self.allocator, adjusted_point) catch unreachable;
+            try self.vertices.append(self.allocator, adjusted_point);
         } else {
             // `.touch`: `adjusted_point` lies on `adjusted_reference_line`, so the visible
             // region collapses onto the reference line at this point. `.exclude` cannot occur
@@ -1045,7 +1045,7 @@ pub const VisibleRegionChain = struct {
             // polygon fully contained their half-plane, but floating-point rounding can make
             // this predicate disagree with the polygon's by a small margin. Such a point is on
             // the boundary within noise, so it is handled like `.touch` instead of crashing.
-            self.vertices.append(self.allocator, adjusted_point) catch unreachable;
+            try self.vertices.append(self.allocator, adjusted_point);
             if (self.vertices.items.len > 0) {
                 _ = self.vertices.orderedRemove(0);
             }
@@ -1053,8 +1053,8 @@ pub const VisibleRegionChain = struct {
     }
     /// Add `new_point` to the chain. Delegates to `updateVisibleRegion` and
     /// returns `true` unconditionally.
-    pub fn addPoint(self: *VisibleRegionChain, new_point: ContinousPoint) bool {
-        self.updateVisibleRegion(new_point);
+    pub fn addPoint(self: *VisibleRegionChain, new_point: ContinousPoint) Allocator.Error!bool {
+        try self.updateVisibleRegion(new_point);
         return true;
     }
 

@@ -110,7 +110,7 @@ pub fn compress(
             tolerances,
         );
     defer state.deinit();
-    state.run(normalized_values);
+    try state.run(normalized_values);
 
     // Verify the emitted stream against the original values and repair pieces whose
     // reconstruction violates the error bound. The polygon geometry operates on normalized
@@ -555,11 +555,10 @@ fn deserializeSegments(
             .readOffsetValue(f64, compressed_values, &offset);
         const val = try shared_functions
             .readOffsetValue(f64, compressed_values, &offset);
-        segment_data
-            .append(allocator, .{
+        try segment_data.append(allocator, .{
             .index = idx,
             .value = val,
-        }) catch return Error.CorruptedCompressedData;
+        });
     }
 
     // Number of knot flags.
@@ -584,7 +583,7 @@ fn deserializeSegments(
         for (0..8) |bit_idx| {
             if (flags_read >= num_flags) break;
             const flag = (byte_val & (@as(u8, 1) << @intCast(bit_idx))) != 0;
-            knot_flags.append(allocator, flag) catch return Error.CorruptedCompressedData;
+            try knot_flags.append(allocator, flag);
             flags_read += 1;
         }
     }
@@ -1142,7 +1141,7 @@ const Fittable = struct {
     /// `boundary_segments` without further processing; the sliding-window
     /// logic in `tryExtendOrTerminateNow` handles them once the buffer
     /// reaches four segments.
-    fn buffer(self: *Fittable, dp: ContinousPoint) void {
+    fn buffer(self: *Fittable, dp: ContinousPoint) Error!void {
         self.current_time = dp.index;
         const size = self.boundary_segment.items.len;
 
@@ -1150,33 +1149,33 @@ const Fittable = struct {
             self.time_base = dp.index;
             self.data_point_buffer = dp;
             self.initializeErrorTube(dp, self.delta);
-            self.boundary_segment.append(self.allocator, ext_poly.ErrorTubeSegment
-                .fromPointAndDelta(dp, self.delta)) catch unreachable;
+            try self.boundary_segment.append(self.allocator, ext_poly.ErrorTubeSegment
+                .fromPointAndDelta(dp, self.delta));
         } else if (size == 1) {
-            self.feasible_polygon.initializePolygon(
+            try self.feasible_polygon.initializePolygon(
                 self.data_point_buffer.?,
                 dp,
                 self.delta,
-            ) catch unreachable;
+            );
 
             const sec = ext_poly.ErrorTubeSegment.fromPointAndDelta(dp, self.delta);
-            self.upper_visible_region.resetFromSeedPoint(
+            try self.upper_visible_region.resetFromSeedPoint(
                 self.feasible_polygon.getEndmostVertex(.right_most),
                 sec.upper,
                 self.time_base,
             );
-            self.lower_visible_region.resetFromSeedPoint(
+            try self.lower_visible_region.resetFromSeedPoint(
                 self.feasible_polygon.getEndmostVertex(.left_most),
                 sec.lower,
                 self.time_base,
             );
 
             self.data_point_buffer = null;
-            self.boundary_segment.append(self.allocator, ext_poly.ErrorTubeSegment
-                .fromPointAndDelta(dp, self.delta)) catch unreachable;
+            try self.boundary_segment.append(self.allocator, ext_poly.ErrorTubeSegment
+                .fromPointAndDelta(dp, self.delta));
         } else if (size == 2 or size == 3) {
-            self.boundary_segment.append(self.allocator, ext_poly.ErrorTubeSegment
-                .fromPointAndDelta(dp, self.delta)) catch unreachable;
+            try self.boundary_segment.append(self.allocator, ext_poly.ErrorTubeSegment
+                .fromPointAndDelta(dp, self.delta));
         }
     }
 
@@ -1199,8 +1198,8 @@ const Fittable = struct {
     /// `boundary_segments` contains more than three entries, delegates
     /// immediately to `tryExtendOrTerminateNow`. Returns `true` while the
     /// segment can still grow, `false` when a termination has been decided.
-    fn updateFittable(self: *Fittable, dp: ContinousPoint) bool { //
-        self.buffer(dp);
+    fn updateFittable(self: *Fittable, dp: ContinousPoint) Error!bool {
+        try self.buffer(dp);
 
         if (self.boundary_segment.items.len <= 3) {
             return true;
@@ -1224,7 +1223,7 @@ const Fittable = struct {
     /// If both half-planes leave the polygon non-empty, visible region chain vertices
     /// that survive `contain_all` are forwarded to `updateVisibleRegion`.
     /// Returns `true`.
-    fn tryExtendOrTerminateNow(self: *Fittable) bool {
+    fn tryExtendOrTerminateNow(self: *Fittable) Error!bool {
         if (self.boundary_segment.items.len > 0) {
             _ = self.boundary_segment.orderedRemove(0);
         }
@@ -1242,9 +1241,9 @@ const Fittable = struct {
             },
             .direction = .point_to_below,
         };
-        const upper_result = self.feasible_polygon.intersect(upper_halfplane) catch unreachable;
+        const upper_result = try self.feasible_polygon.intersect(upper_halfplane);
         if (upper_result == .contain_some) {
-            self.upper_visible_region.resetFromSeedPoint(
+            try self.upper_visible_region.resetFromSeedPoint(
                 self.feasible_polygon.getEndmostVertex(.right_most),
                 leading_segment.upper,
                 self.time_base,
@@ -1258,9 +1257,9 @@ const Fittable = struct {
             },
             .direction = .point_to_above,
         };
-        const lower_result = self.feasible_polygon.intersect(lower_halfplane) catch unreachable;
+        const lower_result = try self.feasible_polygon.intersect(lower_halfplane);
         if (lower_result == .contain_some) {
-            self.lower_visible_region.resetFromSeedPoint(
+            try self.lower_visible_region.resetFromSeedPoint(
                 self.feasible_polygon.getEndmostVertex(.left_most),
                 leading_segment.lower,
                 self.time_base,
@@ -1303,10 +1302,10 @@ const Fittable = struct {
             return false;
         } else {
             if (upper_result == .contain_all) {
-                _ = self.upper_visible_region.addPoint(leading_segment.upper);
+                _ = try self.upper_visible_region.addPoint(leading_segment.upper);
             }
             if (lower_result == .contain_all) {
-                _ = self.lower_visible_region.addPoint(leading_segment.lower);
+                _ = try self.lower_visible_region.addPoint(leading_segment.lower);
             }
             return true;
         }
@@ -1316,7 +1315,7 @@ const Fittable = struct {
     /// `boundary_segments` and tests against the *last* (rather than second) remaining segment
     /// instead of index 1, so that  the tail of the input is processed correctly when the buffer is
     /// nearly empty.
-    fn finalizeWithLastBufferedPoint(self: *Fittable) bool {
+    fn finalizeWithLastBufferedPoint(self: *Fittable) Error!bool {
         if (self.boundary_segment.items.len > 0) {
             _ = self.boundary_segment.orderedRemove(0);
         }
@@ -1334,11 +1333,11 @@ const Fittable = struct {
             },
             .direction = .point_to_below,
         };
-        const upper_result = self.feasible_polygon.intersect(
+        const upper_result = try self.feasible_polygon.intersect(
             upper_halfplane,
-        ) catch unreachable;
+        );
         if (upper_result == .contain_some) {
-            self.upper_visible_region.resetFromSeedPoint(
+            try self.upper_visible_region.resetFromSeedPoint(
                 self.feasible_polygon.getEndmostVertex(.right_most),
                 last_segment.upper,
                 self.time_base,
@@ -1352,11 +1351,11 @@ const Fittable = struct {
             },
             .direction = .point_to_above,
         };
-        const lower_result = self.feasible_polygon.intersect(
+        const lower_result = try self.feasible_polygon.intersect(
             lower_halfplane,
-        ) catch unreachable;
+        );
         if (lower_result == .contain_some) {
-            self.lower_visible_region.resetFromSeedPoint(
+            try self.lower_visible_region.resetFromSeedPoint(
                 self.feasible_polygon.getEndmostVertex(.left_most),
                 last_segment.lower,
                 self.time_base,
@@ -1396,10 +1395,10 @@ const Fittable = struct {
             return false;
         } else {
             if (upper_result == .contain_all) {
-                _ = self.upper_visible_region.addPoint(last_segment.upper);
+                _ = try self.upper_visible_region.addPoint(last_segment.upper);
             }
             if (lower_result == .contain_all) {
-                _ = self.lower_visible_region.addPoint(last_segment.lower);
+                _ = try self.lower_visible_region.addPoint(last_segment.lower);
             }
             return true;
         }
@@ -1486,7 +1485,7 @@ const Fittable = struct {
     /// the surviving visible region chain (`use_ceil` selects upper vs. lower) are
     /// replayed into the fresh polygon via `loadVisibleRegionConstraints` before both region
     /// chains are reseeded from the new polygon's endmost vertices.
-    fn restartNewRound(self: *Fittable, lseg: ext_poly.ErrorTubeSegment, use_ceil: bool) void {
+    fn restartNewRound(self: *Fittable, lseg: ext_poly.ErrorTubeSegment, use_ceil: bool) Error!void {
         if (self.boundary_segment.items.len < 2) {
             return;
         }
@@ -1494,12 +1493,12 @@ const Fittable = struct {
         const first_segment = self.boundary_segment.items[1];
         self.time_base = first_segment.upper.index;
 
-        self.feasible_polygon.reInitializePolygon(
+        try self.feasible_polygon.reInitializePolygon(
             lseg,
             first_segment,
             self.time_base,
             self.closed_direction,
-        ) catch unreachable;
+        );
 
         // Replay surviving visible-region chain vertices as half-plane constraints.
         var surviving_chain =
@@ -1512,15 +1511,15 @@ const Fittable = struct {
                 },
                 .direction = surviving_chain.pointToDirection(),
             };
-            _ = self.feasible_polygon.loadVisibleRegionConstraints(constraint_halfplane) catch unreachable;
+            _ = try self.feasible_polygon.loadVisibleRegionConstraints(constraint_halfplane);
         }
 
-        self.upper_visible_region.resetFromSeedPoint(
+        try self.upper_visible_region.resetFromSeedPoint(
             self.feasible_polygon.getEndmostVertex(.right_most),
             first_segment.upper,
             self.time_base,
         );
-        self.lower_visible_region.resetFromSeedPoint(
+        try self.lower_visible_region.resetFromSeedPoint(
             self.feasible_polygon.getEndmostVertex(.left_most),
             first_segment.lower,
             self.time_base,
@@ -1531,10 +1530,10 @@ const Fittable = struct {
     /// the exact knot position and append it to `segments`. Also accumulates
     /// `accumulated_delay` to track the lag between the current time and
     /// the committed segment's base time.
-    fn recordLastKnot(self: *Fittable, rsep: LinearFunction) void {
+    fn recordLastKnot(self: *Fittable, rsep: LinearFunction) Error!void {
         var dp = ContinousPoint{ .index = 0.0, .value = 0.0 };
         self.active_error_tube.hittingLine(&dp, rsep, self.tolerances);
-        self.segments.append(self.allocator, dp) catch unreachable;
+        try self.segments.append(self.allocator, dp);
         self.delay_info += @intFromFloat(self.current_time - self.time_base);
     }
 
@@ -1569,21 +1568,21 @@ const Fittable = struct {
     /// polygon as uninstantiated, then delegates to either
     /// `restartConnectedRound` or `restartDisconnectedRound` and updates
     /// `knot_type` accordingly.
-    fn initializeNewRoundWithType(self: *Fittable, link_type: PieceType) void {
+    fn initializeNewRoundWithType(self: *Fittable, link_type: PieceType) Error!void {
         self.feasible_polygon.setUninstantiated();
         if (link_type == .connected) {
             self.knot_type = true;
-            self.restartConnectedNewRound();
+            try self.restartConnectedNewRound();
         } else if (link_type == .disjoint) {
             self.knot_type = false;
-            self.restartDisconnectedRound();
+            try self.restartDisconnectedRound();
         }
     }
 
     /// Restart for a disjoint (disconnected) new round. Discards the oldest
     /// boundary segment, then — when exactly two segments remain —
     /// reinitialises the polygon from them and reseeds both visible region chains.
-    fn restartDisconnectedRound(self: *Fittable) void {
+    fn restartDisconnectedRound(self: *Fittable) Error!void {
         if (self.boundary_segment.items.len > 0) {
             _ = self.boundary_segment.orderedRemove(0);
         }
@@ -1598,19 +1597,19 @@ const Fittable = struct {
 
         if (self.boundary_segment.items.len == 2) {
             const second_segment = self.boundary_segment.items[1];
-            self.feasible_polygon
+            try self.feasible_polygon
                 .reInitializePolygon(
                 first_segment,
                 second_segment,
                 self.time_base,
                 .lower,
-            ) catch unreachable;
-            self.upper_visible_region.resetFromSeedPoint(
+            );
+            try self.upper_visible_region.resetFromSeedPoint(
                 self.feasible_polygon.getEndmostVertex(.right_most),
                 second_segment.upper,
                 self.time_base,
             );
-            self.lower_visible_region.resetFromSeedPoint(
+            try self.lower_visible_region.resetFromSeedPoint(
                 self.feasible_polygon.getEndmostVertex(.left_most),
                 second_segment.lower,
                 self.time_base,
@@ -1622,9 +1621,9 @@ const Fittable = struct {
     /// with the saved `restart_bias_segment` and the surviving visible region chain
     /// indicator (`restart_bias_uses_upper_region`), then clears both fields
     /// so they are not replayed again.
-    fn restartConnectedNewRound(self: *Fittable) void {
+    fn restartConnectedNewRound(self: *Fittable) Error!void {
         if (self.restart_bias_segment != null and self.restart_bias_uses_upper_region != null) {
-            self.restartNewRound(
+            try self.restartNewRound(
                 self.restart_bias_segment.?,
                 self.restart_bias_uses_upper_region.?,
             );
@@ -1653,17 +1652,17 @@ const Fittable = struct {
     /// chains are deep-copied via their own clone methods.
     /// `restart_bias_segment` and `restart_bias_uses_upper_region` are reset
     /// to `null`: restart state from the source candidate is not propagated.
-    fn cloneFittable(self: *Fittable, other: *const Fittable) void {
+    fn cloneFittable(self: *Fittable, other: *const Fittable) Error!void {
         self.fitting_window = other.fitting_window;
         self.restart_bias_uses_upper_region = null;
         self.restart_bias_segment = null;
 
         // Clone boundary_segments.
         self.boundary_segment.clearRetainingCapacity();
-        self.boundary_segment.appendSlice(
+        try self.boundary_segment.appendSlice(
             self.allocator,
             other.boundary_segment.items,
-        ) catch unreachable;
+        );
 
         // Clone scalar fields.
         self.active_error_tube = other.active_error_tube;
@@ -1674,25 +1673,25 @@ const Fittable = struct {
 
         // Clone segments.
         self.segments.clearRetainingCapacity();
-        self.segments.appendSlice(self.allocator, other.segments.items) catch unreachable;
+        try self.segments.appendSlice(self.allocator, other.segments.items);
 
         self.data_point_buffer = other.data_point_buffer;
 
         // Clone feasible_polygon (deep copy both chains).
         self.feasible_polygon.deinit();
-        self.feasible_polygon = other.feasible_polygon.cloneExtendedPolygon(
+        self.feasible_polygon = try other.feasible_polygon.cloneExtendedPolygon(
             self.allocator,
-        ) catch unreachable;
+        );
 
         // Clone visible region chains.
         self.upper_visible_region.deinit();
-        self.upper_visible_region = other.upper_visible_region.cloneVisibleRegionChain(
+        self.upper_visible_region = try other.upper_visible_region.cloneVisibleRegionChain(
             self.allocator,
-        ) catch unreachable;
+        );
         self.lower_visible_region.deinit();
-        self.lower_visible_region = other.lower_visible_region.cloneVisibleRegionChain(
+        self.lower_visible_region = try other.lower_visible_region.cloneVisibleRegionChain(
             self.allocator,
-        ) catch unreachable;
+        );
     }
 };
 
@@ -1803,42 +1802,42 @@ const MixedTypePlaState = struct {
     /// needed. Calls `updateFittable` on each active candidate; when both `candidates[0]`
     /// (disjoint extension of C[k]) and `candidates[1]` (connected extension of C[k+1])
     /// are simultaneously exhausted, advances the DP horizon via `advanceDpHorizon`.
-    fn updateState(self: *MixedTypePlaState, p: ContinousPoint) void {
+    fn updateState(self: *MixedTypePlaState, p: ContinousPoint) Error!void {
         for (0..5) |i| {
             if (self.candidate_active[i]) {
-                self.candidate_active[i] = self.candidates[i].updateFittable(p);
+                self.candidate_active[i] = try self.candidates[i].updateFittable(p);
             }
         }
 
         self.current_time = p.index;
 
         while (!self.candidate_active[0] and !self.candidate_active[1]) {
-            self.advanceDpHorizon();
+            try self.advanceDpHorizon();
         }
     }
 
     /// Flush remaining buffered points through all active candidates via
     /// `finalizeWithLastBufferedPoint`, advance the DP horizon until stable,
     /// then close the winning candidate and emit the final committed pieces.
-    fn closeFitting(self: *MixedTypePlaState) void {
+    fn closeFitting(self: *MixedTypePlaState) Error!void {
         for (0..5) |i| {
             if (self.candidate_active[i]) {
-                self.candidate_active[i] = self.candidates[i].finalizeWithLastBufferedPoint();
+                self.candidate_active[i] = try self.candidates[i].finalizeWithLastBufferedPoint();
             }
         }
 
         while (!self.candidate_active[0] and !self.candidate_active[1]) {
-            self.advanceDpHorizon();
+            try self.advanceDpHorizon();
         }
 
         self.chosen_candidate = self.IndexOfBetterBase(0, 1);
         self.candidates[self.chosen_candidate].closeFitting();
 
-        const final_knot_index = self.tryCreateHorizonKnot(self.chosen_candidate);
+        const final_knot_index = try self.tryCreateHorizonKnot(self.chosen_candidate);
 
-        const beg_k = self.commitKnotAndPrune(self.horizon_knots[0]);
+        const beg_k = try self.commitKnotAndPrune(self.horizon_knots[0]);
         _ = beg_k;
-        self.emitFixedPieces();
+        try self.emitFixedPieces();
 
         self.horizon_index += 1;
         self.horizon_knots[0] = self.horizon_knots[1];
@@ -1849,7 +1848,7 @@ const MixedTypePlaState = struct {
             self.horizon_knots[2] = self.horizon_knots[1];
         }
 
-        self.emitKnotChain(self.horizon_knots[2]);
+        try self.emitKnotChain(self.horizon_knots[2]);
         self.clearData();
 
         if (self.connectivity_flags.items.len > 0) {
@@ -1866,23 +1865,23 @@ const MixedTypePlaState = struct {
     /// a new horizon knot for position C[k+3] via `tryCreateHorizonKnot`, commits the
     /// oldest knot via `commitKnotAndPrune`, emits any now-fixed output pieces, then slides
     /// all five candidate slots and the three horizon-knot references one step forward.
-    fn advanceDpHorizon(self: *MixedTypePlaState) void {
+    fn advanceDpHorizon(self: *MixedTypePlaState) Error!void {
         // 1. Prepare C[k+3] by comparing base[0] vs base[1].
         self.chosen_candidate = self.IndexOfBetterBase(0, 1);
-        const new_knot_index = self.tryCreateHorizonKnot(self.chosen_candidate);
+        const new_knot_index = try self.tryCreateHorizonKnot(self.chosen_candidate);
 
         // Push oldest committed knot and possibly free unreferenced knots.
-        const oldest_knot_result = self.commitKnotAndPrune(self.horizon_knots[0]);
+        const oldest_knot_result = try self.commitKnotAndPrune(self.horizon_knots[0]);
         _ = oldest_knot_result;
 
         // 2. Prepare two new fittable bases rooted at the chosen option.
         if (new_knot_index != null) {
             // Duplicate the chosen base into the opposite slot.
-            self.candidates[1 - self.chosen_candidate].cloneFittable(&self.candidates[self.chosen_candidate]);
+            try self.candidates[1 - self.chosen_candidate].cloneFittable(&self.candidates[self.chosen_candidate]);
 
             // chosen → connected extension, unchosen → disjoint extension for C[k+3].
-            self.candidates[self.chosen_candidate].initializeNewRoundWithType(.connected);
-            self.candidates[1 - self.chosen_candidate].initializeNewRoundWithType(.disjoint);
+            try self.candidates[self.chosen_candidate].initializeNewRoundWithType(.connected);
+            try self.candidates[1 - self.chosen_candidate].initializeNewRoundWithType(.disjoint);
         } else {
             // No ck3: mark windows invalid.
             self.candidates[self.chosen_candidate].fitting_window = .{
@@ -1931,7 +1930,7 @@ const MixedTypePlaState = struct {
         }
 
         // Try to output fixed pieces.
-        self.emitFixedPieces();
+        try self.emitFixedPieces();
     }
 
     /// Attempt to create a new committed knot at horizon position C[k+3] for the winning
@@ -1940,7 +1939,7 @@ const MixedTypePlaState = struct {
     /// knot is needed and `null` is returned. Otherwise allocates a fresh `Ck` node in
     /// `knot_pool`, wires its predecessor reference, copies the fitting window and boundary
     /// points from the winning candidate, and returns the new node's index into `knot_pool`.
-    fn tryCreateHorizonKnot(self: *MixedTypePlaState, win: usize) ?usize {
+    fn tryCreateHorizonKnot(self: *MixedTypePlaState, win: usize) Error!?usize {
         const new_window = self.candidates[win].fitting_window;
 
         var existing_window = FittingWindow{};
@@ -1966,7 +1965,7 @@ const MixedTypePlaState = struct {
         new_knot.end_point = self.candidates[win].segment_end_point;
         new_knot.fw = self.candidates[win].fitting_window;
 
-        self.knot_pool.append(self.allocator, new_knot) catch unreachable;
+        try self.knot_pool.append(self.allocator, new_knot);
         return self.knot_pool.items.len - 1;
     }
 
@@ -1975,15 +1974,15 @@ const MixedTypePlaState = struct {
     /// Returns the `refn` of the first still-live ancestor (positive value), `-1` if the
     /// chain was fully pruned or the input index was `null`, or a negative error code if
     /// an inconsistency is detected (knot not found in the committed queue).
-    fn commitKnotAndPrune(self: *MixedTypePlaState, knot_index: ?usize) i64 {
+    fn commitKnotAndPrune(self: *MixedTypePlaState, knot_index: ?usize) Error!i64 {
         if (knot_index == null) {
             return -1;
         }
 
-        self.committed_knot_queue.append(
+        try self.committed_knot_queue.append(
             self.allocator,
             self.knot_pool.items[knot_index.?],
-        ) catch unreachable;
+        );
 
         var current_index = knot_index;
         while (current_index) |node_index| {
@@ -2031,7 +2030,7 @@ const MixedTypePlaState = struct {
     /// appended to `output_segments` (followed by `end_point` when the successor piece is
     /// disconnected), and the delay statistic is accumulated. The knot is then removed
     /// from the queue and the successor's `prev` reference is cleared.
-    fn emitFixedPieces(self: *MixedTypePlaState) void {
+    fn emitFixedPieces(self: *MixedTypePlaState) Error!void {
         while (self.committed_knot_queue.items.len > 0) {
             const leading_knot = self.committed_knot_queue.items[0];
             if (leading_knot.references != 1) {
@@ -2064,12 +2063,12 @@ const MixedTypePlaState = struct {
 
             if (second_previous_knot != null and second_previous_knot.? == leading_knot.k) {
                 // Append the knot type and lastknot point.
-                self.connectivity_flags.append(self.allocator, leading_knot.knot_type) catch unreachable;
-                self.output_segments.append(self.allocator, leading_knot.last_knot) catch unreachable;
+                try self.connectivity_flags.append(self.allocator, leading_knot.knot_type);
+                try self.output_segments.append(self.allocator, leading_knot.last_knot);
 
                 // If the successor is disconnected, also append leading_knot.end_point.
                 if (!successor_knot.knot_type) {
-                    self.output_segments.append(self.allocator, leading_knot.end_point) catch unreachable;
+                    try self.output_segments.append(self.allocator, leading_knot.end_point);
                 }
 
                 // Accumulate delay statistics.
@@ -2107,7 +2106,7 @@ const MixedTypePlaState = struct {
     /// and append them to `connectivity_flags` and `output_segments` in chronological order.
     /// Also decrements the reference count of each visited `knot_pool` node and accumulates
     /// the round-trip delay statistic for each knot.
-    fn emitKnotChain(self: *MixedTypePlaState, ck_idx: ?usize) void {
+    fn emitKnotChain(self: *MixedTypePlaState, ck_idx: ?usize) Error!void {
         if (ck_idx == null) return;
 
         var type_flags = ArrayList(bool).empty;
@@ -2122,28 +2121,28 @@ const MixedTypePlaState = struct {
 
             // Append end_point for the segment if appropriate.
             if (type_flags.items.len == 0) {
-                knot_points.append(self.allocator, knot_node.end_point) catch unreachable;
+                try knot_points.append(self.allocator, knot_node.end_point);
             } else if (!type_flags.items[type_flags.items.len - 1]) {
                 // Last was disconnected.
-                knot_points.append(self.allocator, knot_node.end_point) catch unreachable;
+                try knot_points.append(self.allocator, knot_node.end_point);
             }
 
             // Append the knot point.
-            knot_points.append(self.allocator, knot_node.last_knot) catch unreachable;
+            try knot_points.append(self.allocator, knot_node.last_knot);
 
             // Record delay statistics.
             self.accumulated_delay += @intFromFloat(self.current_time - knot_node.last_knot.index);
 
-            type_flags.append(self.allocator, knot_node.knot_type) catch unreachable;
+            try type_flags.append(self.allocator, knot_node.knot_type);
             current_index = knot_node.previous_knot;
         }
 
         // Reverse and add accumulated flags & points to main lists.
         while (type_flags.items.len > 0) {
-            self.connectivity_flags.append(self.allocator, type_flags.pop().?) catch unreachable;
+            try self.connectivity_flags.append(self.allocator, type_flags.pop().?);
         }
         while (knot_points.items.len > 0) {
-            self.output_segments.append(self.allocator, knot_points.pop().?) catch unreachable;
+            try self.output_segments.append(self.allocator, knot_points.pop().?);
         }
     }
 
@@ -2210,14 +2209,14 @@ const MixedTypePlaState = struct {
     /// is paired with its zero-based integer index as the time coordinate and forwarded
     /// to `updateState`; once all values are processed, `closeFitting` is called to flush
     /// any remaining buffered candidates and finalise the `output_segments` list.
-    fn run(self: *MixedTypePlaState, values: []const f64) void {
+    fn run(self: *MixedTypePlaState, values: []const f64) Error!void {
         for (values, 0..) |val, i| {
-            self.updateState(.{
+            try self.updateState(.{
                 .index = @as(f64, @floatFromInt(i)),
                 .value = val,
             });
         }
-        self.closeFitting();
+        try self.closeFitting();
     }
 };
 
