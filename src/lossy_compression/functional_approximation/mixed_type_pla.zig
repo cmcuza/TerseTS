@@ -63,6 +63,11 @@ pub fn compress(
 
     const error_bound: f64 = @floatCast(parsed_configuration.abs_error_bound);
 
+    // Mixed-Type PLA needs a strictly positive error bound: a zero bound leaves no room for
+    // the numerical safety margins and degenerates the feasible polygon. Negative bounds are
+    // already rejected by the configuration parser.
+    if (error_bound <= 0.0) return Error.InvalidConfiguration;
+
     // Adjust the error bound to avoid exceeding it during decompression due to numerical instabilities.
     const adjusted_error_bound = if (error_bound > shared_structs.ErrorBoundMargin)
         error_bound - shared_structs.ErrorBoundMargin
@@ -95,7 +100,13 @@ pub fn compress(
     const normalized_error_bound = adjusted_error_bound / norm_scale;
     const dynamic_eps = @min(1e-7, @max(1e-14, normalized_error_bound * 1e-4));
     const safety_margin = dynamic_eps * 2.0;
-    const safe_error_bound = normalized_error_bound - safety_margin;
+    // For extremely small normalized error bounds the safety margin would consume the whole
+    // budget and hand the algorithm a non-positive delta, which degenerates its constraints.
+    // Keep the delta strictly positive; verifyAndRepairSegments() enforces the actual bound.
+    const safe_error_bound = @max(
+        normalized_error_bound - safety_margin,
+        normalized_error_bound / 2.0,
+    );
     const tolerances = ext_poly.Tolerances{
         .val = dynamic_eps,
         .time = ext_poly.sign_time_diff,
@@ -2242,6 +2253,28 @@ test "check mixed-type PLA configuration parsing" {
         &compressed_values,
         method_configuration,
     );
+}
+
+test "mixed-type PLA rejects a zero error bound" {
+    // A zero absolute error bound leaves no room for the numerical safety margins and would
+    // degenerate the feasible polygon, so compress() must reject it as an invalid configuration.
+    const allocator = testing.allocator;
+
+    const uncompressed_values = &[4]f64{ 19.0, 48.0, 28.0, 3.0 };
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    const method_configuration =
+        \\ {"abs_error_bound": 0.0}
+    ;
+
+    try testing.expectError(Error.InvalidConfiguration, compress(
+        allocator,
+        uncompressed_values,
+        &compressed_values,
+        method_configuration,
+    ));
 }
 
 test "mixed-type PLA compress and decompress roundtrip with known values" {
