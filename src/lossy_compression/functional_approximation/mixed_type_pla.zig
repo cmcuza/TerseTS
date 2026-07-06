@@ -201,28 +201,15 @@ pub fn decompress(
     );
 
     // Reconstruct the full series by evaluating segments at integer timestamps. When a timestamp
-    // is covered by multiple segments, prefer the one whose start_time matches the timestamp.
+    // is covered by multiple segments, the cursor prefers the one whose start time matches it.
     try decompressed_values.ensureTotalCapacity(allocator, original_length);
+    var cursor = SegmentCursor{ .segments = line_segments.items };
     for (0..original_length) |i| {
         const t: f64 = @floatFromInt(i);
 
-        // Find preferred segment: one whose start time == t, or the first segment that contains t.
-        var preferred: ?LineSegment = null;
-        for (line_segments.items) |seg| {
-            if (seg.start.index <= t and t <= seg.end.index) {
-                if (preferred == null) {
-                    preferred = seg;
-                }
-                if (@abs(seg.start.index - t) < 1e-10) {
-                    preferred = seg;
-                    break;
-                }
-            }
-        }
-
-        if (preferred) |seg| {
+        if (cursor.ownerOf(t)) |owner| {
             // Denormalize the values: normalized_val * scale + offset
-            const normalized_val = seg.evaluate(t);
+            const normalized_val = line_segments.items[owner].evaluate(t);
             const denormalized_val = normalized_val * norm_scale + norm_offset;
             try decompressed_values.append(allocator, denormalized_val);
         } else {
@@ -675,6 +662,39 @@ fn readSegments(
     }
 }
 
+/// Moving cursor over time-ordered line segments that finds, for non-decreasing query
+/// timestamps, the segment reconstruction should evaluate: the first segment whose start time
+/// matches `t` (within 1e-10), or the earliest segment containing `t`. Because the cursor only
+/// advances past segments that ended before `t`, a full reconstruction costs
+/// O(N_points + N_segments) instead of a full segment scan per timestamp. Both `decompress`
+/// and `verifyAndRepairSegments` resolve timestamps through this cursor, so the bound
+/// enforced during compression holds for exactly what decompression reconstructs.
+const SegmentCursor = struct {
+    segments: []const LineSegment,
+    position: usize = 0,
+
+    /// Return the index of the segment owning timestamp `t`, or `null` when no segment
+    /// contains `t`. Queries must be issued in non-decreasing order of `t`.
+    fn ownerOf(self: *SegmentCursor, t: f64) ?usize {
+        // Segments ending before `t` cannot own this or any later timestamp.
+        while (self.position < self.segments.len and
+            self.segments[self.position].end.index < t)
+        {
+            self.position += 1;
+        }
+
+        var owner: ?usize = null;
+        var j = self.position;
+        while (j < self.segments.len and self.segments[j].start.index <= t) : (j += 1) {
+            if (t <= self.segments[j].end.index) {
+                if (owner == null) owner = j;
+                if (@abs(self.segments[j].start.index - t) < 1e-10) return j;
+            }
+        }
+        return owner;
+    }
+};
+
 /// One primal-space piece of the output stream together with the indices of its start and end
 /// knots in the knot array. `verifyAndRepairSegments` uses the records to re-check each piece
 /// against the error bound and to splice replacement pieces while keeping the knots of
@@ -891,19 +911,18 @@ fn verifyAndRepairSegments(
 
         // Simulate reconstruction: attribute every timestamp to the piece `decompress` uses
         // and flag pieces whose denormalized reconstruction violates the bound.
+        var segment_list = ArrayList(LineSegment).empty;
+        defer segment_list.deinit(allocator);
+        try segment_list.ensureTotalCapacity(allocator, records.items.len);
+        for (records.items) |rec| {
+            segment_list.appendAssumeCapacity(rec.segment);
+        }
+        var cursor = SegmentCursor{ .segments = segment_list.items };
+
         var any_violation = false;
         for (uncompressed_values, 0..) |raw_value, i| {
             const t: f64 = @floatFromInt(i);
-            var owner: ?usize = null;
-            for (records.items, 0..) |rec, j| {
-                if (rec.segment.start.index <= t and t <= rec.segment.end.index) {
-                    if (owner == null) owner = j;
-                    if (@abs(rec.segment.start.index - t) < 1e-10) {
-                        owner = j;
-                        break;
-                    }
-                }
-            }
+            const owner = cursor.ownerOf(t);
             if (owner == null) {
                 structurally_broken = true;
                 break;
