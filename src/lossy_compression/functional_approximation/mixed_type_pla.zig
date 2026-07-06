@@ -579,9 +579,12 @@ fn deserializeSegments(
         &offset,
     );
 
-    // Number of bytes used for packed flags.
+    // Number of bytes used for packed flags. The byte count must match the declared number
+    // of flags exactly (8 flags per byte, rounded up), otherwise the stream is desynced.
     const num_flag_bytes = try shared_functions
         .readOffsetValue(u64, compressed_values, &offset);
+    const expected_flag_bytes = num_flags / 8 + @intFromBool(num_flags % 8 != 0);
+    if (num_flag_bytes != expected_flag_bytes) return Error.CorruptedCompressedData;
     const num_flag_bytes_usize =
         math.cast(usize, num_flag_bytes) orelse return Error.CorruptedCompressedData;
     if (num_flag_bytes_usize > compressed_values.len - offset) return Error.CorruptedCompressedData;
@@ -598,6 +601,7 @@ fn deserializeSegments(
             flags_read += 1;
         }
     }
+    if (flags_read != num_flags) return Error.CorruptedCompressedData;
 
     // Original series length.
     const raw_len = try shared_functions.readOffsetValue(
@@ -606,6 +610,10 @@ fn deserializeSegments(
         &offset,
     );
     original_length.* = math.cast(usize, raw_len) orelse return Error.CorruptedCompressedData;
+
+    // The declared structure must consume the whole payload; trailing bytes indicate
+    // corruption or an earlier mis-parse.
+    if (offset != compressed_values.len) return Error.CorruptedCompressedData;
 }
 
 /// Converts parameter-space knot points into primal-space line segments, respecting
@@ -2253,6 +2261,38 @@ test "check mixed-type PLA configuration parsing" {
         &compressed_values,
         method_configuration,
     );
+}
+
+test "mixed-type PLA decompress rejects trailing garbage bytes" {
+    // The declared structure must consume the entire payload, so a valid compressed blob
+    // followed by extra bytes must be rejected instead of being silently ignored.
+    const allocator = testing.allocator;
+
+    const uncompressed_values = &[8]f64{ 1.0, 2.0, 3.0, 4.0, 5.0, 4.0, 3.0, 2.0 };
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+
+    const method_configuration =
+        \\ {"abs_error_bound": 0.5}
+    ;
+
+    try compress(
+        allocator,
+        uncompressed_values,
+        &compressed_values,
+        method_configuration,
+    );
+    try compressed_values.append(allocator, 0xAA);
+
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
+
+    try testing.expectError(Error.CorruptedCompressedData, decompress(
+        allocator,
+        compressed_values.items,
+        &decompressed_values,
+    ));
 }
 
 test "mixed-type PLA rejects a zero error bound" {
