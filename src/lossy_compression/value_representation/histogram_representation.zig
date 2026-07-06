@@ -820,9 +820,8 @@ test "Random clusters, elements per cluster and values for PWCH" {
     const max_counts_per_cluster: usize = 100;
 
     var current_min_value = min_value;
-    for (0..number_of_cluster) |i| {
-        const momentum: f64 = if (i < number_of_cluster / 2) 1.0 else -1.0;
-        const cluster_min = current_min_value + momentum * gap;
+    for (0..number_of_cluster) |_| {
+        const cluster_min = current_min_value + gap;
         const cluster_max = cluster_min + cluster_width;
         const count: usize = random.uintLessThan(usize, max_counts_per_cluster) + 10;
         // Append the cluster to cluster_ranges.

@@ -134,27 +134,35 @@ __library.rebuild.restype  = c_int
 # Mirror the compression methods provided by TerseTS.
 @unique
 class Method(Enum):
-    PoorMansCompressionMidrange = 0
-    PoorMansCompressionMean = 1
-    SwingFilter = 2
-    SwingFilterDisconnected = 3
-    SlideFilter = 4
-    SimPiece = 5
-    PiecewiseConstantHistogram = 6
-    PiecewiseLinearHistogram = 7
-    ABCLinearApproximation = 8
-    VisvalingamWhyatt = 9
-    SlidingWindow = 10
-    BottomUp = 11
-    MixPiece = 12
-    BitPackedQuantization = 13
-    RunLengthEncoding = 14
-    NonLinearApproximation = 15
-    SerfQT = 16
-    MixedTypePLA = 17
+    Uncompressed = 0
+    PoorMansCompressionMidrange = 1
+    PoorMansCompressionMean = 2
+    SwingFilter = 3
+    SwingFilterDisconnected = 4
+    SlideFilter = 5
+    SimPiece = 6
+    PiecewiseConstantHistogram = 7
+    PiecewiseLinearHistogram = 8
+    ABCLinearApproximation = 9
+    VisvalingamWhyatt = 10
+    SlidingWindow = 11
+    BottomUp = 12
+    MixPiece = 13
+    BitPackedQuantization = 14
+    RunLengthEncoding = 15
+    NonLinearApproximation = 16
+    SerfQT = 17
+    BitPackedBUFF = 18
+    Chimp64 = 19
+    Chimp128 = 20
+    BitPackedDeltaEncoding = 21
+    DiscreteFourierTransform = 22
+    MacaqueS = 23
+    MacaqueV = 24
+    MixedTypePLA = 25
 
 
-# Public API. 
+# Public API.
 def compress(
     uncompressed_values: Union["numpy.ndarray", List[float], Tuple[float, ...]],
     method: Method,
@@ -413,7 +421,7 @@ def extract(
     elif isinstance(compressed_values, (bytes, bytearray, memoryview)):
         if _INSTALLED_NUMPY:
             # Zero-copy via NumPy view.
-            view = numpy.frombuffer(values, dtype=numpy.uint8)
+            view = numpy.frombuffer(compressed_values, dtype=numpy.uint8)
             compressed_values_struct.data = view.ctypes.data_as(POINTER(c_ubyte))
             compressed_values_struct.len = view.size
         else:
