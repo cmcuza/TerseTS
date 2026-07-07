@@ -33,20 +33,16 @@ const tester = @import("../tester.zig");
 const Error = tersets.Error;
 const Method = tersets.Method;
 
-/// Upper bound for `calDecimalCount`'s search (a double has at most 17 significant decimal
-/// digits). The per-value decimal count `lv` is additionally capped to `4` in `compress`.
 const max_decimal_places = 17;
-/// Default decimal places when configuration is empty.
 const default_decimal_places = 4;
-/// `2^63` as an `f64`; the exact threshold used by `fitsIntegerPart` to check that `@trunc(x)`
-/// fits in an `i64` without overflow.
-const i64_magnitude_limit: f64 = 9223372036854775808.0;
+const i64_magnitude_limit: f64 = 0x1p63;
+const max_int_diff: i64 = 0xFFFF;
 
-/// Compress `uncompressed_values` into `compressed_values` using "Camel". `allocator` backs
-/// the configuration parser and the bit writer's scratch buffer. `method_configuration` accepts a
-/// JSON object with a `decimal_places` field (1–4, default 4); values whose integer parts differ
-/// by more than 65535 between consecutive normal values return `Error.UnsupportedInput`. If an
-/// error occurs it is returned.
+/// Compress `uncompressed_values` into `compressed_values` using "Camel".
+/// `allocator` backs the configuration parser and the bit writer's scratch buffer.
+/// `method_configuration` must be an empty configuration; any field makes the call return `Error.InvalidConfiguration`.
+/// Values whose integer parts differ by more than `max_int_diff` return `Error.UnsupportedInput`.
+/// If an error occurs it is returned.
 pub fn compress(
     allocator: Allocator,
     uncompressed_values: []const f64,
@@ -78,7 +74,7 @@ pub fn compress(
         if (!fitsIntegerPart(v) or isNegativeZero(v)) return Error.UnsupportedInput;
         const int_part = intPart(v);
         const diff_overflow = @subWithOverflow(int_part, prev_int);
-        if (diff_overflow[1] != 0 or diff_overflow[0] < -65535 or diff_overflow[0] > 65535) {
+        if (diff_overflow[1] != 0 or diff_overflow[0] < -max_int_diff or diff_overflow[0] > max_int_diff) {
             return Error.UnsupportedInput;
         }
         const int_signal: u1 = @intFromBool(v >= 0.0);
@@ -127,15 +123,13 @@ pub fn decompress(
     }
 }
 
-/// Returns `true` when `x` is finite and its truncated integer part fits in an `i64`, i.e. it is
-/// safe to call `intPart` on it.
+/// Returns `true` when `x` is finite and its truncated integer part fits in an `i64`.
 fn fitsIntegerPart(x: f64) bool {
     if (math.isNan(x) or math.isInf(x)) return false;
     return @abs(@trunc(x)) < i64_magnitude_limit;
 }
 
-/// Returns the truncated integer part of `x` as an `i64`. Caller must first verify
-/// `fitsIntegerPart(x)`.
+/// Returns the truncated integer part of `x` as an `i64`.
 fn intPart(x: f64) i64 {
     if (math.isNan(x) or math.isInf(x)) return 0;
     return @intFromFloat(@trunc(x));
@@ -153,7 +147,7 @@ fn fracPart(x: f64) f64 {
 }
 
 /// Returns the smallest decimal count in `[1, max_decimal_places]` such that
-/// `|value| * 10^count` is within epsilon of an integer; ported from Camel.java's `calDecimalCount`.
+/// `|value| * 10^count` is within epsilon of an integer.
 fn calDecimalCount(value: f64) u8 {
     const epsilon: f64 = 0.0000001;
     var factor: f64 = 1.0;
@@ -176,10 +170,11 @@ fn doubleToBits(x: f64) u64 {
     return @as(u64, @bitCast(x));
 }
 
-/// Writes the compressed integer part of one value into `writer` using delta-encoding.
-/// First writes `int_signal` (1 = non-negative value, 0 = negative), then encodes
-/// `int_part - prev_int` with a 2-bit code for `{-1, 0, 1}` and a sign+range+magnitude
-/// encoding for larger differences (Algorithm 1 of the paper).
+/// Writes the compressed integer part of one value into `writer`, encoding `int_part` as a delta
+/// from `prev_int`. The function first writes `int_signal` (1 for a non-negative value, 0 for
+/// negative), then encodes the difference using a 2-bit code for `{-1, 0, 1}` or a
+/// sign+range+magnitude encoding for larger differences.
+/// If an error occurs it is returned.
 fn compressIntegerPart(prev_int: i64, int_part: i64, int_signal: u1, writer: *shared_structs.BulkBitWriter) !void {
     try writer.writeBits(int_signal, 1);
     const diff = int_part - prev_int;
@@ -198,10 +193,10 @@ fn compressIntegerPart(prev_int: i64, int_part: i64, int_signal: u1, writer: *sh
     }
 }
 
-/// Compresses the fractional magnitude of one value using the Camel XOR scheme (Algorithm 2).
-/// `magnitude` must be non-negative (sign is carried by `int_signal` in the integer part).
-/// Writes a flag; when the magnitude is at least one quantization step the XOR center bits and
-/// `dxor_prime` are written (flag 1), otherwise the rounded magnitude is stored directly (flag 0).
+/// Compresses the fractional `magnitude` of one value into `writer` using `l` decimal places and
+/// the Camel XOR scheme. The function writes a flag bit,
+/// followed by the XOR center bits and `dxor_prime` when `magnitude` is at least one quantization
+/// step, or the rounded magnitude directly otherwise. If an error occurs it is returned.
 fn compressDecimalPart(magnitude: f64, l: u8, writer: *shared_structs.BulkBitWriter) !void {
     const step = math.pow(f64, 2.0, -@as(f64, @floatFromInt(l)));
     if (magnitude >= step) {
@@ -224,15 +219,17 @@ fn compressDecimalPart(magnitude: f64, l: u8, writer: *shared_structs.BulkBitWri
     }
 }
 
-/// Returns `dxor.ddec` from formula (3) of the paper: `frac - 2^{-l} * floor(frac / 2^{-l})`.
+/// Computes `dxor.ddec` for the fractional magnitude `frac` using
+/// `l` decimal places.
 fn computeDxorFrac(frac: f64, l: u8) f64 {
     if (l == 0) return 0.0;
     const step = math.pow(f64, 2.0, -@as(f64, @floatFromInt(l)));
     return frac - step * @floor(frac / step);
 }
 
-/// Writes the quantized decimal integer `dxor_prime` using the per-`l` prefix+value bucket
-/// tables from Camel.java's `mValueBits`.
+/// Writes the quantized decimal integer `dxor_prime` into `writer` using `l` decimal places to
+/// select the per-`l` prefix+value bucket tables.
+/// If an error occurs it is returned.
 fn writeDxorPrime(dxor_prime: u64, l: u8, writer: *shared_structs.BulkBitWriter) !void {
     switch (l) {
         0, 1 => {
@@ -287,8 +284,10 @@ fn bitsToDouble(bits: u64) f64 {
 
 const IntPartResult = struct { int_part: i64, int_signal: u1 };
 
-/// Reads and decodes the integer part of one value from `reader`, inverting `compressIntegerPart`.
-/// Returns the decoded `int_part` and the `int_signal` (1 = non-negative value, 0 = negative).
+/// Reads and decodes the integer part of one value from `reader`, inverting
+/// `compressIntegerPart` given the previous value's integer part `prev_int`. Returns the decoded
+/// `int_part` and the `int_signal` (1 = non-negative value, 0 = negative). If an error occurs it
+/// is returned.
 fn decompressIntegerPart(prev_int: i64, reader: *shared_structs.BulkBitReader) Error!IntPartResult {
     const int_signal = reader.readBitsNoEof(u1, 1) catch return Error.ByteStreamError;
     const range = reader.readBitsNoEof(u2, 2) catch return Error.ByteStreamError;
@@ -306,8 +305,9 @@ fn decompressIntegerPart(prev_int: i64, reader: *shared_structs.BulkBitReader) E
     return .{ .int_part = prev_int + diff, .int_signal = @intCast(int_signal) };
 }
 
-/// Decompresses the fractional magnitude produced by `compressDecimalPart`, inverting the XOR
-/// scheme. Returns a non-negative value; the caller applies the sign from `int_signal`.
+/// Decompresses the fractional magnitude produced by `compressDecimalPart` from `reader`, using
+/// `l` decimal places to invert the XOR scheme. Returns a non-negative value; the caller applies
+/// the sign from `int_signal`. If an error occurs it is returned.
 fn decompressDecimalPart(l: u8, reader: *shared_structs.BulkBitReader) Error!f64 {
     const flag = reader.readBitsNoEof(u1, 1) catch return Error.ByteStreamError;
     const factor = math.pow(f64, 10.0, @as(f64, @floatFromInt(l)));
@@ -329,7 +329,9 @@ fn decompressDecimalPart(l: u8, reader: *shared_structs.BulkBitReader) Error!f64
     return magnitude;
 }
 
-/// Reads `dxor_prime` encoded by `writeDxorPrime`, using the same per-`l` prefix+value tables.
+/// Reads the quantized decimal integer `dxor_prime` from `reader`, using `l` decimal places to
+/// select the same per-`l` prefix+value tables written by `writeDxorPrime`. If an error occurs
+/// it is returned.
 fn readDxorPrime(l: u8, reader: *shared_structs.BulkBitReader) Error!u64 {
     switch (l) {
         0, 1 => return reader.readBitsNoEof(u64, 3) catch return Error.ByteStreamError,
