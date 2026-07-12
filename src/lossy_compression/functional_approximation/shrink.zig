@@ -61,8 +61,8 @@ pub fn compress(
     );
 
     const base_error_bound: f32 = parsed_configuration.base_error_bound;
-    // The original SHRINK paper a scheme which allows for different errors resolutions for the
-    // residual part, in this implementation we keep the error bound fixed for the whole sequence.
+    // The original SHRINK paper proposes a scheme with different error resolutions for the
+    // residual part. In this implementation, the error bound is fixed for the whole sequence.
     const residual_error_bound: f32 = parsed_configuration.residual_error_bound;
     // `lambda` controls the default interval length `L = lambda * n * base_error_bound` used to
     // estimate the local fluctuation level of the data, see SHRINK paper Section III-B, Eq. (4).
@@ -79,7 +79,8 @@ pub fn compress(
     }
 
     // SHRINK Phase 1 (Section III-B, Algorithms 2-3): compute cones using a base error threshold
-    // that adapts to local data fluctuation. (Based on `computeSegmentsMetadata` from sim_piece.zig)
+    // that adapts to local data fluctuation.
+    // This is based on `computeSegmentsMetadata` from sim_piece.zig.
     var segments_metadata = ArrayList(SegmentMetadata).empty;
     defer segments_metadata.deinit(allocator);
     try computeAdaptiveSegmentsMetadata(
@@ -184,7 +185,7 @@ pub fn extract(
 ) Error!void {
     var offset: usize = 0;
 
-    // Extract the base segments
+    // Extract the base segments.
     var base_segments_metadata = ArrayList(SegmentMetadata).empty;
     defer base_segments_metadata.deinit(allocator);
     const series_length = try readBase(allocator, compressed_values, &offset, &base_segments_metadata);
@@ -198,7 +199,7 @@ pub fn extract(
     }
     try indices.append(allocator, series_length);
 
-    // Extract the residuals section
+    // Extract the residuals section.
     var stored = ArrayList(u64).empty;
     defer stored.deinit(allocator);
     const header = try readResiduals(allocator, compressed_values, &offset, &stored);
@@ -230,7 +231,7 @@ pub fn rebuild(
     coefficients: []const f64,
     compressed_values: *ArrayList(u8),
 ) Error!void {
-    // --- Base section ---
+    // Write the base section.
     const segments_count = indices[0];
     try shared_functions.appendValue(allocator, usize, segments_count, compressed_values);
 
@@ -254,7 +255,7 @@ pub fn rebuild(
     idx += 1;
     try shared_functions.appendValue(allocator, usize, series_length, compressed_values);
 
-    // --- Residuals section ---
+    // Write the residuals section.
     const residual_error_bound: f64 = coefficients[ci];
     try shared_functions.appendValue(allocator, f32, @as(f32, @floatCast(residual_error_bound)), compressed_values);
 
@@ -296,7 +297,7 @@ fn computeAdaptiveSegmentsMetadata(
     if (!math.isFinite(uncompressed_values[0]) or @abs(uncompressed_values[0]) > tester.max_test_value)
         return Error.UnsupportedInput;
 
-    // Used for phase division
+    // Used for phase division.
     const global_range = computeRange(uncompressed_values);
 
     var upper_bound_slope: f64 = math.floatMax(f64);
@@ -343,7 +344,7 @@ fn computeAdaptiveSegmentsMetadata(
             start_point = end_point;
             adaptive_error_bound = adaptiveErrorBound(
                 uncompressed_values,
-                current_index, // same as end_point.index
+                current_index, // Same as end_point.index.
                 base_error_bound,
                 lambda,
                 global_range,

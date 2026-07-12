@@ -72,8 +72,8 @@ pub const DecimalPrecision = struct {
     decimal_precision: u8,
 };
 
-/// Configuration for lossy_compression/functional_approximation/shrink.zig
-/// Base Semantics + Residual + Adaptive Error Bound
+/// Configuration for lossy_compression/functional_approximation/shrink.zig.
+/// Base semantics, residuals, and adaptive error bounds.
 pub const ShrinkConfiguration = struct {
     base_error_bound: f32,
     residual_error_bound: f32,
@@ -235,9 +235,9 @@ pub fn defaultConfigurationBuilder(
         .Shrink => blk: {
             break :blk try getDefaultShrinkConfiguration(
                 allocator,
-                random_f32, // base_error_bound
-                random_f32 * 0.5, // residual_error_bound <= base
-                0.5, // lambda
+                random_f32, // Base error bound.
+                random_f32 * 0.5, // Residual error bound, at most the base.
+                0.5, // Lambda.
             );
         },
     };
