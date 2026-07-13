@@ -577,7 +577,7 @@ fn writeResiduals(
 ) Error!void {
     // Find the minimum quantized residual to shift residuals toward zero,
     // aligning with the SHRINK paper (Section III-D, Eq. 6).
-    var minimum_residual: i64 = 0;
+    var minimum_residual: i64 = if (residuals.len > 0) residuals[0] else 0;
     for (residuals) |residual| {
         if (residual < minimum_residual) minimum_residual = residual;
     }
