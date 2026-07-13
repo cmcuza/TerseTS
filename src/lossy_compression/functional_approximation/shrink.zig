@@ -480,10 +480,6 @@ fn computeResiduals(
 /// sub-base segment, returns a "clean" candidate slope rather than the exact average, by
 /// truncating to the longest common decimal prefix of `lower_bound_slope` and `upper_bound_slope`
 /// when they share the same integer part, or to one decimal digit of their average otherwise.
-/// This avoids carrying unnecessarily high floating-point precision in the slope while remaining
-/// within the cone, matching the paper's worked example: `lower_bound_slope =
-/// 0.12385382076923077`, `upper_bound_slope = 0.12389554722222222` yields `0.12387` rather than
-/// the exact average `0.12387468399572649`.
 fn candidateSlope(lower_bound_slope: f64, upper_bound_slope: f64) f64 {
     if (!math.isFinite(lower_bound_slope) or !math.isFinite(upper_bound_slope)) {
         if (math.isFinite(lower_bound_slope)) return lower_bound_slope;
