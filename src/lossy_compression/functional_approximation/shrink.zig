@@ -488,16 +488,16 @@ fn candidateSlope(lower_bound_slope: f64, upper_bound_slope: f64) f64 {
     }
 
     // Compare integer part (lead).
-    const lead_lo = @floor(lower_bound_slope);
-    const lead_hi = @floor(upper_bound_slope);
-    if (lead_lo != lead_hi) {
+    const lead_lower_slope = @floor(lower_bound_slope);
+    const lead_higher_slope = @floor(upper_bound_slope);
+    if (lead_lower_slope != lead_higher_slope) {
         const average = (lower_bound_slope + upper_bound_slope) / 2.0;
         return @round(average * 10.0) / 10.0;
     }
 
     // Compare decimal part (tail).
-    const tail_lo = lower_bound_slope - lead_lo;
-    const tail_hi = upper_bound_slope - lead_hi;
+    const tail_lo = lower_bound_slope - lead_lower_slope;
+    const tail_hi = upper_bound_slope - lead_higher_slope;
     var scale: f64 = 1.0;
     for (0..5) |_| {
         const next_scale = scale * 10.0;
@@ -507,7 +507,7 @@ fn candidateSlope(lower_bound_slope: f64, upper_bound_slope: f64) f64 {
             const avg_digit = @round((digit_lo + digit_hi) / 2.0);
             const prefix = @floor(tail_lo * scale);
             const tail = (prefix * 10.0 + avg_digit) / next_scale;
-            return lead_lo + tail;
+            return lead_lower_slope + tail;
         }
         scale = next_scale;
     }
