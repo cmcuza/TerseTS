@@ -235,15 +235,15 @@ pub fn rebuild(
     const segments_count = indices[0];
     try shared_functions.appendValue(allocator, usize, segments_count, compressed_values);
 
-    var idx: usize = 1;
-    var ci: usize = 0;
+    var indices_offset: usize = 1;
+    var coefficients_offset: usize = 0;
     for (0..segments_count) |_| {
-        const start_index = indices[idx];
-        idx += 1;
-        const intercept = coefficients[ci];
-        const lower_bound_slope = coefficients[ci + 1];
-        const upper_bound_slope = coefficients[ci + 2];
-        ci += 3;
+        const start_index = indices[indices_offset];
+        indices_offset += 1;
+        const intercept = coefficients[coefficients_offset];
+        const lower_bound_slope = coefficients[coefficients_offset + 1];
+        const upper_bound_slope = coefficients[coefficients_offset + 2];
+        coefficients_offset += 3;
 
         try shared_functions.appendValue(allocator, usize, start_index, compressed_values);
         try shared_functions.appendValue(allocator, f64, intercept, compressed_values);
@@ -251,24 +251,24 @@ pub fn rebuild(
         try shared_functions.appendValue(allocator, f64, upper_bound_slope, compressed_values);
     }
 
-    const series_length = indices[idx];
-    idx += 1;
+    const series_length = indices[indices_offset];
+    indices_offset += 1;
     try shared_functions.appendValue(allocator, usize, series_length, compressed_values);
 
     // Write the residuals section.
-    const residual_error_bound: f64 = coefficients[ci];
+    const residual_error_bound: f64 = coefficients[coefficients_offset];
     try shared_functions.appendValue(allocator, f32, @as(f32, @floatCast(residual_error_bound)), compressed_values);
 
-    const r_min: i64 = @as(i64, @bitCast(indices[idx]));
-    idx += 1;
+    const r_min: i64 = @as(i64, @bitCast(indices[indices_offset]));
+    indices_offset += 1;
     try shared_functions.appendValue(allocator, i64, r_min, compressed_values);
 
-    const residuals_count = indices[idx];
-    idx += 1;
+    const residuals_count = indices[indices_offset];
+    indices_offset += 1;
     try shared_functions.appendValue(allocator, usize, residuals_count, compressed_values);
 
     if (residuals_count > 0) {
-        const stored_values = indices[idx .. idx + residuals_count];
+        const stored_values = indices[indices_offset .. indices_offset + residuals_count];
 
         var encoded = ArrayList(u8).empty;
         defer encoded.deinit(allocator);
