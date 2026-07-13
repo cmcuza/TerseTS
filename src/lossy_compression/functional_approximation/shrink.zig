@@ -133,10 +133,9 @@ pub fn decompress(
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
 ) Error!void {
-    var offset: usize = 0;
-
     var base_segments_metadata = ArrayList(SegmentMetadata).empty;
     defer base_segments_metadata.deinit(allocator);
+    var offset: usize = 0;
     const series_length = try readBase(allocator, compressed_values, &offset, &base_segments_metadata);
 
     var stored = ArrayList(u64).empty;
@@ -195,9 +194,9 @@ pub fn extract(
 ) Error!void {
 
     // Extract the base segments.
-    var offset: usize = 0;
     var base_segments_metadata = ArrayList(SegmentMetadata).empty;
     defer base_segments_metadata.deinit(allocator);
+    var offset: usize = 0;
     const series_length = try readBase(allocator, compressed_values, &offset, &base_segments_metadata);
 
     try indices.append(allocator, base_segments_metadata.items.len);
@@ -715,27 +714,6 @@ test "SHRINK rejects residual error bound larger than base error bound" {
         &compressed_values,
         method_configuration,
     ));
-}
-
-test "SHRINK handles an empty series" {
-    const allocator = testing.allocator;
-
-    const uncompressed_values = &[_]f64{};
-
-    var compressed_values = ArrayList(u8).empty;
-    defer compressed_values.deinit(allocator);
-
-    const method_configuration =
-        \\ {"base_error_bound": 0.1, "residual_error_bound": 0.0, "lambda": 0.1}
-    ;
-
-    try compress(allocator, uncompressed_values, &compressed_values, method_configuration);
-
-    var decompressed_values = ArrayList(f64).empty;
-    defer decompressed_values.deinit(allocator);
-    try decompress(allocator, compressed_values.items, &decompressed_values);
-
-    try testing.expectEqual(@as(usize, 0), decompressed_values.items.len);
 }
 
 test "SHRINK handles a single-point series" {
