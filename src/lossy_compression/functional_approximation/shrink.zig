@@ -43,6 +43,16 @@ const sim_piece = @import("sim_piece.zig");
 
 const tester = @import("../../tester.zig");
 
+/// Header fields from the residuals section of the compressed stream.
+const ResidualsHeader = struct {
+    /// The `residual_error_bound` used to quantize the residuals during compression.
+    error_bound: f32,
+    /// The minimum quantized residual value, used to shift residuals toward zero.
+    minimum_residual: i64,
+    /// The number of residuals stored (equal to the length of `uncompressed_values`).
+    count: usize,
+};
+
 /// Compresses `uncompressed_values` using the "SHRINK" algorithm. The function writes the result
 /// to `compressed_values`. The `allocator` is used for memory allocation of intermediate data
 /// structures and the `method_configuration` parser. The `method_configuration` is expected to be
@@ -600,14 +610,6 @@ fn writeResiduals(
     try shared_functions.appendValue(allocator, usize, encoded_residuals.items.len, compressed_values);
     try compressed_values.appendSlice(allocator, encoded_residuals.items);
 }
-
-/// Header fields from the residuals section of the compressed stream.
-const ResidualsHeader = struct {
-    error_bound: f32,
-    // The minimum quantized residual value, used to shift residuals toward zero.
-    minimum_residual: i64,
-    count: usize,
-};
 
 /// Reads the residual section header and, if present, decodes the Elias-Gamma block into
 /// `stored`. The allocator is used for decoding. Returns the header fields.
