@@ -136,7 +136,7 @@ pub fn decompress(
     var residuals = ArrayList(i64).empty;
     defer residuals.deinit(allocator);
     for (stored.items) |value| {
-        try residuals.append(allocator, @as(i64, @intCast(value - 1)) + header.r_min);
+        try residuals.append(allocator, @as(i64, @intCast(value - 1)) + header.minimum_residual);
     }
 
     // Combine residuals and base segments.
@@ -165,10 +165,10 @@ pub fn decompress(
 /// The compressed stream consists of a base section followed by a residuals section.
 /// The base section encodes: a segment count (usize), for each segment: (start_index, intercept,
 /// lower_bound_slope, upper_bound_slope), and the series length (usize).
-/// The residuals section encodes: residual_error_bound (f32), r_min (i64), residuals_count (usize),
+/// The residuals section encodes: residual_error_bound (f32), minimum_residual (i64), residuals_count (usize),
 /// and optionally an Elias-Gamma-encoded block of shifted residual values.
 /// A `indices` ArrayList stores the segment count, all start indices, the series length,
-/// r_min (bitcast to u64), the residuals count, and the decoded Elias-Gamma stored values.
+/// minimum_residual (bitcast to u64), the residuals count, and the decoded Elias-Gamma stored values.
 /// A `coefficients` ArrayList stores the per-segment (intercept, lower_bound_slope,
 /// upper_bound_slope) values and the residual_error_bound.
 /// Any loss or misalignment of the indices may produce a stream that cannot be decompressed or
@@ -205,7 +205,7 @@ pub fn extract(
     const header = try readResiduals(allocator, compressed_values, &offset, &stored);
 
     try coefficients.append(allocator, @as(f64, @floatCast(header.error_bound)));
-    try indices.append(allocator, @as(u64, @bitCast(header.r_min)));
+    try indices.append(allocator, @as(u64, @bitCast(header.minimum_residual)));
     try indices.append(allocator, header.count);
 
     for (stored.items) |value| {
@@ -216,7 +216,7 @@ pub fn extract(
 /// Rebuilds Shrink's `compressed_values` from the provided `indices` and `coefficients`.
 /// The encoding matches the layout produced by `extract`. The function reconstructs the
 /// base section (segment count, per-segment metadata, series length) followed by the
-/// residuals section (residual_error_bound, r_min, residuals count, Elias-Gamma-encoded
+/// residuals section (residual_error_bound, minimum_residual, residuals count, Elias-Gamma-encoded
 /// block). The `indices` array provides the integer metadata and stored residual values,
 /// while the `coefficients` array provides the floating-point parameters.
 /// Any loss or misalignment of the indices or coefficients, such as incorrect segment
@@ -259,9 +259,9 @@ pub fn rebuild(
     const residual_error_bound: f64 = coefficients[coefficients_offset];
     try shared_functions.appendValue(allocator, f32, @as(f32, @floatCast(residual_error_bound)), compressed_values);
 
-    const r_min: i64 = @as(i64, @bitCast(indices[indices_offset]));
+    const minimum_residual: i64 = @as(i64, @bitCast(indices[indices_offset]));
     indices_offset += 1;
-    try shared_functions.appendValue(allocator, i64, r_min, compressed_values);
+    try shared_functions.appendValue(allocator, i64, minimum_residual, compressed_values);
 
     const residuals_count = indices[indices_offset];
     indices_offset += 1;
@@ -433,7 +433,7 @@ fn quantize(value: f64, error_bound: f32) f64 {
 /// a candidate slope (Algorithm 5) and computes the quantized residual (Algorithm 6, Eq. 6) for
 /// every point covered by that segment. The residuals are appended, in series order, to
 /// `residuals` as signed integers representing the quantization bucket index relative to the
-/// segment's residual range, ready for r_min-shifted Elias-Gamma encoding.
+/// segment's residual range, ready for minimum_residual-shifted Elias-Gamma encoding.
 /// If `residual_error_bound` is zero, no residuals are computed and `residuals` stays empty,
 /// meaning decompression will only be able to reconstruct the (looser) base approximation.
 fn computeResiduals(
@@ -562,12 +562,12 @@ fn readBase(
 }
 
 /// Writes `residuals` to `compressed_values`, prefixed by the `residual_error_bound` used to
-/// quantize them, the minimum quantized residual `r_min` for shifting, and the number of residuals.
-/// Residuals are shifted by `r_min` to produce unsigned values in `[0, K]`, incremented by one
+/// quantize them, the minimum quantized residual `minimum_residual` for shifting, and the number of residuals.
+/// Residuals are shifted by `minimum_residual` to produce unsigned values in `[0, K]`, incremented by one
 /// since Elias-Gamma encoding is undefined for zero (see `shared_functions.encodeEliasGamma`),
 /// and then Elias-Gamma encoded. This follows the SHRINK paper (Section III-D) which subtracts
 /// the minimum residual before quantizing. If `residuals` is empty, only the (zero) residual error
-/// bound, a zero r_min, and a zero count are written; decompression then returns the base
+/// bound, a zero minimum_residual, and a zero count are written; decompression then returns the base
 /// approximation unchanged.
 fn writeResiduals(
     allocator: Allocator,
@@ -577,22 +577,22 @@ fn writeResiduals(
 ) Error!void {
     // Find the minimum quantized residual to shift residuals toward zero,
     // aligning with the SHRINK paper (Section III-D, Eq. 6).
-    var r_min: i64 = 0;
+    var minimum_residual: i64 = 0;
     for (residuals) |r| {
-        if (r < r_min) r_min = r;
+        if (r < minimum_residual) minimum_residual = r;
     }
 
     try shared_functions.appendValue(allocator, f32, residual_error_bound, compressed_values);
-    try shared_functions.appendValue(allocator, i64, r_min, compressed_values);
+    try shared_functions.appendValue(allocator, i64, minimum_residual, compressed_values);
     try shared_functions.appendValue(allocator, usize, residuals.len, compressed_values);
     if (residuals.len == 0) return;
 
     var shifted_values = ArrayList(u64).empty;
     defer shifted_values.deinit(allocator);
     for (residuals) |residual| {
-        // Shift by r_min to produce non-negative values, then add one since
+        // Shift by minimum_residual to produce non-negative values, then add one since
         // Elias-Gamma encoding is undefined for zero.
-        try shifted_values.append(allocator, @as(u64, @intCast(residual - r_min)) + 1);
+        try shifted_values.append(allocator, @as(u64, @intCast(residual - minimum_residual)) + 1);
     }
 
     var encoded_residuals = ArrayList(u8).empty;
@@ -607,7 +607,7 @@ fn writeResiduals(
 const ResidualsHeader = struct {
     error_bound: f32,
     /// The minimum quantized residual value, used to shift residuals toward zero.
-    r_min: i64,
+    minimum_residual: i64,
     count: usize,
 };
 
@@ -620,7 +620,7 @@ fn readResiduals(
     stored: *ArrayList(u64),
 ) Error!ResidualsHeader {
     const error_bound = try shared_functions.readOffsetValue(f32, compressed_values, offset);
-    const r_min = try shared_functions.readOffsetValue(i64, compressed_values, offset);
+    const minimum_residual = try shared_functions.readOffsetValue(i64, compressed_values, offset);
     const count = try shared_functions.readOffsetValue(usize, compressed_values, offset);
     if (count > 0) {
         const encoded_len = try shared_functions.readOffsetValue(usize, compressed_values, offset);
@@ -629,7 +629,7 @@ fn readResiduals(
         try shared_functions.decodeEliasGamma(allocator, encoded_slice, stored);
         if (stored.items.len != count) return Error.CorruptedCompressedData;
     }
-    return .{ .error_bound = error_bound, .r_min = r_min, .count = count };
+    return .{ .error_bound = error_bound, .minimum_residual = minimum_residual, .count = count };
 }
 
 /// Reconstructs the decompressed values for indices `[start_index, end_index)` covered by
