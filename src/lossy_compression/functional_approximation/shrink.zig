@@ -161,7 +161,7 @@ pub fn decompress(
     }
 }
 
-/// Extracts `indices` and `coefficients` from Shrink's `compressed_values`.
+/// Extracts `indices` and `coefficients` from SHRINK's `compressed_values`.
 /// The compressed stream consists of a base section followed by a residuals section.
 /// The base section encodes: a segment count (usize), for each segment: (start_index, intercept,
 /// lower_bound_slope, upper_bound_slope), and the series length (usize).
@@ -213,7 +213,7 @@ pub fn extract(
     }
 }
 
-/// Rebuilds Shrink's `compressed_values` from the provided `indices` and `coefficients`.
+/// Rebuilds SHRINK's `compressed_values` from the provided `indices` and `coefficients`.
 /// The encoding matches the layout produced by `extract`. The function reconstructs the
 /// base section (segment count, per-segment metadata, series length) followed by the
 /// residuals section (residual_error_bound, minimum_residual, residuals count, Elias-Gamma-encoded
@@ -302,7 +302,6 @@ fn computeAdaptiveSegmentsMetadata(
     base_error_bound: f32,
     lambda: f32,
 ) Error!void {
-    if (uncompressed_values.len == 0) return;
 
     // Check if the first point is NaN, infinite, or a reduced precision f64. If so, return error.
     if (!math.isFinite(uncompressed_values[0]) or @abs(uncompressed_values[0]) > tester.max_test_value)
@@ -678,7 +677,7 @@ test "candidateSlope handles unbounded cones from single-point segments" {
     try testing.expectEqual(@as(f64, 0), candidateSlope(0, 0));
 }
 
-test "shrink cannot compress NaN values" {
+test "SHRINK cannot compress NaN values" {
     const allocator = testing.allocator;
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, math.nan(f64), 3.0 };
@@ -696,7 +695,7 @@ test "shrink cannot compress NaN values" {
     );
 }
 
-test "shrink rejects residual error bound larger than base error bound" {
+test "SHRINK rejects residual error bound larger than base error bound" {
     const allocator = testing.allocator;
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, 28.0, 3.0 };
@@ -716,7 +715,7 @@ test "shrink rejects residual error bound larger than base error bound" {
     ));
 }
 
-test "shrink handles an empty series" {
+test "SHRINK handles an empty series" {
     const allocator = testing.allocator;
 
     const uncompressed_values = &[_]f64{};
@@ -737,7 +736,7 @@ test "shrink handles an empty series" {
     try testing.expectEqual(@as(usize, 0), decompressed_values.items.len);
 }
 
-test "shrink handles a single-point series" {
+test "SHRINK handles a single-point series" {
     const allocator = testing.allocator;
 
     const uncompressed_values = &[_]f64{42.5};
@@ -759,7 +758,7 @@ test "shrink handles a single-point series" {
     try testing.expect(@abs(decompressed_values.items[0] - 42.5) <= 0.1);
 }
 
-test "shrink handles a constant series exactly" {
+test "SHRINK handles a constant series exactly" {
     const allocator = testing.allocator;
 
     var uncompressed_values: [50]f64 = undefined;
@@ -784,7 +783,7 @@ test "shrink handles a constant series exactly" {
     }
 }
 
-test "shrink round trip preserves length for a noisy sinusoid with residual correction" {
+test "SHRINK round trip preserves length for a noisy sinusoid with residual correction" {
     const allocator = testing.allocator;
     var uncompressed_values: [200]f64 = undefined;
     var prng = std.Random.DefaultPrng.init(42);
@@ -814,7 +813,7 @@ test "shrink round trip preserves length for a noisy sinusoid with residual corr
     try testing.expect(max_error <= 0.15 + 1e-6);
 }
 
-test "shrink rejects lambda greater than 1.0" {
+test "SHRINK rejects lambda greater than 1.0" {
     const allocator = testing.allocator;
 
     const uncompressed_values = &[5]f64{ 1.0, 2.0, 3.0, 4.0, 5.0 };
@@ -834,7 +833,7 @@ test "shrink rejects lambda greater than 1.0" {
     ));
 }
 
-test "shrink rejects negative residual_error_bound" {
+test "SHRINK rejects negative residual_error_bound" {
     const allocator = testing.allocator;
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, 28.0, 3.0 };
@@ -854,7 +853,7 @@ test "shrink rejects negative residual_error_bound" {
     ));
 }
 
-test "shrink rejects base_error_bound of zero" {
+test "SHRINK rejects base_error_bound of zero" {
     const allocator = testing.allocator;
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, 28.0, 3.0 };
@@ -874,7 +873,7 @@ test "shrink rejects base_error_bound of zero" {
     ));
 }
 
-test "shrink candidateSlope stays within cone bounds across a range of inputs" {
+test "SHRINK candidateSlope stays within cone bounds across a range of inputs" {
     const pairs = [_][2]f64{
         .{ 0.1, 0.9 },
         .{ -0.5, 0.5 },
