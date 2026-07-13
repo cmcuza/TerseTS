@@ -502,7 +502,7 @@ fn candidateSlope(lower_bound_slope: f64, upper_bound_slope: f64) f64 {
     const tail_lo = lower_bound_slope - lead_lo;
     const tail_hi = upper_bound_slope - lead_hi;
     var scale: f64 = 1.0;
-    for (0..7) |_| {
+    for (0..5) |_| {
         const next_scale = scale * 10.0;
         const digit_lo = @floor(tail_lo * next_scale) - @floor(tail_lo * scale) * 10.0;
         const digit_hi = @floor(tail_hi * next_scale) - @floor(tail_hi * scale) * 10.0;
@@ -778,7 +778,7 @@ test "shrink handles a constant series exactly" {
 
     try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
     for (decompressed_values.items) |value| {
-        try testing.expect(@abs(value - 7.0) <= 1e-3);
+        try testing.expect(@abs(value - 7.0) <= 1e-4);
     }
 }
 
