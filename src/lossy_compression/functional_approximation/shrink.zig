@@ -193,9 +193,9 @@ pub fn extract(
     indices: *ArrayList(u64),
     coefficients: *ArrayList(f64),
 ) Error!void {
-    var offset: usize = 0;
 
     // Extract the base segments.
+    var offset: usize = 0;
     var base_segments_metadata = ArrayList(SegmentMetadata).empty;
     defer base_segments_metadata.deinit(allocator);
     const series_length = try readBase(allocator, compressed_values, &offset, &base_segments_metadata);
