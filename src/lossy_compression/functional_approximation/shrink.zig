@@ -661,7 +661,10 @@ fn decompressSegment(
     }
 }
 
-/// Reverses the quantization performed in `computeResiduals`.
+/// Reverses the quantization performed in `computeResiduals`. `quantized_residual` is the signed
+/// bucket index produced by `@floor(residual / residual_error_bound)`, and `residual_error_bound`
+/// is the same bound used to quantize it. Returns the dequantized residual as the midpoint of the
+/// bucket.
 fn dequantizeResidual(quantized_residual: i64, residual_error_bound: f32) f64 {
     const bucket: f64 = @as(f64, @floatFromInt(quantized_residual)) * residual_error_bound;
     return bucket + (@as(f64, residual_error_bound) / 2.0);
