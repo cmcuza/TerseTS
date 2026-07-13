@@ -496,17 +496,18 @@ fn candidateSlope(lower_bound_slope: f64, upper_bound_slope: f64) f64 {
     }
 
     // Compare decimal part (tail).
+    const decimal_base: f64 = 10.0;
     const tail_lo = lower_bound_slope - lead_lower_slope;
     const tail_hi = upper_bound_slope - lead_higher_slope;
     var scale: f64 = 1.0;
     for (0..5) |_| {
-        const next_scale = scale * 10.0;
-        const digit_lo = @floor(tail_lo * next_scale) - @floor(tail_lo * scale) * 10.0;
-        const digit_hi = @floor(tail_hi * next_scale) - @floor(tail_hi * scale) * 10.0;
+        const next_scale = scale * decimal_base;
+        const digit_lo = @floor(tail_lo * next_scale) - @floor(tail_lo * scale) * decimal_base;
+        const digit_hi = @floor(tail_hi * next_scale) - @floor(tail_hi * scale) * decimal_base;
         if (digit_lo != digit_hi) {
             const avg_digit = @round((digit_lo + digit_hi) / 2.0);
             const prefix = @floor(tail_lo * scale);
-            const tail = (prefix * 10.0 + avg_digit) / next_scale;
+            const tail = (prefix * decimal_base + avg_digit) / next_scale;
             return lead_lower_slope + tail;
         }
         scale = next_scale;
