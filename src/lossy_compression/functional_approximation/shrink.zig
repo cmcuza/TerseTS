@@ -324,7 +324,7 @@ fn computeAdaptiveSegmentsMetadata(
         lambda,
         global_range,
     );
-    var quantized_intercept = quantize(uncompressed_values[0], adaptive_error_bound);
+    var quantized_intercept = sim_piece.quantize(uncompressed_values[0], adaptive_error_bound);
 
     for (1..uncompressed_values.len) |current_index| {
         if (!math.isFinite(uncompressed_values[current_index])) {
@@ -360,7 +360,7 @@ fn computeAdaptiveSegmentsMetadata(
                 lambda,
                 global_range,
             );
-            quantized_intercept = quantize(start_point.value, adaptive_error_bound);
+            quantized_intercept = sim_piece.quantize(start_point.value, adaptive_error_bound);
             upper_bound_slope = math.floatMax(f64);
             lower_bound_slope = -math.floatMax(f64);
         } else {
@@ -429,15 +429,6 @@ fn adaptiveErrorBound(
     const exponent: f64 = (2.0 / 3.0) - beta_i;
     const adaptive: f64 = @as(f64, base_error_bound) * @exp(exponent);
     return @floatCast(adaptive);
-}
-
-/// Quantizes `value` by the given `error_bound`, identical to Sim-Piece's `quantize`.
-/// In the SHRINK paper this is line 12 of the of Algorithm 2.
-fn quantize(value: f64, error_bound: f32) f64 {
-    if (error_bound != 0) {
-        return @floor(value / error_bound) * error_bound;
-    }
-    return value;
 }
 
 /// SHRINK Phase 3 (Section III-D). For each sub-base segment in `base_segments_metadata`, selects

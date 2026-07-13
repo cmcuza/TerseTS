@@ -607,7 +607,7 @@ pub fn createCompressedRepresentation(
 /// Quantizes the given `value` by the specified `error_bound`. This process ensures that
 /// the quantized value remains within the error bound of the original value. If the
 /// `error_bound` is equal to zero, the value is directly returned.
-fn quantize(value: f64, error_bound: f32) f64 {
+pub fn quantize(value: f64, error_bound: f32) f64 {
     if (error_bound != 0) {
         return @floor(value / error_bound) * error_bound;
     }
