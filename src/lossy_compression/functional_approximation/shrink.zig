@@ -578,8 +578,8 @@ fn writeResiduals(
     // Find the minimum quantized residual to shift residuals toward zero,
     // aligning with the SHRINK paper (Section III-D, Eq. 6).
     var minimum_residual: i64 = 0;
-    for (residuals) |r| {
-        if (r < minimum_residual) minimum_residual = r;
+    for (residuals) |residual| {
+        if (residual < minimum_residual) minimum_residual = residual;
     }
 
     try shared_functions.appendValue(allocator, f32, residual_error_bound, compressed_values);
@@ -606,7 +606,7 @@ fn writeResiduals(
 /// Header fields from the residuals section of the compressed stream.
 const ResidualsHeader = struct {
     error_bound: f32,
-    /// The minimum quantized residual value, used to shift residuals toward zero.
+    // The minimum quantized residual value, used to shift residuals toward zero.
     minimum_residual: i64,
     count: usize,
 };
