@@ -231,13 +231,19 @@ pub fn rebuild(
     coefficients: []const f64,
     compressed_values: *ArrayList(u8),
 ) Error!void {
+    if (indices.len < 4) return Error.CorruptedCompressedData;
+
     // Write the base section.
-    const segments_count = indices[0];
+    const segments_count: usize = std.math.cast(usize, indices[0]) orelse return Error.CorruptedCompressedData;
+
     try shared_functions.appendValue(allocator, usize, segments_count, compressed_values);
 
     var indices_offset: usize = 1;
     var coefficients_offset: usize = 0;
     for (0..segments_count) |_| {
+        if (indices.len - indices_offset < 1) return Error.CorruptedCompressedData;
+        if (coefficients.len - coefficients_offset < 3) return Error.CorruptedCompressedData;
+
         const start_index = indices[indices_offset];
         indices_offset += 1;
         const intercept = coefficients[coefficients_offset];
@@ -251,6 +257,9 @@ pub fn rebuild(
         try shared_functions.appendValue(allocator, f64, upper_bound_slope, compressed_values);
     }
 
+    if (indices.len - indices_offset < 3) return Error.CorruptedCompressedData;
+    if (coefficients.len - coefficients_offset < 1) return Error.CorruptedCompressedData;
+
     const series_length = indices[indices_offset];
     indices_offset += 1;
     try shared_functions.appendValue(allocator, usize, series_length, compressed_values);
@@ -263,11 +272,13 @@ pub fn rebuild(
     indices_offset += 1;
     try shared_functions.appendValue(allocator, i64, minimum_residual, compressed_values);
 
-    const residuals_count = indices[indices_offset];
+    const residuals_count: usize = std.math.cast(usize, indices[indices_offset]) orelse return Error.CorruptedCompressedData;
     indices_offset += 1;
     try shared_functions.appendValue(allocator, usize, residuals_count, compressed_values);
 
     if (residuals_count > 0) {
+        if (indices.len - indices_offset < residuals_count) return Error.CorruptedCompressedData;
+
         const stored_values = indices[indices_offset .. indices_offset + residuals_count];
 
         var encoded = ArrayList(u8).empty;
