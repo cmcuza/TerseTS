@@ -61,7 +61,7 @@ pub fn compress(
     const threshold: usize = @intCast(parsed_configuration.output_threshold_number);
     // Return an error  for a threshold that is too low, because at least
     // 2 points are always necessary, as they anchor the line.
-    if (threshold < 2) return Error.UnsupportedInput;
+    if (threshold < 2) return Error.InvalidConfiguration;
 
     // Series is already at or below the target size: keep every point
     // and just output (value, index) pairs normally.
@@ -95,20 +95,20 @@ pub fn compress(
             1 + (bucket_idx + 2) * inner_point_count / inner_threshold,
             uncompressed_values.len,
         );
-        var avg: f64 = 0;
+        var average_value: f64 = 0;
         for (next_start..next_end) |point_idx| {
-            avg += uncompressed_values[point_idx];
+            average_value += uncompressed_values[point_idx];
         }
-        avg /= @as(f64, @floatFromInt(next_end - next_start));
-        const avg_point = DiscretePoint{ .index = (next_start + next_end) / 2, .value = avg };
+        average_value /= @as(f64, @floatFromInt(next_end - next_start));
+        const average_point = DiscretePoint{ .index = (next_start + next_end) / 2, .value = average_value };
 
         // Pick the interior point in the current bucket that forms the largest triangle
         // with the previously selected point and the next bucket's average.
         var best_point = DiscretePoint{ .index = start, .value = uncompressed_values[start] };
-        var max_area = calculateArea(selected_point, best_point, avg_point);
+        var max_area = calculateArea(selected_point, best_point, average_point);
         for (start + 1..end) |point_idx| {
             const candidate = DiscretePoint{ .index = point_idx, .value = uncompressed_values[point_idx] };
-            const curr_area = calculateArea(selected_point, candidate, avg_point);
+            const curr_area = calculateArea(selected_point, candidate, average_point);
             if (curr_area > max_area) {
                 max_area = curr_area;
                 best_point = candidate;
@@ -287,7 +287,7 @@ test "lttb returns error for threshold below 2" {
     ;
 
     try testing.expectError(
-        Error.UnsupportedInput,
+        Error.InvalidConfiguration,
         compress(allocator, uncompressed_values, &compressed_values, method_configuration),
     );
 }
