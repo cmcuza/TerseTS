@@ -70,22 +70,19 @@ pub fn compress(
         method_configuration,
     );
 
-    const base_error_bound: f32 = parsed_configuration.base_error_bound;
     // The original SHRINK paper proposes a scheme with different error resolutions for the
     // residual part. In this implementation, the error bound is fixed for the whole sequence.
-    const residual_error_bound: f32 = parsed_configuration.residual_error_bound;
+    const residual_error_bound: f32 = parsed_configuration.abs_error_bound;
+    const base_error_bound: f32 = parsed_configuration.abs_error_bound * 2.0;
+
     // `lambda` controls the default interval length `L = lambda * n * base_error_bound` used to
     // estimate the local fluctuation level of the data, see SHRINK paper Section III-B, Eq. (4).
     const lambda: f32 = parsed_configuration.lambda;
 
-    if (base_error_bound == 0.0) {
-        return Error.InvalidConfiguration;
-    }
-    if (residual_error_bound < 0.0 or residual_error_bound > base_error_bound) {
-        return Error.InvalidConfiguration;
-    }
-    if (lambda <= 0.0 or lambda > 1.0) {
-        return Error.InvalidConfiguration;
+    if (residual_error_bound <= 0.0 or
+        lambda <= 0.0 or lambda > 1.0)
+    {
+        return error.InvalidConfiguration;
     }
 
     // SHRINK Phase 1 (Section III-B, Algorithms 2-3): compute cones using a base error threshold
@@ -687,33 +684,13 @@ test "SHRINK cannot compress NaN values" {
     defer compressed_values.deinit(allocator);
 
     const method_configuration =
-        \\ {"base_error_bound": 0.1, "residual_error_bound": 0.01, "lambda": 0.01}
+        \\ {"abs_error_bound": 0.01, "lambda": 0.01}
     ;
 
     try testing.expectError(
         Error.UnsupportedInput,
         compress(allocator, uncompressed_values, &compressed_values, method_configuration),
     );
-}
-
-test "SHRINK rejects residual error bound larger than base error bound" {
-    const allocator = testing.allocator;
-
-    const uncompressed_values = &[4]f64{ 19.0, 48.0, 28.0, 3.0 };
-
-    var compressed_values = ArrayList(u8).empty;
-    defer compressed_values.deinit(allocator);
-
-    const method_configuration =
-        \\ {"base_error_bound": 0.1, "residual_error_bound": 0.5, "lambda": 0.05}
-    ;
-
-    try testing.expectError(Error.InvalidConfiguration, compress(
-        allocator,
-        uncompressed_values,
-        &compressed_values,
-        method_configuration,
-    ));
 }
 
 test "SHRINK handles a single-point series" {
@@ -725,7 +702,7 @@ test "SHRINK handles a single-point series" {
     defer compressed_values.deinit(allocator);
 
     const method_configuration =
-        \\ {"base_error_bound": 0.1, "residual_error_bound": 0.01, "lambda": 0.1}
+        \\ {"abs_error_bound": 0.01, "lambda": 0.1}
     ;
 
     try compress(allocator, uncompressed_values, &compressed_values, method_configuration);
@@ -738,6 +715,24 @@ test "SHRINK handles a single-point series" {
     try testing.expect(@abs(decompressed_values.items[0] - 42.5) <= 0.1);
 }
 
+test "SHRINK can compress and decompress bounded values with positive error bound" {
+    const allocator = testing.allocator;
+    const data_distributions = &[_]tester.DataDistribution{
+        .LinearFunctions,
+        .BoundedRandomValues,
+        .SinusoidalFunction,
+    };
+
+    // This function evaluates SimPiece using all data distribution stored in
+    // `data_distribution` with a positive error bound ranging from [1e-4, 1)*range
+    // of the generated uncompressed time series.
+    try tester.testErrorBoundedCompressionMethod(
+        allocator,
+        Method.Shrink,
+        data_distributions,
+    );
+}
+
 test "SHRINK handles a constant series exactly" {
     const allocator = testing.allocator;
 
@@ -748,7 +743,7 @@ test "SHRINK handles a constant series exactly" {
     defer compressed_values.deinit(allocator);
 
     const method_configuration =
-        \\ {"base_error_bound": 0.001, "residual_error_bound": 0.0001, "lambda": 0.1}
+        \\ {"abs_error_bound": 0.0001, "lambda": 0.1}
     ;
 
     try compress(allocator, &uncompressed_values, &compressed_values, method_configuration);
@@ -777,7 +772,7 @@ test "SHRINK round trip preserves length for a noisy sinusoid with residual corr
     var compressed_values = ArrayList(u8).empty;
     defer compressed_values.deinit(allocator);
     const method_configuration =
-        \\ {"base_error_bound": 1.0, "residual_error_bound": 0.15, "lambda": 0.1}
+        \\ {"abs_error_bound": 0.15, "lambda": 0.1}
     ;
     try compress(allocator, &uncompressed_values, &compressed_values, method_configuration);
     var decompressed_values = ArrayList(f64).empty;
@@ -802,7 +797,7 @@ test "SHRINK rejects lambda greater than 1.0" {
     defer compressed_values.deinit(allocator);
 
     const method_configuration =
-        \\ {"base_error_bound": 0.1, "residual_error_bound": 0.01, "lambda": 1.5}
+        \\ {"abs_error_bound": 0.01, "lambda": 1.5}
     ;
 
     try testing.expectError(Error.InvalidConfiguration, compress(
@@ -813,7 +808,7 @@ test "SHRINK rejects lambda greater than 1.0" {
     ));
 }
 
-test "SHRINK rejects negative residual_error_bound" {
+test "SHRINK rejects negative error_bound" {
     const allocator = testing.allocator;
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, 28.0, 3.0 };
@@ -822,7 +817,7 @@ test "SHRINK rejects negative residual_error_bound" {
     defer compressed_values.deinit(allocator);
 
     const method_configuration =
-        \\ {"base_error_bound": 0.1, "residual_error_bound": -0.01, "lambda": 0.05}
+        \\ {"abs_error_bound": -0.01, "lambda": 0.05}
     ;
 
     try testing.expectError(Error.InvalidConfiguration, compress(
@@ -833,7 +828,7 @@ test "SHRINK rejects negative residual_error_bound" {
     ));
 }
 
-test "SHRINK rejects base_error_bound of zero" {
+test "SHRINK rejects error_bound of zero" {
     const allocator = testing.allocator;
 
     const uncompressed_values = &[4]f64{ 19.0, 48.0, 28.0, 3.0 };
@@ -842,7 +837,7 @@ test "SHRINK rejects base_error_bound of zero" {
     defer compressed_values.deinit(allocator);
 
     const method_configuration =
-        \\ {"base_error_bound": 0.0, "residual_error_bound": 0.0, "lambda": 0.05}
+        \\ {"abs_error_bound": 0.0, "lambda": 0.05}
     ;
 
     try testing.expectError(Error.InvalidConfiguration, compress(

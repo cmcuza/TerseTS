@@ -73,11 +73,10 @@ pub const DecimalPrecision = struct {
 };
 
 /// Configuration for lossy_compression/functional_approximation/shrink.zig.
-/// Base semantics, residuals, and adaptive error bounds.
+/// Example: { "abs_error_bound": 0.1, "lambda": 0.1 }
 pub const ShrinkConfiguration = struct {
-    base_error_bound: f32,
-    residual_error_bound: f32,
-    lambda: f32,
+    abs_error_bound: f32,
+    lambda: f32 = 0.1,
 };
 
 /// Empty configuration for methods that do not require any parameters.
@@ -132,11 +131,11 @@ pub fn parse(
                 return error.InvalidConfiguration;
         },
         ShrinkConfiguration => {
-            if (parsed_value.base_error_bound <= 0 or
-                parsed_value.residual_error_bound < 0 or
-                parsed_value.residual_error_bound > parsed_value.base_error_bound or
-                parsed_value.lambda <= 0 or parsed_value.lambda > 1)
+            if (parsed_value.abs_error_bound <= 0.0 or
+                parsed_value.lambda <= 0.0 or parsed_value.lambda > 1.0)
+            {
                 return error.InvalidConfiguration;
+            }
         },
         else => return error.InvalidConfiguration,
     }
@@ -235,9 +234,8 @@ pub fn defaultConfigurationBuilder(
         .Shrink => blk: {
             break :blk try getDefaultShrinkConfiguration(
                 allocator,
-                random_f32, // Base error bound.
-                random_f32 * 0.5, // Residual error bound, at most the base.
-                0.5, // Lambda.
+                random_f32,
+                0.5,
             );
         },
     };
@@ -285,14 +283,13 @@ fn getDefaultDomainTransformationConfiguration(allocator: Allocator, number_of_c
 
 fn getDefaultShrinkConfiguration(
     allocator: Allocator,
-    base: f32,
-    residual: f32,
+    error_bound: f32,
     lambda: f32,
 ) ![]u8 {
     return std.fmt.allocPrint(
         allocator,
-        "{{\"base_error_bound\": {d}, \"residual_error_bound\": {d}, \"lambda\": {d}}}",
-        .{ base, residual, lambda },
+        "{{\"abs_error_bound\": {d}, \"lambda\": {d}}}",
+        .{ error_bound, lambda },
     );
 }
 
