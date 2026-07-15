@@ -58,14 +58,14 @@ pub fn compress(
         method_configuration,
     );
 
-    const threshold: usize = @intCast(parsed_configuration.target_point_count);
-    // Return an error  for a threshold that is too low, because at least
+    const target_point_count: usize = @intCast(parsed_configuration.target_point_count);
+    // Return an error  for a `target_point_count` that is too low, because at least
     // 2 points are always necessary, as they anchor the line.
-    if (threshold < 2) return Error.InvalidConfiguration;
+    if (target_point_count < 2) return Error.InvalidConfiguration;
 
     // Series is already at or below the target size: keep every point
     // and just output (value, index) pairs normally.
-    if (uncompressed_values.len <= threshold) {
+    if (uncompressed_values.len <= target_point_count) {
         try shared_functions.appendValue(allocator, f64, uncompressed_values[0], compressed_values);
         for (1..uncompressed_values.len) |i| {
             try shared_functions.appendValue(allocator, f64, uncompressed_values[i], compressed_values);
@@ -74,25 +74,25 @@ pub fn compress(
         return;
     }
 
-    // The first and last points are always kept, so the remaining threshold - 2
+    // The first and last points are always kept, so the remaining target_point_count - 2
     // output points are chosen from the len - 2 interior points (indices 1..len-1).
-    const inner_threshold: usize = threshold - 2;
+    const inner_target_point_count: usize = target_point_count - 2;
     const inner_point_count = uncompressed_values.len - 2;
 
     var selected_point = DiscretePoint{ .index = 0, .value = uncompressed_values[0] };
     try shared_functions.appendValue(allocator, f64, uncompressed_values[0], compressed_values);
 
-    for (0..inner_threshold) |bucket_idx| {
+    for (0..inner_target_point_count) |bucket_idx| {
         // Split the interior points proportionally so the buckets always cover exactly
         // [1, len-1) with no overshoot, regardless of how evenly the points divide.
-        const start = 1 + bucket_idx * inner_point_count / inner_threshold;
-        const end = 1 + (bucket_idx + 1) * inner_point_count / inner_threshold;
+        const start = 1 + bucket_idx * inner_point_count / inner_target_point_count;
+        const end = 1 + (bucket_idx + 1) * inner_point_count / inner_target_point_count;
 
         // Average of the next bucket. For the final bucket this range collapses onto the
         // last point, which is exactly the anchor we want to aim the triangle at.
         const next_start = end;
         const next_end = @min(
-            1 + (bucket_idx + 2) * inner_point_count / inner_threshold,
+            1 + (bucket_idx + 2) * inner_point_count / inner_target_point_count,
             uncompressed_values.len,
         );
         var average_value: f64 = 0;
@@ -219,10 +219,10 @@ pub fn rebuild(
     );
 }
 
-test "lttb keeps all values when threshold is at least the input length" {
+test "lttb keeps all values when target_point_count is at least the input length" {
     const allocator = testing.allocator;
 
-    // With a threshold greater than or equal to the number of points, every point is kept and the
+    // With a target_point_count greater than or equal to the number of points, every point is kept and the
     // round-trip is lossless.
     const uncompressed_values: []const f64 = &[_]f64{ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0 };
 
@@ -247,9 +247,9 @@ test "lttb keeps all values when threshold is at least the input length" {
 test "lttb downsamples with known result" {
     const allocator = testing.allocator;
 
-    // Nine points are reduced to a threshold of four.
+    // Nine points are reduced to a target_point_count of four.
     const uncompressed_values: []const f64 = &[_]f64{ 1.0, 2.0, 1.5, 3.0, 4.0, 3.5, 5.0, 6.0, 7.0 };
-    const threshold: usize = 4;
+    const target_point_count: usize = 4;
 
     var compressed_values = ArrayList(u8).empty;
     defer compressed_values.deinit(allocator);
@@ -261,9 +261,9 @@ test "lttb downsamples with known result" {
     try compress(allocator, uncompressed_values, &compressed_values, method_configuration);
 
     // The compressed representation stores the first value (8 bytes) followed by a (value, index)
-    // pair (16 bytes) for every other kept point, so exactly `threshold` points must be kept.
+    // pair (16 bytes) for every other kept point, so exactly `target_point_count` points must be kept.
     const kept_points = (compressed_values.items.len - 8) / 16 + 1;
-    try testing.expectEqual(threshold, kept_points);
+    try testing.expectEqual(target_point_count, kept_points);
 
     // Reinterpret the byte stream as f64s: slot 0 is the first kept value, then the kept
     // (value, index) pairs follow, so the kept values live at slots 0, 1, 3, 5.
@@ -274,7 +274,7 @@ test "lttb downsamples with known result" {
     try testing.expectEqual(uncompressed_values[8], kept[5]);
 }
 
-test "lttb returns error for threshold below 2" {
+test "lttb returns error for target_point_count below 2" {
     const allocator = testing.allocator;
 
     const uncompressed_values: []const f64 = &[_]f64{ 1.0, 2.0, 3.0 };
@@ -292,10 +292,10 @@ test "lttb returns error for threshold below 2" {
     );
 }
 
-test "lttb with threshold 2 keeps only first and last point" {
+test "lttb with target_point_count 2 keeps only first and last point" {
     const allocator = testing.allocator;
 
-    // inner_threshold = 0, the loop never executes, only endpoints are kept.
+    // inner_target_point_count = 0, the loop never executes, only endpoints are kept.
     const uncompressed_values: []const f64 = &[_]f64{ 1.0, 3.0, 5.0, 7.0, 9.0 };
 
     var compressed_values = ArrayList(u8).empty;
@@ -318,10 +318,10 @@ test "lttb with threshold 2 keeps only first and last point" {
     try testing.expectEqual(uncompressed_values[uncompressed_values.len - 1], kept[1]);
 }
 
-test "lttb with threshold equal to len-1 preserves round-trip" {
+test "lttb with target_point_count equal to len-1 preserves round-trip" {
     const allocator = testing.allocator;
 
-    // 5 points, threshold 4: inner_threshold = 2, inner_point_count = 3.
+    // 5 points, target_point_count 4: inner_target_point_count = 2, inner_point_count = 3.
     // Two buckets cover three interior points (indices 1,2,3).
     const uncompressed_values: []const f64 = &[_]f64{ 1.0, 2.0, 1.5, 3.0, 5.0 };
 
@@ -351,7 +351,7 @@ test "lttb with threshold equal to len-1 preserves round-trip" {
 test "lttb handles uneven bucket distribution" {
     const allocator = testing.allocator;
 
-    // 12 points, threshold 5: inner_threshold = 3, inner_point_count = 10.
+    // 12 points, target_point_count 5: inner_target_point_count = 3, inner_point_count = 10.
     // Buckets: floor(0*10/3)=0, floor(1*10/3)=3, floor(2*10/3)=6, floor(3*10/3)=10.
     // Bucket sizes: 3, 3, 4 — uneven.
     const uncompressed_values: []const f64 = &[_]f64{
@@ -403,10 +403,10 @@ test "lttb handles collinear points" {
     try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
 }
 
-test "lttb round-trip with threshold 3 preserves length" {
+test "lttb round-trip with target_point_count 3 preserves length" {
     const allocator = testing.allocator;
 
-    // Minimal downsampling: inner_threshold = 1, one interior point selected.
+    // Minimal downsampling: inner_target_point_count = 1, one interior point selected.
     const uncompressed_values: []const f64 = &[_]f64{ 0.0, 10.0, 5.0, 20.0, 15.0 };
 
     var compressed_values = ArrayList(u8).empty;

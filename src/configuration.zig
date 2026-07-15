@@ -222,10 +222,10 @@ pub fn defaultConfigurationBuilder(
 
         // Methods using lower downsampling bounds.
         .LargestTriangleThreeBuckets => blk: {
-            const default_threshold: u32 = 2; // Minimum allowed.
-            break :blk try getDefaultThresholdConfiguration(
+            const default_target_point_count: u32 = 2; // Minimum allowed.
+            break :blk try getDefaultTargetPointCountConfiguration(
                 allocator,
-                default_threshold,
+                default_target_point_count,
             );
         },
 
@@ -279,7 +279,7 @@ fn getDefaultDomainTransformationConfiguration(allocator: Allocator, number_of_c
     );
 }
 
-fn getDefaultThresholdConfiguration(allocator: Allocator, output_number: u32) ![]u8 {
+fn getDefaultTargetPointCountConfiguration(allocator: Allocator, output_number: u32) ![]u8 {
     return try std.fmt.allocPrint(
         allocator,
         "{{\"target_point_count\": {d}}}",
