@@ -48,9 +48,9 @@ pub const HistogramBinsNumber = struct {
 
 /// Configuration for downsampling methods specifying the number of data
 /// points to be returned.
-/// Example: { "output_threshold_number": 500 }
-pub const OutputThresholdNumber = struct {
-    output_threshold_number: u32,
+/// Example: { "target_point_count": 500 }
+pub const TargetPointCount = struct {
+    target_point_count: u32,
 };
 
 /// Configuration for methods that require an aggregate error type and bound.
@@ -125,8 +125,8 @@ pub fn parse(
             if (parsed_value.decimal_precision == 0 or parsed_value.decimal_precision >= 64)
                 return error.InvalidConfiguration;
         },
-        OutputThresholdNumber => {
-            if (parsed_value.output_threshold_number == 0)
+        TargetPointCount => {
+            if (parsed_value.target_point_count == 0)
                 return error.InvalidConfiguration;
         },
         EmptyConfiguration => {},
@@ -282,7 +282,7 @@ fn getDefaultDomainTransformationConfiguration(allocator: Allocator, number_of_c
 fn getDefaultThresholdConfiguration(allocator: Allocator, output_number: u32) ![]u8 {
     return try std.fmt.allocPrint(
         allocator,
-        "{{\"output_threshold_number\": {d}}}",
+        "{{\"target_point_count\": {d}}}",
         .{output_number},
     );
 }

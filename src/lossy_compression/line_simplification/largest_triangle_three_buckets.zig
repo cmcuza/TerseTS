@@ -44,7 +44,7 @@ const calculateArea = shared_functions.calculateTriangleArea;
 /// points which form the greatest triangle between an anchor point of the previous bucket and the average point
 /// of the next bucket. The function writes the result to `compressed_values`. The `allocator` is used to
 /// allocate memory for `method_configuration` parser. The `method_configuration` is expected to be of
-/// `OutputThresholdNumber` type otherwise an `InvalidConfiguration` error is returned.
+/// `TargetPointCount` type otherwise an `InvalidConfiguration` error is returned.
 /// If any other error occurs during the execution of the method, it is returned.
 pub fn compress(
     allocator: Allocator,
@@ -54,11 +54,11 @@ pub fn compress(
 ) Error!void {
     const parsed_configuration = try configuration.parse(
         allocator,
-        configuration.OutputThresholdNumber,
+        configuration.TargetPointCount,
         method_configuration,
     );
 
-    const threshold: usize = @intCast(parsed_configuration.output_threshold_number);
+    const threshold: usize = @intCast(parsed_configuration.target_point_count);
     // Return an error  for a threshold that is too low, because at least
     // 2 points are always necessary, as they anchor the line.
     if (threshold < 2) return Error.InvalidConfiguration;
@@ -134,7 +134,7 @@ pub fn decompress(allocator: Allocator, compressed_values: []const u8, decompres
     // of the values are in pairs (value, index) and that they are all of type 64-bit float.
     if (compressed_values.len < 8 or
         (compressed_values.len - 8) % 16 != 0)
-        return Error.UnsupportedInput;
+        return Error.CorruptedCompressedData;
 
     const compressed_lines_and_index = mem.bytesAsSlice(f64, compressed_values);
 
@@ -232,7 +232,7 @@ test "lttb keeps all values when threshold is at least the input length" {
     defer decompressed_values.deinit(allocator);
 
     const method_configuration =
-        \\ {"output_threshold_number": 16}
+        \\ {"target_point_count": 16}
     ;
 
     try compress(allocator, uncompressed_values, &compressed_values, method_configuration);
@@ -255,7 +255,7 @@ test "lttb downsamples with known result" {
     defer compressed_values.deinit(allocator);
 
     const method_configuration =
-        \\ {"output_threshold_number": 4}
+        \\ {"target_point_count": 4}
     ;
 
     try compress(allocator, uncompressed_values, &compressed_values, method_configuration);
@@ -283,7 +283,7 @@ test "lttb returns error for threshold below 2" {
     defer compressed_values.deinit(allocator);
 
     const method_configuration =
-        \\ {"output_threshold_number": 1}
+        \\ {"target_point_count": 1}
     ;
 
     try testing.expectError(
@@ -302,7 +302,7 @@ test "lttb with threshold 2 keeps only first and last point" {
     defer compressed_values.deinit(allocator);
 
     const method_configuration =
-        \\ {"output_threshold_number": 2}
+        \\ {"target_point_count": 2}
     ;
 
     try compress(allocator, uncompressed_values, &compressed_values, method_configuration);
@@ -331,7 +331,7 @@ test "lttb with threshold equal to len-1 preserves round-trip" {
     defer decompressed_values.deinit(allocator);
 
     const method_configuration =
-        \\ {"output_threshold_number": 4}
+        \\ {"target_point_count": 4}
     ;
 
     try compress(allocator, uncompressed_values, &compressed_values, method_configuration);
@@ -364,7 +364,7 @@ test "lttb handles uneven bucket distribution" {
     defer decompressed_values.deinit(allocator);
 
     const method_configuration =
-        \\ {"output_threshold_number": 5}
+        \\ {"target_point_count": 5}
     ;
 
     try compress(allocator, uncompressed_values, &compressed_values, method_configuration);
@@ -391,7 +391,7 @@ test "lttb handles collinear points" {
     defer decompressed_values.deinit(allocator);
 
     const method_configuration =
-        \\ {"output_threshold_number": 4}
+        \\ {"target_point_count": 4}
     ;
 
     try compress(allocator, uncompressed_values, &compressed_values, method_configuration);
@@ -415,7 +415,7 @@ test "lttb round-trip with threshold 3 preserves length" {
     defer decompressed_values.deinit(allocator);
 
     const method_configuration =
-        \\ {"output_threshold_number": 3}
+        \\ {"target_point_count": 3}
     ;
 
     try compress(allocator, uncompressed_values, &compressed_values, method_configuration);
@@ -442,7 +442,7 @@ test "lttb compress and decompress preserve length on larger data" {
     defer decompressed_values.deinit(allocator);
 
     const method_configuration =
-        \\ {"output_threshold_number": 20}
+        \\ {"target_point_count": 20}
     ;
 
     try compress(allocator, uncompressed_values.items, &compressed_values, method_configuration);
@@ -454,7 +454,7 @@ test "lttb compress and decompress preserve length on larger data" {
 test "lttb returns an error for an invalid configuration" {
     const allocator = testing.allocator;
 
-    // LTTB expects an OutputThresholdNumber configuration; any other shape is invalid.
+    // LTTB expects an TargetPointCount configuration; any other shape is invalid.
     const uncompressed_values: []const f64 = &[_]f64{ 1.0, 2.0, 3.0, 4.0 };
 
     var compressed_values = ArrayList(u8).empty;
@@ -471,7 +471,7 @@ test "lttb returns an error for an invalid configuration" {
 }
 
 test "check lttb configuration parsing" {
-    // Verifies that a well-formed OutputThresholdNumber configuration is accepted by compress.
+    // Verifies that a well-formed TargetPointCount configuration is accepted by compress.
     const allocator = testing.allocator;
 
     const uncompressed_values: []const f64 = &[_]f64{ 19.0, 48.0, 28.0, 3.0 };
@@ -480,7 +480,7 @@ test "check lttb configuration parsing" {
     defer compressed_values.deinit(allocator);
 
     const method_configuration =
-        \\ {"output_threshold_number": 4}
+        \\ {"target_point_count": 4}
     ;
 
     try compress(allocator, uncompressed_values, &compressed_values, method_configuration);
