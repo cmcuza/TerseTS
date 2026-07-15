@@ -39,6 +39,7 @@ const non_linear_approximation = @import(
 const piecewise_histogram = @import("lossy_compression/value_representation/histogram_representation.zig");
 const bitpacked_quantization = @import("lossy_compression/value_representation/bitpacked_quantization.zig");
 const serfqt = @import("lossy_compression/value_representation/serf_qt.zig");
+const serfxor = @import("lossy_compression/value_representation/serf_xor.zig");
 const buff = @import("lossy_compression/value_representation/bounded_fast_floats.zig");
 const macaque = @import("lossy_compression/value_representation/macaque.zig");
 
@@ -105,6 +106,7 @@ pub const Method = enum {
     DiscreteFourierTransform,
     MacaqueS,
     MacaqueV,
+    SerfXOR,
 };
 
 /// Compress `uncompressed_values` using `method` and its `configuration` and returns the results
@@ -118,6 +120,9 @@ pub fn compress(
     configuration: []const u8,
 ) Error!ArrayList(u8) {
     var compressed_values = ArrayList(u8).empty;
+    // Compression methods may fail after having partially written their output, so free the
+    // buffer on any error.
+    errdefer compressed_values.deinit(allocator);
 
     // Handle the trivial cases of zero or one element.
     if (uncompressed_values.len == 0) {
@@ -322,6 +327,14 @@ pub fn compress(
                 configuration,
             );
         },
+        .SerfXOR => {
+            try serfxor.compress(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                configuration,
+            );
+        },
         .Uncompressed => {
             for (uncompressed_values) |value| {
                 const value_as_bytes: [8]u8 = @bitCast(value);
@@ -341,6 +354,9 @@ pub fn decompress(
     compressed_values: []const u8,
 ) Error!ArrayList(f64) {
     var decompressed_values = ArrayList(f64).empty;
+    // Decompression methods may fail after having partially decoded corrupted or truncated
+    // streams, so free the buffer on any error.
+    errdefer decompressed_values.deinit(allocator);
 
     // Handle the trivial case of zero elements.
     if (compressed_values.len == 0) {
@@ -420,6 +436,9 @@ pub fn decompress(
         },
         .MacaqueV => {
             try macaque.decompressMacaqueV(allocator, compressed_values_slice, &decompressed_values);
+        },
+        .SerfXOR => {
+            try serfxor.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .Uncompressed => {
             if (compressed_values_slice.len % 8 != 0) return Error.CorruptedCompressedData;
@@ -578,6 +597,7 @@ pub fn extract(
         .BitPackedQuantization,
         .BitPackedDeltaEncoding,
         .SerfQT,
+        .SerfXOR,
         .RunLengthEncoding,
         .BitPackedBUFF,
         .Chimp64,
@@ -602,6 +622,9 @@ pub fn rebuild(
     if (coefficients.len == 0) return Error.UnsupportedInput;
 
     var compressed_values = ArrayList(u8).empty;
+    // Rebuilders may fail after having partially written their output, so free the buffer on
+    // any error.
+    errdefer compressed_values.deinit(allocator);
 
     switch (method) {
         // Both PMC methods use the same rebuilder.
@@ -729,6 +752,7 @@ pub fn rebuild(
         .BitPackedDeltaEncoding,
         .BitPackedBUFF,
         .SerfQT,
+        .SerfXOR,
         .RunLengthEncoding,
         .Chimp64,
         .Chimp128,
@@ -769,6 +793,7 @@ test "extract and rebuild works for any compression method supported" {
         if (method == Method.Uncompressed or
             method == Method.BitPackedQuantization or
             method == Method.SerfQT or
+            method == Method.SerfXOR or
             method == Method.RunLengthEncoding or
             method == Method.BitPackedDeltaEncoding or
             method == Method.BitPackedBUFF or

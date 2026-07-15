@@ -95,7 +95,8 @@ pub fn appendValueAndIndexToArrayList(
 /// Read a value of type `T` from `values` starting at `*offset`, advancing `*offset` by `@sizeOf(T)`.
 pub fn readOffsetValue(comptime T: type, values: []const u8, offset: *usize) Error!T {
     const offset_delta = @sizeOf(T);
-    if (values.len - offset.* < offset_delta) return Error.UnsupportedInput;
+    // Guard `offset.* > values.len` first so the subtraction below cannot wrap on unsafe builds.
+    if (offset.* > values.len or values.len - offset.* < offset_delta) return Error.UnsupportedInput;
 
     // Read into a fixed-size byte array, then bit-cast.
     var bytes: [@sizeOf(T)]u8 = undefined;
