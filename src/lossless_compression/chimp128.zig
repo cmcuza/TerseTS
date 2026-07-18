@@ -61,9 +61,8 @@ const lsb_bits = 14;
 /// Mask selecting the low `lsb_bits` of a value's bit pattern, i.e. its predictor lookup-table key.
 const lsb_mask: u64 = (1 << lsb_bits) - 1;
 
-/// Quantized leading-zero counts from the Chimp paper. `@clz(xor)` is rounded down to one of these
-/// eight boundaries so the chosen bucket index fits in `leading_zero_bucket_bits`.
-const leading_zero_buckets = [_]u6{ 0, 8, 12, 16, 18, 20, 22, 24 };
+/// Quantized leading-zero counts from the Chimp paper (shared with Chimp64 and Elf).
+const leading_zero_buckets = shared_structs.leading_zero_buckets;
 
 /// End-of-stream marker meaningful-bit count. Written in a marker `01` after the last value so the
 /// decoder needs no explicit value count: a real marker `01` always stores at least one meaningful

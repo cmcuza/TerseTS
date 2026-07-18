@@ -43,6 +43,11 @@ pub const ParameterSpacePoint = struct {
 pub const ABS_EPS: f64 = 1e-12;
 pub const REL_EPS: f64 = 1e-15;
 
+/// Quantized leading-zero counts from the Chimp paper, shared by Chimp64, Chimp128, and Elf's XOR
+/// layer. An exact `@clz` count is rounded down to one of these 8 boundaries so the chosen index
+/// fits in 3 bits.
+pub const leading_zero_buckets = [_]u6{ 0, 8, 12, 16, 18, 20, 22, 24 };
+
 /// `Segment` models a straight line segment from `start_point` to `end_point`. All segments
 /// have discrete points.
 pub const Segment = struct {

@@ -48,9 +48,8 @@ const trailing_zero_threshold = 6;
 /// Number of randomized rounds the generated-distribution round-trip test runs.
 const generated_test_rounds = 5;
 
-/// Quantized leading-zero counts from the Chimp paper. `@clz(xor)` is rounded down to one of these
-/// eight boundaries so the chosen bucket index fits in `leading_zero_bucket_bits`.
-const leading_zero_buckets = [_]u6{ 0, 8, 12, 16, 18, 20, 22, 24 };
+/// Quantized leading-zero counts from the Chimp paper (shared with Chimp128 and Elf).
+const leading_zero_buckets = shared_structs.leading_zero_buckets;
 
 /// End-of-stream marker meaningful-bit count. Written in a marker `01` after the last value so the
 /// decoder needs no explicit value count: a real marker `01` always stores at least one meaningful
