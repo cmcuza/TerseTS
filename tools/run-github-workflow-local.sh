@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 
 # Copyright 2026 TerseTS Contributors
 #
@@ -14,14 +14,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# This script is intended to be run from the root of the repository 
-# and will execute the same steps as the GitHub workflow defined in
-# .github/workflows/ci.yml, allowing you to verify that the workflow will
-# succeed locally before pushing changes.
+# Approximates .github/workflows/ci.yml for local verification before pushing.
+# The C-binding only runs Clang for testing C-syntax. Therefore, it is skipped in this
+# script to avoid requiring Clang to be installed locally.
 
-set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+set -eu
+
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 
 export CARGO_TERM_COLOR=always
 export RUSTFLAGS="-D warnings"
@@ -31,21 +31,21 @@ print_step() {
     printf "\n==> %s\n" "$1"
 }
 
+# Accumulates names of missing commands and reports them all at once.
 assert_command_available() {
-    local missing_commands=()
-    local command_name
+    missing_commands=""
 
     for command_name in "$@"
     do
         if ! command -v "$command_name" >/dev/null 2>&1
         then
-            missing_commands+=("$command_name")
+            missing_commands="${missing_commands:+$missing_commands }$command_name"
         fi
     done
 
-    if [ "${#missing_commands[@]}" -gt 0 ]
+    if [ -n "$missing_commands" ]
     then
-        printf "Required commands not found in PATH: %s\n" "${missing_commands[*]}" >&2
+        printf "Required commands not found in PATH: %s\n" "$missing_commands" >&2
         exit 1
     fi
 }
@@ -54,46 +54,64 @@ assert_command_available zig gcc julia python rustup cargo
 
 cd "$repo_root"
 
-# Build the native library first so local bindings can load zig-out artifacts.
+# Run Zig fmt to validate that the code is properly formatted.
 print_step "Zig fmt Check"
-zig fmt --check .
+if ! zig fmt --check .
+then
+    printf "Error: zig fmt check failed. Run 'zig fmt .' and re-run this script.\n" >&2
+    exit 1
+fi
+
+# Build TereTS in both modes to validate that it works correctly.
 print_step "Zig Build Debug"
 zig build -Doptimize="Debug"
 print_step "Zig Build ReleaseFast"
 zig build -Doptimize="ReleaseFast"
+
+# Build and test TerseTS in both modes to validate that they work correctly.
 print_step "Zig Build Test Debug"
 zig build test -Doptimize="Debug"
 print_step "Zig Build Test ReleaseFast"
 zig build test -Doptimize="ReleaseFast"
 
-# Julia
+# Test C bindings.
+print_step "Clang C-binding Syntax Check"
+cd "$repo_root/bindings/c"
+if command -v clang >/dev/null 2>&1; then
+    command clang -Weverything tersets.h
+else
+    printf "Skipping C-binding syntax check because Clang is not available.\n" >&2
+fi 
+
+print_step "GCC C-binding Syntax Check"
+gcc -Wall -Wextra tersets.h
+
+# Test Julia binding.
 cd "$repo_root/bindings/julia"
 print_step "Julia Run Unittest"
 julia Tests.jl
 
-# Python
-cd "$repo_root"
+# Test Python binding.
+# Install from source, confirm the package resolves from site-packages, then test.
 cd "$repo_root/bindings/python"
 print_step "Python Install Binding"
 python -m pip install . -v
+# We need to move out of the bindings/python directory to ensure
+# that the installed package is imported instead of the local source code.
 cd "$repo_root"
 print_step "Python Verify Installed Binding Import"
 python - <<'PY'
 import pathlib
 import tersets
-
 library_path = str(pathlib.Path(tersets.__file__)).lower()
-print(library_path)
 assert "site-packages" in library_path or "dist-packages" in library_path
 PY
-cd "$repo_root/bindings/python"
 print_step "Python Run Unittest"
-python -m unittest --verbose
+python -m unittest discover --verbose -s "$repo_root/bindings/python"
 
-# The presence of .dylib files breaks static linking on macOS in CI.
-# Run the same cleanup locally to mirror the workflow before Rust tasks.
+# Test Rust binding.
+# Zig outputs .dylib files into zig-out that break Rust static linking on macOS.
 cd "$repo_root"
-
 print_step "Clear Zig Cache and Zig Out"
 rm -rf .zig-cache zig-out
 
