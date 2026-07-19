@@ -449,11 +449,9 @@ test "vw compress and compress with random data" {
     // Check if the decompressed values have the same lenght as the compressed ones.
     try testing.expectEqual(uncompressed_values.items.len, decompressed_values.items.len);
 
-    // In theory, all triangles formed by the slices of removed points should be within the error otherwise the
-    // point cannot be removed. In this case, the error bound is unknown as well as which points are finally
-    // preserved in the compressed representation. Therefore, we need to used the compressed representation to access
-    // each of the points preserved and their index `current_point_index`. Then, the area of the triangles formed by the
-    // slices of the removed points from `previous_point_index`..`current_point_index` should be less than `error_bound`.
+    // Reconstruct the indices of points kept by VW from the compressed representation.
+    // Then validate the VW invariant on consecutive kept-point triplets: each kept
+    // interior point must have effective area greater than or equal to `error_bound`.
     const compressed_representation = mem.bytesAsSlice(f64, compressed_values.items);
 
     var kept_indices = ArrayList(usize).empty;
@@ -461,12 +459,12 @@ test "vw compress and compress with random data" {
     try kept_indices.append(allocator, 0);
 
     var index: usize = 0;
-    while (index < compressed_representation.len - 1) : (index += 2) {
+    while (index + 2 < compressed_representation.len) : (index += 2) {
         try kept_indices.append(allocator, @as(usize, @bitCast(compressed_representation[index + 2])));
     }
 
     for (1..kept_indices.items.len - 1) |i| {
-        // Check if the point is within the error bound.
+        // Check if the point satisfies the minimum effective area bound.
         const area = calculateAreaFromValues(
             uncompressed_values.items,
             kept_indices.items[i - 1],
