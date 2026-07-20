@@ -19,6 +19,7 @@ When reviewing or editing TerseTS:
 - Preserve compatibility-sensitive public names even when they predate the current style. Keep additions consistent within an existing public type that is a naming exception; for example, a new `Method` member follows that type's established convention until a planned API migration changes the type as a whole. Do not use such exceptions as precedent for unrelated declarations.
 - When a compression method is added or renamed, check that `Method` values stay synchronized across `src/tersets.zig`, `src/capi.zig`, `bindings/c/tersets.h`, `bindings/rust/src/lib.rs`, `bindings/python/tersets/__init__.py`, and `bindings/julia/TerseTS.jl`.
 - Keep method configuration names consistent with `src/configuration.zig`.
+- Check licence headers, copyright year.
 - Prefer small, local changes. Do not introduce broad abstractions unless they remove concrete duplication or match an existing TerseTS pattern.
 - For bit-level codecs, inspect corrupted-input handling, sentinel/header layout, integer casts, shift widths, and Debug versus ReleaseFast behavior.
 - Run or request `zig fmt` for changed Zig files, `zig build test --summary all`, and for bit-level codec changes `zig build test -Doptimize=ReleaseFast --summary all`.

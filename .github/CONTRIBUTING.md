@@ -1,346 +1,208 @@
-# Contributing Guidelines for TerseTS
+# Contributing to TerseTS
 
-TerseTS is a high-performance compression library written in [Zig](https://ziglang.org/) with bindings for other languages through a C interface. It uses the Apache‑2.0 license and includes a pre‑commit hook for building, formatting, and running tests. We welcome contributions of all kinds: bug reports, feature requests, code, documentation, or tests. The following guidelines summarize how to contribute effectively.
+TerseTS accepts bug fixes, compression methods, binding changes, tests, and documentation updates. Keep each pull request focused on one change. For a large feature, a new compression category, or a public API change, open an issue before writing the implementation.
 
-## 1. Environment Setup
+The [README](../README.md) explains how to build and use TerseTS. This guide covers repository conventions that contributors need when changing the implementation.
 
-Consult the relevant README and source file for language-specific contribution setup.
+## Development setup
 
-| Language | Path |
-|----------|------|
-| Zig      | [README.md](../README.md) and [src/tersets.zig](../src/tersets.zig) |
-| C        | [src/capi.zig](../src/capi.zig) and [C header](../bindings/c/tersets.h) comments |
-| Python   | [bindings/python/README.md](../bindings/python/README.md) |
+Use the Zig version selected by the [CI workflow](workflows/zig-fmt-build-and-test-on-pr-and-push.yml). Build and test the library from the repository root:
 
-## 2. Development Tools and Checks
-- Run [`tools/pre-commit`](../tools/pre-commit) before every commit. It:
-  - Builds the library (`Debug` and `ReleaseFast`)
-  - Runs Zig and Python tests
-  - Formats code (`zig fmt`)
-  - Compiles the C header
-- To use it as a Git hook for automatic execution do:
-  - On Unix-like:
-    ```bash
-    ln -s ../../tools/pre-commit .git/hooks/pre-commit
-    ```
-  - On Windows:
-    ```powershell
-    copy tools\pre-commit .git\hooks\pre-commit
-    ```
-
-## 3. Code Style
-- Add the Apache-2.0 license header to new files. You can copy from [LICENSE_HEADER](../tools/LICENSE_HEADER).
-- Follow [Zig's official style guide](https://ziglang.org/documentation/master/#Style-Guide).
-- Apply Zig's naming rules by declaration semantics:
-  - Use `camelCase` for ordinary functions and other callable values.
-  - Use `TitleCase` for types, type aliases, and functions that return a type.
-  - Use `snake_case` for other values, including variables, constants, fields, and enum fields.
-  - Use `TitleCase.zig` for files with top-level fields and `snake_case.zig` for namespace files. Use `snake_case` for directories.
-- Preserve an established public name when changing it would break compatibility. Keep new members consistent within an existing public type that is a naming exception, but do not copy that exception into unrelated declarations.
-- Format code with:
-  ```bash
-  zig fmt .
-  ```
-
-## 4. Language-Specific Contribution Guides
-<a id="zig-specific"></a>
-<details>
-<summary><strong>Zig Contributing Steps</strong></summary>
-
-#### 🧩 Add a New Compression Method
-
-In the `src/` directory, compression methods are organized by category. These categories are inspired by the following papers:
-
-- [Time Series Compression Survey (2023)](https://dl.acm.org/doi/10.1145/3560814)  
-- [CAMEO: Autocorrelation-Preserving Line Simplification (2024)](https://arxiv.org/abs/2501.14432)
-
-Current categories:
-
-- `src/functional_approximation/`  
-  Methods using linear or non-linear functions to approximate segments.
-  - e.g. [Poor Man’s Compression](../src/functional_approximation/poor_mans_compression.zig)
-  - e.g. [Swing and Slide Filter](../src/functional_approximation/swing_slide_filter.zig)
-
-- `src/histogram_representation/`  
-  Methods that model the time series as a histogram.
-
-- `src/line_simplification/`  
-  Sampling-based or geometry-driven simplification techniques.
-  - e.g. [Visvalingam-Whyatt](../src/line_simplification/visvalingam_whyatt.zig)
-  - e.g. [Bottom-Up](../src/line_simplification/bottom_up.zig)
-
-- `src/lossless_encoding/`  
-  Techniques that preserve full precision of the input time series.
-  - e.g. [Run Length Enconding](../src/lossless_enconding/run_length_encoding.zig)
-
-- `src/value_quantization/`  
-  Techniques that apply any kind of value quantization.
-  - e.g. [Quantization](../src/value_quantization/bitpacked_quantization.zig)
-
-🔧 If your method fits an existing category, add it under the respective folder using the filename pattern `[method_short_name].zig`.  If your method introduces a *new compression paradigm*, justify the new category in your commit message.
-
-
-📌 **Note:** Add the new method to `tersets.Method` and expose the `compress` and `decompress` function in `src/tersets.zig`. 
-
-#### 🧱 File Structure Guidelines
-
-Every source file containing a new compression method must follow this convention:
-  - `enum` and `struct` without methods are first.
-  - The `compress` and `decompress` functions are public and come right after, respectivelly.
-  - struct containing methods after `decompress` function. 
-  - Private functions follow in the same order in which they are called.
-  - All test cases at the end of the file.
-
-Example:
-
-```c 
-// 1. Enums and structs without methods
-// 2. pub fn compress(...) Error!void { ... }
-// 3. pub fn decompress(...) Error!void { ... }
-// 4. structs with methods (if any)
-// 5. private helper functions, in the order they are called
-// 6. test cases at the end 
+```sh
+zig fmt --check .
+zig build -Doptimize=Debug
+zig build test -Doptimize=Debug
+zig build -Doptimize=ReleaseFast
+zig build test -Doptimize=ReleaseFast
 ```
 
-#### 📏 Function Signature Guidelines
-For consistency across TerseTS, follow this recommended signature:
-```c
-/// Compress `uncompressed_values` within `error_bound` using "[METHOD]". The function writes the 
-/// result to `compressed_values`. The `allocator` is used for memory allocation of intermediate 
-/// data structures. If an error occurs, it is returned.
-pub fn compress(
+Run [`tools/pre-commit`](../tools/pre-commit) before each commit:
+
+```sh
+sh tools/pre-commit
+```
+
+The script checks Zig formatting where CI supports it, builds and tests both optimization modes, compiles the C header with GCC and with Clang when available, and runs the Python tests.
+
+Run [`tools/run-github-workflow-local.sh`](../tools/run-github-workflow-local.sh) before requesting review when you have the complete toolchain available:
+
+```sh
+sh tools/run-github-workflow-local.sh
+```
+
+This script approximates the complete CI job, including Julia, an installed Python package, and Rust. It installs the Python binding into the active Python environment, so use a virtual environment when needed. Clang is optional for this script; Zig, GCC, Julia, Python, and Cargo are required.
+
+Both scripts use `python3` or `python` when available. Set `TERSETS_PYTHON` to the interpreter path when neither command resolves to the Python environment you want to test.
+
+Run the checks for every binding that you change. The CI workflow is the source of truth for the commands and tool versions used by the project.
+
+## Repository layout
+
+| Path | Purpose |
+| --- | --- |
+| [`src/tersets.zig`](../src/tersets.zig) | Public Zig API, compression method registry, and method dispatch |
+| [`src/configuration.zig`](../src/configuration.zig) | Configuration types, JSON parsing, validation, and test configurations |
+| [`src/lossless_compression/`](../src/lossless_compression) | Lossless compression methods |
+| [`src/lossy_compression/`](../src/lossy_compression) | Lossy methods grouped by compression approach |
+| [`src/utilities/`](../src/utilities) | Shared data structures and algorithms |
+| [`src/tester.zig`](../src/tester.zig) | Shared generators and compression test helpers |
+| [`bindings/`](../bindings) | C, Julia, Python, and Rust APIs |
+
+Place a new method in the existing category that describes how it compresses data. Add a new category only when none of the current directories fits.
+
+## Zig style
+
+Add the Apache-2.0 header from [`tools/LICENSE_HEADER`](../tools/LICENSE_HEADER) to new source files. Run `zig fmt` on every changed Zig file.
+
+Follow [Zig's official style guide](https://ziglang.org/documentation/master/#Style-Guide):
+
+- Use `camelCase` for ordinary callables.
+- Use `TitleCase` for types, type aliases, and callables that return a type.
+- Use `snake_case` for other values, including variables, constants, fields, and enum fields.
+- Use `TitleCase.zig` for files with top-level fields. Use `snake_case.zig` for namespace files and `snake_case` for directories.
+- Apply the same rules to acronyms and initialisms.
+
+Some public TerseTS names predate these rules. Preserve a name when changing it would break compatibility. New members of an existing public type, such as `Method`, must remain consistent with that type until a planned API migration changes the complete API. Do not copy a compatibility exception into unrelated code.
+
+Compression method files normally use this order:
+
+1. Imports, aliases, constants, and types without methods.
+2. Public compression and decompression functions.
+3. Types with methods.
+4. Private helpers in the order they are first used.
+5. Tests.
+
+## Compression method interface
+
+Compression implementations receive JSON configuration text through `method_configuration`. Standard entry points are compatible with these function types:
+
+```zig
+const CompressFn = fn (
     allocator: std.mem.Allocator,
     uncompressed_values: []const f64,
-    compressed_values: *ArrayList(u8),
-    error_bound: f32,
-)  Error!void  { ... }
+    compressed_values: *std.ArrayList(u8),
+    method_configuration: []const u8,
+) tersets.Error!void;
 
-/// Decompress `compressed_values` produced by "[METHOD]". The function writes the result to
-/// `decompressed_values`. The `allocator` is used for memory allocation of intermediate
-/// data structures. If an error occurs it is returned.
-pub fn decompress(
+const DecompressFn = fn (
     allocator: std.mem.Allocator,
     compressed_values: []const u8,
-    decompressed_values: *ArrayList(f64),
-)  Error!void  { ... }
+    decompressed_values: *std.ArrayList(f64),
+) tersets.Error!void;
 ```
 
-📌 If the allocator or error bound are not needed, they can be removed from the signature. 
+Expose these as `pub fn compress` and `pub fn decompress`. A module may use more specific function names when it implements multiple `Method` values. Keep parameter names consistent with nearby methods and with the public API.
 
+Treat each method's encoded format as a contract between its compressor and decompressor. The decompressor must accept every stream produced by the compressor and reject malformed or truncated input with a TerseTS error. Document the byte or bit layout next to the code that writes it when the layout is not self-evident.
 
-<a id="zig-error-codes"></a>
-#### ⚠️ Zig Error Codes 
+## Configuration
 
-Errors in the Zig core are mapped to C-friendly integer codes in `capi.zig`:
+The public APIs pass configuration as JSON. Each compressor converts that JSON to a typed configuration defined in [`src/configuration.zig`](../src/configuration.zig). Bindings should pass the same configuration data to the Zig core instead of implementing their own validation rules.
 
-| Code | Zig Error                 | Meaning                              |
-|------|----------------------------|---------------------------------------|
-| 0    | —                          | Success                               |
-| 1    | `Error.UnknownMethod`      | Unsupported compression method        |
-| 2    | `Error.UnsupportedInput`  | No/unexpected input data              |
-| 3    | `Error.UnsupportedErrorBound` | Negative error bound              |
-| 4    | `Error.OutOfMemory`       | Allocation failure                    |
-| 5    | `Error.ItemNotFound`      | Missing data or lookup failure        |
-| 6    | `Error.EmptyConvexHull`   | Convex hull utility received no data  |
-| 7    | `Error.EmptyQueue`        | Priority queue utility empty          |
+Reuse an existing configuration type when its fields and validation match the method. Parse it near the start of the compressor:
 
-📌 If a new `Error` code is needed, mention it in the PR description.
-
-#### 🛠️ Adding Utility Functions
-
-Shared logic that’s not specific to a single compression method should go in the `src/utilities/` folder. Current files include:
-
-
-- `src/utilities/convex_hull.zig`  
-  Contains a `ConvexHull` struct with functions for hull construction, point inclusion, and area computation.
-
-- `src/utilities/hashed_priority_queue.zig`  
-  Implements a priority queue with fast lookup and removal by key, useful for algorithms needing efficient dynamic heaps.
-
-- `src/utilities/shared_structs.zig`  
-  Defines general-purpose structs shared across modules (e.g., `DiscretePoint`, `Segment`, `LinearFunction`).
-
-- `src/utilities/shared_functions.zig`  
-  Contains common helper functions like appending values to a list and bit casting.
-
-#### ✅ Best Practices for Utilities
-
-- **One responsibility per file:** Keep modules cohesive and focused.
-- **Prefer reuse:** Import utilities rather than duplicating code.
-- **Granularity:** If a utility becomes too large, consider splitting it into smaller modules.
-- **Testing:** Add tests to illustrate and validate the behaviour when necessary.
-
-📌 If you add a new utility that becomes broadly useful, mention it in the PR description.
-</details>
-
-<a id="c-specific"></a>
-<details>
-<summary><strong>C Contributing Steps</strong></summary>
-
-#### 📚 C API Overview
-The C API in `bindings/c/tersets.h` mirrors Zig’s compression methods via:
-
-- `enum Method { … }`: matching `tersets.Method`.
-- `UncompressedValues`, `CompressedValues`, and `Configuration` structs
-- `compress(...)` and `decompress(...)` functions
-
-#### 🛠 Binding a New Method
-1. If you add a new method in Zig, ensure the C `enum Method` gains the new entry (matching name & value).
-2. You do not need to modify anything else in C.
-
-#### ✅ API Conventions
-
-```c
-int32_t compress(
-    struct UncompressedValues uncompressed,
-    struct CompressedValues *compressed_out,
-    struct Configuration config
+```zig
+const parsed_configuration = try configuration.parse(
+    allocator,
+    configuration.AbsoluteErrorBound,
+    method_configuration,
 );
-```
-Error return codes are defined in the Zig layer and passed through the C API.
-
-➡️ See [Zig Error Codes](#zig-error-codes) for a full list of meanings.
-
-</details>
-
-<a id="python-specific"></a>
-<details>
-<summary><strong>Python Contributing Steps</strong></summary>
-
-#### 🐍 Python API Overview
-Public functions:
-
-```python
-compress(values: List[float], method: Method, error_bound: float) -> bytes
-decompress(data: bytes) -> List[float]
+const error_bound = parsed_configuration.abs_error_bound;
 ```
 
-These wrap the `C API` via `ctypes`, loading the shared library built by Zig.
+When a method needs a new configuration shape:
 
-#### 🔍 Adding a Method in Python
-After adding the new method in Zig:
-* Add it to the Python’s `Method` enum.
-* Add tests to confirm it works via compress/decompress.
+1. Add a specifically named configuration struct to `src/configuration.zig`.
+2. Use `snake_case` JSON field names that match the Zig fields exactly.
+3. Add validation to `configuration.parse`. Invalid JSON, missing fields, extra fields, and out-of-range values must return `Error.InvalidConfiguration`.
+4. Add valid and invalid parsing tests next to the configuration tests.
+5. Register a valid configuration in `defaultConfigurationBuilder` so the shared method tests can exercise the compressor.
+6. Update user documentation only when the public configuration shape changes.
 
-</details>
+Method implementations without options still parse `EmptyConfiguration` and accept `{}`. Do not add a separate error-bound parameter or a binding-specific configuration format.
 
-## 5. Other Binding Contributions
+## Registering a method
 
-We welcome improvements and new features in the C and Python bindings—including better error messages, usability improvements, or helper functions.
+Adding a compressor requires more than adding its implementation file:
 
-However, please note:
+1. Add the method to `Method` in `src/tersets.zig`.
+2. Add compression and decompression dispatch in `src/tersets.zig`.
+3. Decide whether `extract` and `rebuild` support the format. Add dispatch or keep the method on the explicit unsupported path.
+4. Add the method's configuration to `defaultConfigurationBuilder`.
+5. Mirror the method name and numeric value in every binding.
+6. Add method-level and public API tests.
 
-* 🧩 **Keep bindings thin:** Bindings should reflect the Zig core behavior as closely as possible.
+For non-empty input, the final byte of a compressed stream stores the `Method` value. Append new methods; never reorder or renumber existing entries. A changed value makes existing streams and language bindings incompatible.
 
-* 📦 **No external dependencies:** Do not introduce new runtime or build-time dependencies (e.g., Python packages, C libraries) unless there is a very strong justification and it is essential to the functionality.
+Keep the method definitions synchronized in these files:
 
-* 🧾 **Justify structural changes:** If you propose changes to how bindings are organized, loaded, or called, please clearly explain the motivation and benefit in the PR description.
+| API | Method definition |
+| --- | --- |
+| Zig | [`src/tersets.zig`](../src/tersets.zig) |
+| C | [`bindings/c/tersets.h`](../bindings/c/tersets.h) |
+| Rust | [`bindings/rust/src/lib.rs`](../bindings/rust/src/lib.rs) |
+| Python | [`bindings/python/tersets/__init__.py`](../bindings/python/tersets/__init__.py) |
+| Julia | [`bindings/julia/TerseTS.jl`](../bindings/julia/TerseTS.jl) |
 
-## 6. Tests
-All compression methods must be validated using the unified testing framework in `src/tester.zig`.
+If a change adds a TerseTS error, update `Error` in `src/tersets.zig`, the stable C error mapping in `src/capi.zig`, affected bindings, and their tests. Do not expose Zig's internal error integer values through the C API.
 
-This file contains:
-- Utility functions for generating test data (e.g., linear, sinusoidal, bounded random)
-- High-level test runners like `testErrorBoundedCompressionMethod` and `testGenerateCompressAndDecompress`
-- A set of error-bounded compression checks
-- `NaN/infinity` injection for stress testing
-- Tools for narrowing down minimal failing subsequences
+Keep bindings thin. Memory allocated by the C API must be released through the matching `free*` function. Avoid new runtime or build dependencies unless the change cannot be implemented reasonably with the existing toolchain.
 
-#### 🧪 How to Add Tests
+## Tests
 
-When implementing a new method (e.g., `Method.MyNewMethod`), you should:
-1. Add `test` blocks in your compression method file (e.g., `my_new_method.zig`):
-2. Use `testErrorBoundedCompressionMethod` with multiple data distributions. Example:
-    ```c
-    test "mynewmethod supports bounded error compression across distributions" {
-       const allocator = testing.allocator;
-       const data_distributions = &[_]tester.DataDistribution{
-           .FiniteRandomValues,
-           .LinearFunctions,
-           .BoundedRandomValues,
-           .SinusoidalFunction,
-           .LinearFunctionsWithNansAndInfinities,
-           .RandomValuesWithNansAndInfinities,
-       };
-       try tester.testErrorBoundedCompressionMethod(
-           allocator,
-           Method.MyNewMethod,
-           data_distributions,
-       );
-    }
-3. Use `testGenerateCompressAndDecompress` with `error_bound = 0`. Example:
-    ```c
-    test "mynewmethod can compress and decompress with zero error" {
-       const allocator = testing.allocator;
-       try tester.testGenerateCompressAndDecompress(
-           allocator,
-           tester.generateRandomValues,
-           Method.MyNewMethod,
-           0,
-           shared_functions.isWithinErrorBound,
-       );
-    }
-    ```
+Place method-specific tests at the end of the method file. Use [`src/tester.zig`](../src/tester.zig) for generated data and public API coverage.
 
-#### ⚠️ Methods with Input Constraints
+Tests for a lossy method should cover:
 
-Some methods may not support all data types (e.g., `NaN`, `inf`, high-magnitude floats). This is acceptable as long as:
+- The documented error bound across the supported data distributions.
+- Zero error when the method claims to support it.
+- Empty, single-value, and boundary-sized inputs where relevant.
+- `NaN`, infinity, and unsupported values, with explicit expected behavior.
+- Invalid configuration and malformed compressed input.
+- State transitions at block, segment, or adaptive-window boundaries.
 
-* The test suite excludes unsupported distributions.
-* You add explicit negative tests that check failure modes and confirm appropriate errors are raised.
+Tests for a lossless method should compare every decompressed bit pattern with the input. Include repeated values, special floating-point values, and inputs that switch between encoding modes.
 
-Example:
-```c
-test "my-method cannot compress nan values" {
-    const data = &[4]f64{ 1.0, math.nan(f64), 3.0, 4.0 };
-    var buffer = ArrayList(u8).init(testing.allocator);
-    defer buffer.deinit();
+Use `std.testing.allocator` in tests so leaks are reported. Run both Debug and ReleaseFast tests for bit-level code because integer casts, shifts, and safety checks can behave differently across optimization modes.
 
-    compress(data, &buffer, testing.allocator, 0.1) catch |err| {
-        try testing.expectEqual(Error.UnsupportedInput, err);
-        return;
-    };
+When a binding changes, test through that binding's public API. A Zig round trip does not verify FFI types, method values, ownership, or error translation.
 
-    try testing.expectFmt("", "Expected error not triggered", .{});
-}
-```
+## Documentation and comments
 
-#### 🔍 Specialized Behavior
-Some methods may require additional tests beyond correctness:
-* Compression efficiency (e.g. merging, segment length control).
-* Internal structure properties (e.g. monotonicity, convexity).
-* Stress tests with large or adversarial inputs.
+Write documentation for maintainers and users of the API:
 
-You are encouraged to add dedicated test blocks for these in the same `.zig` file.
+- Use `//!` for a file or namespace and `///` for the declaration that follows it.
+- Start with the behavior that is not already clear from the declaration name.
+- Explain ownership, lifetimes, encoded layouts, invariants, supported input, and error behavior where they matter.
+- Use the names found in TerseTS code. Introduce terminology from a paper or reference implementation only when it helps connect the implementation to its source.
+- Cite a paper or upstream repository once near the module-level explanation. Do not reproduce a paper summary in code comments.
+- Remove line-by-line narration, marketing claims, analogies, and repeated explanations.
+- Use plain headings and text. Do not add icons or emoji.
 
-## 7. Git Commit Conventions
+Comments should explain why a choice or invariant exists. Code should explain the routine control flow.
 
-- Use short, imperative summaries (e.g., “Add swing filter compression”).
-- Explain *why* the change is needed, not just *what* changed.
-- If referencing a paper (e.g., for a new algorithm), include the citation or link.
+## Utilities
 
-See [cbea.ms/git-commit](https://cbea.ms/git-commit/) for a quick guide.
+Put shared code in `src/utilities` only when more than one method needs it or when it forms a distinct, tested algorithm. Use a specific name that describes its role. Keep method-specific helpers in the method file.
 
+Document ownership for utilities that allocate or return slices. Add tests for boundary cases and errors, not only the expected path.
 
-## 8. Pull Requests
-We welcome PRs of all sizes, but please follow these guidelines:
+## Pull requests
 
-- **Describe what the PR does**: include a summary of the feature or fix.
-- **Explain why it’s needed**: especially if it introduces a new method, category, or utility.
-- **Reference related issues** using `Fixes #123` or `Closes #123`.
-- **Run `tools/pre-commit` locally** to catch issues early.
-- **Link to papers** if you’re implementing an algorithm from a publication.
-- **Avoid adding dependencies** unless justified (see note under “Bindings”).
+Before requesting review:
 
-📌 Need help structuring your PR? See [Pull Request Template](PULL_REQUEST_TEMPLATE.md).
+- Keep the change focused and remove unrelated formatting or generated files.
+- Explain what changed and why it belongs in TerseTS.
+- Link the issue or paper that motivates the change when relevant.
+- Describe public API, configuration, compressed format, and compatibility changes explicitly.
+- List unsupported inputs or known limitations.
+- Run the applicable local and binding checks.
+- Update the README when users must call the API differently.
 
+Use the [pull request template](PULL_REQUEST_TEMPLATE.md). Short, concrete descriptions are easier to review than a long account of the implementation process.
 
-## 9. Filing Issues
+Commit summaries should be imperative and describe the change, for example, `Add Gorilla lossless compression`. Use the commit body when the reason or compatibility impact is not clear from the summary.
 
-When opening an issue, please:
+## Issues
 
-- Describe the problem clearly (what you expected vs. what happened).
-- Include example data or steps to reproduce, if possible.
-- Mention your system, Zig version, and how you built the project.
-
-Use labels (bug, enhancement, question, etc.) to help triage faster.
+A useful bug report includes the input or a small reproducer, the expected result, the actual result, the Zig version, the target platform, and the command used to build or test TerseTS. Do not include private time-series data; reduce it to the smallest input that still demonstrates the problem.
