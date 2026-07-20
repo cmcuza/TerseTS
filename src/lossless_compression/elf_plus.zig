@@ -240,6 +240,7 @@ pub fn decompress(
     if (compressed_values.len < 16) return Error.UnsupportedInput;
 
     // The header gives the exact output length, so reserve it once and append without growth checks.
+    if (value_count > math.maxInt(usize)) return Error.UnsupportedInput;
     try decompressed_values.ensureTotalCapacity(allocator, @intCast(value_count));
 
     const first_value = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
@@ -475,6 +476,11 @@ fn eraser(
         try bit_writer.writeBits(@as(u2, 0b10), 2);
         return .{ .value_prime_bits = value_bits, .new_last_beta_star = last_beta_star };
     }
+    // beta_star is encoded in 4 bits; values > 15 are not representable on the erase path.
+    if (ab.beta_star > 15) {
+        try bit_writer.writeBits(@as(u2, 0b10), 2);
+        return .{ .value_prime_bits = value_bits, .new_last_beta_star = last_beta_star };
+    }
 
     // g(alpha) tells us how many mantissa bits are needed to represent the value exactly given
     // its decimal precision; everything below g(alpha) is binary noise we can erase.
@@ -511,8 +517,6 @@ fn eraser(
         }
     }
 
-    // beta_star fits in 4 bits (<= 15) by construction: the `eraser` rejects beta >= 16 above via
-    // the `eraseBits > 4` profitability check.
     try bit_writer.writeBits(@as(u2, 0b11), 2);
     try bit_writer.writeBits(ab.beta_star, 4);
     return .{ .value_prime_bits = value_prime_bits, .new_last_beta_star = ab.beta_star };
@@ -539,9 +543,9 @@ fn restorer(value_prime: f64, beta_star: u8) Error!f64 {
         return if (value_prime < 0) -recovered else recovered;
     }
     // For valid streams alpha equals the encoder's alpha, which is in [0, 20]. A corrupted
-    // stream can drive alpha negative, which would trap `roundUp`/`getPositivePowerOfTen`'s negative @intCast.
+    // stream can drive alpha outside that range; reject it instead of calling pow() with a huge exponent.
     const alpha: i32 = @as(i32, beta_star) - @as(i32, significand_position) - 1;
-    if (alpha < 0) return Error.UnsupportedInput;
+    if (alpha < 0 or alpha >= f_alpha_table.len) return Error.UnsupportedInput;
     return roundUp(value_prime, alpha);
 }
 
