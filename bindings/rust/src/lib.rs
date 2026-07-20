@@ -52,6 +52,7 @@ pub enum Method {
     DiscreteFourierTransform,
     MacaqueS,
     MacaqueV,
+    MixedTypePLA,
 }
 
 /// Compress a slice of [`f64`] in `uncompressed_values` to a [`Vec`] of [`u8`] with a TerseTS

@@ -31,6 +31,9 @@ const abc_linear_approximation = @import(
 );
 const sim_piece = @import("lossy_compression/functional_approximation/sim_piece.zig");
 const mix_piece = @import("lossy_compression/functional_approximation/mix_piece.zig");
+const mixed_type_pla = @import(
+    "lossy_compression/functional_approximation/mixed_type_pla.zig",
+);
 const non_linear_approximation = @import(
     "lossy_compression/functional_approximation/non_linear_approximation.zig",
 );
@@ -105,6 +108,7 @@ pub const Method = enum {
     DiscreteFourierTransform,
     MacaqueS,
     MacaqueV,
+    MixedTypePLA,
 };
 
 /// Compress `uncompressed_values` using `method` and its `configuration` and returns the results
@@ -328,6 +332,14 @@ pub fn compress(
                 try compressed_values.appendSlice(allocator, value_as_bytes[0..]);
             }
         },
+        .MixedTypePLA => {
+            try mixed_type_pla.compress(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                configuration,
+            );
+        },
     }
     try compressed_values.append(allocator, @intFromEnum(method));
     return compressed_values;
@@ -399,6 +411,9 @@ pub fn decompress(
         },
         .SerfQT => {
             try serfqt.decompress(allocator, compressed_values_slice, &decompressed_values);
+        },
+        .MixedTypePLA => {
+            try mixed_type_pla.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .DiscreteFourierTransform => {
             try dft.decompress(allocator, compressed_values_slice, &decompressed_values);
@@ -552,6 +567,14 @@ pub fn extract(
                 coefficients,
             );
         },
+        .MixedTypePLA => {
+            try mixed_type_pla.extract(
+                allocator,
+                compressed_values_slice,
+                indices,
+                coefficients,
+            );
+        },
         .DiscreteFourierTransform => {
             try dft.extract(
                 allocator,
@@ -696,6 +719,14 @@ pub fn rebuild(
         },
         .NonLinearApproximation => {
             try non_linear_approximation.rebuild(
+                allocator,
+                indices,
+                coefficients,
+                &compressed_values,
+            );
+        },
+        .MixedTypePLA => {
+            try mixed_type_pla.rebuild(
                 allocator,
                 indices,
                 coefficients,

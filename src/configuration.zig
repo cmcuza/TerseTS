@@ -147,6 +147,7 @@ pub fn defaultConfigurationBuilder(
         .ABCLinearApproximation,
         .NonLinearApproximation,
         .SerfQT,
+        .MixedTypePLA,
         .BitPackedQuantization,
         => blk: {
             break :blk try getDefaultAbsoluteErrorConfiguration(
