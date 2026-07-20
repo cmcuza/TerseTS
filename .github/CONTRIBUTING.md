@@ -31,6 +31,12 @@ Consult the relevant README and source file for language-specific contribution s
 ## 3. Code Style
 - Add the Apache-2.0 license header to new files. You can copy from [LICENSE_HEADER](../tools/LICENSE_HEADER).
 - Follow [Zig's official style guide](https://ziglang.org/documentation/master/#Style-Guide).
+- Apply Zig's naming rules by declaration semantics:
+  - Use `camelCase` for ordinary functions and other callable values.
+  - Use `TitleCase` for types, type aliases, and functions that return a type.
+  - Use `snake_case` for other values, including variables, constants, fields, and enum fields.
+  - Use `TitleCase.zig` for files with top-level fields and `snake_case.zig` for namespace files. Use `snake_case` for directories.
+- Preserve an established public name when changing it would break compatibility. Keep new members consistent within an existing public type that is a naming exception, but do not copy that exception into unrelated declarations.
 - Format code with:
   ```bash
   zig fmt .
