@@ -1,5 +1,11 @@
 ---
-applyTo: "**/*.md,src/**/*.zig,bindings/**/*.h,bindings/**/*.rs,bindings/**/*.py,bindings/**/*.jl"
+applyTo:
+  - "**/*.md"
+  - "src/**/*.zig"
+  - "bindings/**/*.h"
+  - "bindings/**/*.rs"
+  - "bindings/**/*.py"
+  - "bindings/**/*.jl"
 ---
 
 # Documentation Quality Review

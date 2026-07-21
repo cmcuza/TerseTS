@@ -22,7 +22,7 @@ Run [`tools/pre-commit`](../tools/pre-commit) before each commit:
 sh tools/pre-commit
 ```
 
-The script checks Zig formatting where CI supports it, builds and tests both optimization modes, compiles the C header with GCC and with Clang when available, and runs the Python tests.
+The script checks Zig formatting, builds and tests both optimization modes, compiles the C header with GCC and Clang, and runs the Python tests.
 
 Run [`tools/run-github-workflow-local.sh`](../tools/run-github-workflow-local.sh) before requesting review when you have the complete toolchain available:
 
@@ -32,7 +32,7 @@ sh tools/run-github-workflow-local.sh
 
 This script approximates the complete CI job, including Julia, an installed Python package, and Rust. It installs the Python binding into the active Python environment, so use a virtual environment when needed. Clang is optional for this script; Zig, GCC, Julia, Python, and Cargo are required.
 
-Both scripts use `python3` or `python` when available. Set `TERSETS_PYTHON` to the interpreter path when neither command resolves to the Python environment you want to test.
+The pre-commit hook runs Python tests with `python3`. The workflow-local script uses `python` (and `pip`) from PATH; use a virtual environment when you need to control which interpreter is used.
 
 Run the checks for every binding that you change. The CI workflow is the source of truth for the commands and tool versions used by the project.
 

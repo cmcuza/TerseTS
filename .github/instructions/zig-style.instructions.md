@@ -1,5 +1,7 @@
 ---
-applyTo: "src/**/*.zig,build.zig"
+applyTo:
+  - "src/**/*.zig"
+  - "build.zig"
 ---
 
 # Zig Style Review
