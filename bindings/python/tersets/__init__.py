@@ -106,8 +106,8 @@ class __Coefficients(Structure):
 # Declare function signatures to avoid silent arguments mismatch.
 __library.compress.argtypes = [
     __UncompressedValues,
-    POINTER(__CompressedValues), 
-    c_uint8, 
+    POINTER(__CompressedValues),
+    c_uint8,
     c_char_p,
 ]
 __library.compress.restype = c_int
@@ -116,19 +116,19 @@ __library.decompress.argtypes = [__CompressedValues, POINTER(__UncompressedValue
 __library.decompress.restype = c_int
 
 __library.extract.argtypes = [
-    __CompressedValues, 
-    POINTER(__Indices), 
+    __CompressedValues,
+    POINTER(__Indices),
     POINTER(__Coefficients),
 ]
-__library.extract.restype  = c_int
+__library.extract.restype = c_int
 
 __library.rebuild.argtypes = [
-    __Indices, 
-    __Coefficients, 
-    POINTER(__CompressedValues), 
+    __Indices,
+    __Coefficients,
+    POINTER(__CompressedValues),
     c_ubyte,
 ]
-__library.rebuild.restype  = c_int
+__library.rebuild.restype = c_int
 
 
 # Mirror the compression methods provided by TerseTS.
@@ -160,6 +160,7 @@ class Method(Enum):
     MacaqueS = 23
     MacaqueV = 24
     LargestTriangleThreeBuckets = 25
+    Shrink = 26
 
 
 # Public API.
@@ -254,9 +255,9 @@ def compress(
         )
         if tersets_error != 0:
             raise RuntimeError(f"compress failed: {tersets_error}")
-        
+
         if _INSTALLED_NUMPY:
-            # The native layer allocates `compressed_values_struct.data`. 
+            # The native layer allocates `compressed_values_struct.data`.
             # Copy into NumPy-owned memory before freeing the Zig arrays.
             return numpy.ctypeslib.as_array(
                 cast(compressed_values_struct.data, POINTER(c_ubyte)),
@@ -276,7 +277,7 @@ def decompress(
 ) -> Union[List[float], "numpy.ndarray"]:
     """Decompress a TerseTS-compressed array into a list of floats.
 
-    This function restores the float64 values from a compressed TerseTS compressed 
+    This function restores the float64 values from a compressed TerseTS compressed
     representation. When NumPy is installed, it uses a zero-copy view of the input array and
     an efficient conversion to Python list. The function accepts compressed input as `bytes`,
     `bytearray`, `memoryview`, or a `numpy.ndarray[uint8]`. If NumPy is installed, returns a
@@ -370,11 +371,11 @@ def extract(
     """Extract indices and coefficients from a compressed TerseTS compressed representation.
 
     This function parses a compressed representation and returns its internal
-    representation as two arrays: indices and coefficients. In this context, 
+    representation as two arrays: indices and coefficients. In this context,
     indices are method-dependent metadata need to reconstruct the original time series,
     e.g., indices of key points, segment boundaries, or histogram bin indices.
     Coefficients are the floating-point values associated with these indices.
-    Pass `values` as `bytes` for the fastest processing using Python or install 
+    Pass `values` as `bytes` for the fastest processing using Python or install
     NumPy to enable efficient memory handling and avoid unnecessary copies.
 
     Args:
@@ -440,8 +441,8 @@ def extract(
 
     try:
         tersets_error = __library.extract(
-            compressed_values_struct, 
-            byref(indices_struct), 
+            compressed_values_struct,
+            byref(indices_struct),
             byref(coefficients_struct),
         )
         if tersets_error != 0:
@@ -450,9 +451,9 @@ def extract(
         if _INSTALLED_NUMPY:
             # Create views onto native memory, then copy into NumPy-owned arrays
             # before we free the native allocations in `finally`.
-            indices = numpy.ctypeslib.as_array(indices_struct.data, 
+            indices = numpy.ctypeslib.as_array(indices_struct.data,
                                                shape=(indices_struct.len,)).copy()
-            coefficients = numpy.ctypeslib.as_array(coefficients_struct.data, 
+            coefficients = numpy.ctypeslib.as_array(coefficients_struct.data,
                                                     shape=(coefficients_struct.len,)).copy()
             return indices, coefficients
 
@@ -466,7 +467,7 @@ def extract(
             __library.freeIndices(byref(indices_struct))
         if coefficients_struct.data:
             __library.freeCoefficients(byref(coefficients_struct))
-        
+
 
 def rebuild(
     indices: Union["numpy.ndarray", List[int], Tuple[int, ...]],
@@ -476,19 +477,19 @@ def rebuild(
     """Rebuild a compressed TerseTS representation from extracted indices and coefficients.
 
     This function is the inverse of :func:`extract` and constructs a valid
-    binary compressed representation from the method-specific arrays `indices` 
+    binary compressed representation from the method-specific arrays `indices`
     and `coefficients`. In this context, indices are method-dependent metadata
-    needed to reconstruct the original time series, e.g., indices of key points, 
+    needed to reconstruct the original time series, e.g., indices of key points,
     segment boundaries, or histogram bin indices. Coefficients are the floating-point
     values associated with these indices. The returned representation is identical in
-    format to what :func:`compress` would produce for the same method. 
-    
+    format to what :func:`compress` would produce for the same method.
+
     The meaning and required structure of `indices` and `coefficients`
-    depend on the selected compression method. 
-    
-    TerseTS performs structural validation and will return an error 
-    if the arrays do not satisfy the invariants of the target `method`. 
-    
+    depend on the selected compression method.
+
+    TerseTS performs structural validation and will return an error
+    if the arrays do not satisfy the invariants of the target `method`.
+
     When NumPy is installed, the function uses a zero-copy view of both input arrays
     (if they are C-contiguous and of the correct dtype), making this significantly
     faster for large arrays. Otherwise, it falls back to building temporary ctypes arrays.
@@ -517,7 +518,7 @@ def rebuild(
     Notes:
       - NumPy-based zero-copy input requires arrays to be C-contiguous and of the correct dtype.
       - Output is copied into Python/NumPy-owned memory before freeing the Zig array.
-    
+
     Examples:
       >>> configuration = {"abs_error_bound": 0.1}
       >>> blob = compress([1.0, 2.08, 2.96], Method.SwingFilter, configuration)

@@ -79,6 +79,13 @@ pub const DecimalPrecision = struct {
     decimal_precision: u8,
 };
 
+/// Configuration for lossy_compression/functional_approximation/shrink.zig.
+/// Example: { "abs_error_bound": 0.1, "lambda": 0.1 }
+pub const ShrinkConfiguration = struct {
+    abs_error_bound: f32,
+    lambda: f32 = 0.1,
+};
+
 /// Empty configuration for methods that do not require any parameters.
 pub const EmptyConfiguration = struct {};
 
@@ -133,6 +140,13 @@ pub fn parse(
         DomainTransformation => {
             if (parsed_value.number_of_coefficients == 0)
                 return error.InvalidConfiguration;
+        },
+        ShrinkConfiguration => {
+            if (parsed_value.abs_error_bound <= 0.0 or
+                parsed_value.lambda <= 0.0 or parsed_value.lambda > 1.0)
+            {
+                return error.InvalidConfiguration;
+            }
         },
         else => return error.InvalidConfiguration,
     }
@@ -236,6 +250,14 @@ pub fn defaultConfigurationBuilder(
         .Chimp128,
         .BitPackedDeltaEncoding,
         => try allocator.dupe(u8, "{}"),
+
+        .Shrink => blk: {
+            break :blk try getDefaultShrinkConfiguration(
+                allocator,
+                random_f32,
+                0.5,
+            );
+        },
     };
 }
 
@@ -284,6 +306,18 @@ fn getDefaultTargetPointCountConfiguration(allocator: Allocator, output_number: 
         allocator,
         "{{\"target_point_count\": {d}}}",
         .{output_number},
+    );
+}
+
+fn getDefaultShrinkConfiguration(
+    allocator: Allocator,
+    error_bound: f32,
+    lambda: f32,
+) ![]u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "{{\"abs_error_bound\": {d}, \"lambda\": {d}}}",
+        .{ error_bound, lambda },
     );
 }
 
