@@ -46,6 +46,13 @@ pub const HistogramBinsNumber = struct {
     histogram_bins_number: u32,
 };
 
+/// Configuration for downsampling methods specifying the number of data
+/// points to be returned.
+/// Example: { "target_point_count": 500 }
+pub const TargetPointCount = struct {
+    target_point_count: u32,
+};
+
 /// Configuration for methods that require an aggregate error type and bound.
 /// Example: { "aggregate_error_type": "rmse", "aggregate_error_bound": 5.0 }
 pub const AggregateError = struct {
@@ -116,6 +123,10 @@ pub fn parse(
         },
         DecimalPrecision => {
             if (parsed_value.decimal_precision == 0 or parsed_value.decimal_precision >= 64)
+                return error.InvalidConfiguration;
+        },
+        TargetPointCount => {
+            if (parsed_value.target_point_count == 0)
                 return error.InvalidConfiguration;
         },
         EmptyConfiguration => {},
@@ -209,6 +220,15 @@ pub fn defaultConfigurationBuilder(
             );
         },
 
+        // Methods using lower downsampling bounds.
+        .LargestTriangleThreeBuckets => blk: {
+            const default_target_point_count: u32 = 2; // Minimum allowed.
+            break :blk try getDefaultTargetPointCountConfiguration(
+                allocator,
+                default_target_point_count,
+            );
+        },
+
         // Methods with empty configuration.
         .Uncompressed,
         .RunLengthEncoding,
@@ -257,6 +277,14 @@ fn getDefaultDomainTransformationConfiguration(allocator: Allocator, number_of_c
         allocator,
         "{{\"number_of_coefficients\": {d}}}",
         .{number_of_coefficients},
+    );
+}
+
+fn getDefaultTargetPointCountConfiguration(allocator: Allocator, output_number: u32) ![]u8 {
+    return try std.fmt.allocPrint(
+        allocator,
+        "{{\"target_point_count\": {d}}}",
+        .{output_number},
     );
 }
 
