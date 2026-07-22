@@ -230,16 +230,6 @@ pub fn compress(
     try bit_writer.flushBits();
 }
 
-/// Writes the end-of-stream marker: marker `01` with a meaningful-bit count of 0. The encoder never
-/// emits a zero count for a real value (a stored-meaningful-bits value always has at least one
-/// meaningful bit), so the decoder uses it as a sentinel and needs no explicit value count.
-fn writeEndMarker(bit_writer: *shared_structs.BulkBitWriter) Error!void {
-    try bit_writer.writeBits(@as(u2, 0b01), 2);
-    try bit_writer.writeBits(@as(u7, 0), 7);
-    try bit_writer.writeBits(@as(u3, 0), leading_zero_bucket_bits);
-    try bit_writer.writeBits(end_marker_meaningful_bit_count, 6);
-}
-
 /// Decompress a Chimp128-encoded `compressed_values` stream into `decompressed_values`.
 /// `allocator` grows `decompressed_values` and backs the ring buffer that mirrors the encoder's so
 /// predictor lookups stay in sync. `compressed_values` must start with the raw `[first_value: f64]`
@@ -331,6 +321,16 @@ pub fn decompress(
         const value: f64 = @bitCast(current_value_bits);
         try decompressed_values.append(allocator, value);
     }
+}
+
+/// Writes the end-of-stream marker: marker `01` with a meaningful-bit count of 0. The encoder never
+/// emits a zero count for a real value (a stored-meaningful-bits value always has at least one
+/// meaningful bit), so the decoder uses it as a sentinel and needs no explicit value count.
+fn writeEndMarker(bit_writer: *shared_structs.BulkBitWriter) Error!void {
+    try bit_writer.writeBits(@as(u2, 0b01), 2);
+    try bit_writer.writeBits(@as(u7, 0), 7);
+    try bit_writer.writeBits(@as(u3, 0), leading_zero_bucket_bits);
+    try bit_writer.writeBits(end_marker_meaningful_bit_count, 6);
 }
 
 /// Map an exact leading-zero count `leading_zeros` (as returned by `@clz`) to the index of the
