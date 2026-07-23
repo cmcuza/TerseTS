@@ -16,7 +16,6 @@
 
 const std = @import("std");
 const mem = std.mem;
-const assert = std.debug.assert;
 const Allocator = mem.Allocator;
 const ArrayList = std.ArrayList;
 const HashMap = std.HashMap;
@@ -42,11 +41,6 @@ pub const ParameterSpacePoint = struct {
 /// Absolute and relative tolerances for floating-point comparisons.
 pub const ABS_EPS: f64 = 1e-12;
 pub const REL_EPS: f64 = 1e-15;
-
-/// Quantized leading-zero counts from the Chimp paper, shared by Chimp64, Chimp128, and Elf's XOR
-/// layer. An exact `@clz` count is rounded down to one of these 8 boundaries so the chosen index
-/// fits in 3 bits.
-pub const leading_zero_buckets = [_]u6{ 0, 8, 12, 16, 18, 20, 22, 24 };
 
 /// `Segment` models a straight line segment from `start_point` to `end_point`. All segments
 /// have discrete points.
@@ -95,6 +89,40 @@ pub const HashF64Context = struct {
 pub fn HashMapf64(comptime value_type: type) type {
     return HashMap(f64, value_type, HashF64Context, std.hash_map.default_max_load_percentage);
 }
+
+/// Number of bits in an IEEE-754 `f64`, the value type of every TerseTS time series.
+pub const bits_per_value = @bitSizeOf(f64);
+
+/// Quantized leading-zero counts from the Chimp paper (`leadingRound` in the authors' Java
+/// implementation). `@clz(xor)` is rounded down to one of these eight boundaries so the chosen
+/// bucket index fits in three bits. Shared by the Chimp and Elf family of codecs.
+pub const leading_zero_buckets = [_]u6{ 0, 8, 12, 16, 18, 20, 22, 24 };
+
+/// Bit width of a `leading_zero_buckets` index in Chimp-family streams.
+pub const leading_zero_bucket_bits = std.math.log2_int(usize, leading_zero_buckets.len);
+
+/// Maps an exact leading-zero count, as returned by `@clz` on a 64-bit XOR, to the index of the
+/// largest `leading_zero_buckets` entry that does not exceed it. Read through
+/// `shared_functions.leadingZeroBucketIndex`.
+pub const leading_zero_bucket_index = [_]u3{
+    0, 0, 0, 0, 0, 0, 0, 0, // 0..7   -> bucket 0 (0 leading zeros).
+    1, 1, 1, 1, //             8..11  -> bucket 1 (8).
+    2, 2, 2, 2, //             12..15 -> bucket 2 (12).
+    3, 3, //                   16..17 -> bucket 3 (16).
+    4, 4, //                   18..19 -> bucket 4 (18).
+    5, 5, //                   20..21 -> bucket 5 (20).
+    6, 6, //                   22..23 -> bucket 6 (22).
+    7, 7, 7, 7, 7, 7, 7, 7, // 24..63 -> bucket 7 (24).
+    7, 7, 7, 7, 7, 7, 7, 7,
+    7, 7, 7, 7, 7, 7, 7, 7,
+    7, 7, 7, 7, 7, 7, 7, 7,
+    7, 7, 7, 7, 7, 7, 7, 7,
+};
+
+/// Chimp-family encoders place this where a leading-zero bucket would go when there is no bucket
+/// the next value may reuse, forcing the next value onto the "store a new bucket" marker. Any
+/// value no real bucket can equal works; 65 matches the reference implementation.
+pub const no_reusable_leading_bucket: u7 = 65;
 
 /// Creates a `BitWriter` which allows for writing bits with Big Endian. The code for `BitWriter` was
 /// originally copied from Zig's MIT licensed standard library as suggested in GitHub PR 24614 since
