@@ -16,9 +16,8 @@
 //! The method is described in:
 //! Liakos et al., "Chimp: Efficient Lossless Floating Point Compression for Time Series Databases", VLDB 2022.
 //! https://doi.org/10.14778/3551793.3551852
-//! The ring-buffer predictor scheme, bit-level layout, and leading-zero bucket boundaries follow
-//! the official Java implementation (`ChimpN`) published by the paper's authors, package
-//! `gr.aueb.delorean.chimp`: https://github.com/panagiotisl/chimp.
+//! The code follows the official Java implementation published by the paper's authors at:
+//! https://github.com/panagiotisl/chimp.
 
 const std = @import("std");
 const math = std.math;
@@ -36,59 +35,26 @@ const tester = @import("../tester.zig");
 const Error = tersets.Error;
 const Method = tersets.Method;
 
-/// Number of bits in an IEEE-754 `f64`; the width of every value Chimp128 XOR-encodes.
-const bits_per_value = 64;
-/// Bit width of the leading-zero bucket index written to the stream. 3 bits index the 8 buckets
-/// in `leading_zero_buckets`.
-const leading_zero_bucket_bits = 3;
 /// Size of the ring buffer of recently seen values that serve as XOR predictors. The "128" in
 /// Chimp128 refers to this window length.
 const previous_values = 128;
 /// Bit width of a ring-buffer slot index (`log2(128) = 7`). The ring-buffer marker paths store a
 /// slot of this width so the decoder can address the same stored value.
-const ring_slot_bits = std.math.log2_int(usize, previous_values);
-/// Minimum trailing-zero run that triggers the "store only meaningful bits" path (marker `01`).
-/// Higher than Chimp64's threshold of 6 because this path additionally stores a `ring_slot_bits`
-/// ring-buffer index, so the trailing-zero run must save at least those extra bits to be worth it.
+const ring_slot_bits = math.log2_int(usize, previous_values);
+/// Minimum trailing-zero run for the "store only meaningful bits" path (marker `01`). Higher than
+/// Chimp64's 6 because this path also stores a `ring_slot_bits` ring-buffer index.
 const trailing_zero_threshold = 6 + ring_slot_bits;
-/// Number of randomized rounds the generated-distribution round-trip test runs.
-const generated_test_rounds = 5;
-
-/// Width of the least-significant-bit key used to index the predictor lookup table. Two values
-/// sharing these `lsb_bits` low bits usually differ only in higher bits, making one a good XOR
-/// predictor for the other; the encoder keys its `indices` table on them to find a recent match.
+/// Number of low bits used as the predictor lookup key: values sharing these bits usually differ
+/// only in higher bits, so one is a good XOR predictor for the other.
 const lsb_bits = 14;
 /// Mask selecting the low `lsb_bits` of a value's bit pattern, i.e. its predictor lookup-table key.
 const lsb_mask: u64 = (1 << lsb_bits) - 1;
 
-/// Quantized leading-zero counts from the Chimp paper (shared with Chimp64 and Elf).
-const leading_zero_buckets = shared_structs.leading_zero_buckets;
-
-/// End-of-stream marker meaningful-bit count. Written in a marker `01` after the last value so the
-/// decoder needs no explicit value count: a real marker `01` always stores at least one meaningful
-/// bit, so a count of 0 is impossible for real data and unambiguously marks the end.
-const end_marker_meaningful_bit_count: u6 = 0;
-
-/// Per-thread scratch for the predictor lookup table. Allocating and zeroing the 64 KB `indices`
-/// table on every block dominated compress time, so it is reused across calls: zeroed once, then
-/// kept clean by resetting only the slots a block dirtied (recorded in `dirty`) instead of wiping
-/// all 64 KB. Thread-local so concurrent encoders never share state; the allocation is retained
-/// until the thread exits. `u32` slots (not `usize`) keep this table at 64 KB rather than 128 KB
-/// and shrink the `dirty` list likewise. Each slot holds a value's position within the current
-/// call, so the only limit is one `compress` call encoding fewer than 2^32 (~4.3 billion) values,
-/// far above the 1000-value blocks it is used with. The reference `ChimpN` stores this index in a
-/// signed `int`, so `u32` here matches upstream (and slightly relaxes its ~2^31 cap).
-const Scratch = struct {
-    indices: []u32,
-    dirty: ArrayList(u32),
-};
-threadlocal var scratch: ?Scratch = null;
-
-/// Compress `uncompressed_values` into `compressed_values` using Chimp128's value codec.
-/// `allocator` backs the configuration parser, the ring buffer and predictor lookup table, and the
-/// bit writer's scratch buffer. `method_configuration` must be an empty configuration; any field
-/// makes the call return `Error.InvalidConfiguration`. On success `compressed_values` holds
-/// `[first_value: f64][XOR marker bits][end-of-stream marker]`. If an error occurs it is returned.
+/// Compress `uncompressed_values` into `compressed_values` using Chimp128, allocating with
+/// `allocator`. `method_configuration` must be empty (`{}`), otherwise
+/// `Error.InvalidConfiguration` is returned. `uncompressed_values` must not be empty;
+/// `tersets.compress` guarantees this. On
+/// success `compressed_values` holds `[first_value: f64][XOR marker bits][end-of-stream marker]`.
 pub fn compress(
     allocator: Allocator,
     uncompressed_values: []const f64,
@@ -101,141 +67,112 @@ pub fn compress(
         method_configuration,
     );
 
-    // Chimp128 encodes later values as XORs against a predictor, so the first value is stored raw.
+    // The first value has nothing to XOR against, so it is stored raw.
     const first_value = uncompressed_values[0];
     try shared_functions.appendValue(allocator, f64, first_value, compressed_values);
 
-    // Ring buffer of the last `previous_values` encoded values for predictor lookup.
-    const stored_values = try allocator.alloc(u64, previous_values);
-    defer allocator.free(stored_values);
-    @memset(stored_values, 0);
+    // Ring buffer of the last `previous_values` values, used as XOR predictors.
+    var stored_values: [previous_values]u64 = @splat(0);
 
-    // Fast lookup: maps 14 LSBs of any value to the global index of the last value with those LSBs.
-    // Reused across calls via the per-thread `scratch`: the table is zeroed once, then kept clean
-    // by resetting only the slots dirtied by the previous call. `current_index` starts at
-    // `previous_values` so unseen keys (index 0) fail the staleness check
-    // `current_index - indices[key] < previous_values`. `dirty` has room for every possible key,
-    // so tracking and resetting touched slots never allocates.
-    if (scratch == null) {
-        // The scratch outlives any single call, so it is owned by a process-lifetime allocator
-        // rather than the caller's (which may be transient); it is intentionally never freed.
-        const scratch_allocator = std.heap.page_allocator;
-        const table = try scratch_allocator.alloc(u32, 1 << lsb_bits);
-        @memset(table, 0);
-        var dirty = ArrayList(u32).empty;
-        try dirty.ensureTotalCapacity(scratch_allocator, 1 << lsb_bits);
-        scratch = .{ .indices = table, .dirty = dirty };
-    }
-    const indices = scratch.?.indices;
-    const dirty = &scratch.?.dirty;
-    for (dirty.items) |slot| indices[slot] = 0;
-    dirty.clearRetainingCapacity();
+    // Maps the low `lsb_bits` of a value to the index of the last value with those bits. Encoder
+    // only: it picks which predictor to try, and the chosen ring slot is written to the stream.
+    // Fresh and zeroed per call like the reference; unseen keys read 0 and resolve to the first
+    // stored value. `u32` keeps the table at 64 KB and limits one call to 2^32 values.
+    const indices = try allocator.alloc(u32, 1 << lsb_bits);
+    defer allocator.free(indices);
+    @memset(indices, 0);
 
-    var current_index: usize = previous_values;
+    // Position of the most recently stored value. Starting at 0 makes the window test below
+    // span all `previous_values` live ring slots.
+    var index: usize = 0;
 
     const first_value_bits: u64 = @bitCast(first_value);
-    const first_value_key: usize = @intCast(first_value_bits & lsb_mask);
-    stored_values[current_index % previous_values] = first_value_bits;
-    dirty.appendAssumeCapacity(@intCast(first_value_key));
-    indices[first_value_key] = @intCast(current_index);
-    current_index += 1;
+    stored_values[index % previous_values] = first_value_bits;
+    indices[@intCast(first_value_bits & lsb_mask)] = 0;
 
-    var previous_value_bits: u64 = first_value_bits;
-    var previous_leading_zeros: u6 = leading_zero_buckets[0];
+    var previous_leading_bucket: u7 = shared_structs.no_reusable_leading_bucket;
 
     var bit_writer = try shared_structs.BulkBitWriter.init(allocator, compressed_values);
 
     for (uncompressed_values[1..]) |value| {
         const current_value_bits: u64 = @bitCast(value);
         const key: usize = @intCast(current_value_bits & lsb_mask);
-        const prev_index: usize = indices[key];
+        const candidate_index: usize = indices[key];
 
-        // Check if the LSB-matched ring-buffer entry is still within the active window.
-        if (current_index - prev_index < previous_values) {
-            const predictor_bits = stored_values[prev_index % previous_values];
-            const xor = predictor_bits ^ current_value_bits;
-            const ring_slot: u7 = @intCast(prev_index % previous_values);
+        // Pick the predictor first, then classify the XOR once. `trailing_zeros` stays 0 unless
+        // the ring-buffer candidate is used, so marker `01` below only fires for it. `u7` because
+        // `@ctz` of a zero XOR is 64.
+        var xor: u64 = undefined;
+        var ring_slot: u7 = undefined;
+        var trailing_zeros: u7 = 0;
 
-            if (xor == 0) {
-                // Marker `00`: ring-buffer match, value is identical.
-                // 9 bits total: 2-bit marker + 7-bit ring slot so the decoder knows which stored value to reuse.
-                try bit_writer.writeBits(@as(u2, 0b00), 2);
-                try bit_writer.writeBits(ring_slot, 7);
-
-                stored_values[current_index % previous_values] = current_value_bits;
-                if (indices[key] == 0) dirty.appendAssumeCapacity(@intCast(key));
-                indices[key] = @intCast(current_index);
-                current_index += 1;
-                previous_value_bits = current_value_bits;
-                continue;
-            }
-
-            const trailing_zeros: u6 = @intCast(@ctz(xor));
+        // Accept the LSB-matched entry only while its value still occupies its ring slot.
+        if (index - candidate_index < previous_values) {
+            const candidate_xor = stored_values[candidate_index % previous_values] ^ current_value_bits;
+            trailing_zeros = @intCast(@ctz(candidate_xor));
             if (trailing_zeros > trailing_zero_threshold) {
-                // Marker `01`: ring-buffer predictor with meaningful bits.
-                // 7-bit ring slot is required so the decoder XORs against the right stored value.
-                const leading_zeros: u6 = @intCast(@clz(xor));
-                const leading_bucket_index = leadingZeroBucketIndex(leading_zeros);
-                const leading_bucket = leading_zero_buckets[leading_bucket_index];
+                ring_slot = @intCast(candidate_index % previous_values);
+                xor = candidate_xor;
+            } else {
+                ring_slot = @intCast(index % previous_values);
+                xor = stored_values[ring_slot] ^ current_value_bits;
+            }
+        } else {
+            ring_slot = @intCast(index % previous_values);
+            xor = stored_values[ring_slot] ^ current_value_bits;
+        }
+
+        if (xor == 0) {
+            // Marker `00`: the predictor already holds this value; store only its ring slot.
+            try bit_writer.writeBits(@as(u2, 0b00), 2);
+            try bit_writer.writeBits(ring_slot, ring_slot_bits);
+            previous_leading_bucket = shared_structs.no_reusable_leading_bucket;
+        } else {
+            const leading_bucket_index = shared_functions.leadingZeroBucketIndex(@intCast(@clz(xor)));
+            const leading_bucket = shared_structs.leading_zero_buckets[leading_bucket_index];
+
+            if (trailing_zeros > trailing_zero_threshold) {
+                // Marker `01`: ring-buffer predictor, meaningful bits only.
                 const meaningful_bit_count: u16 =
-                    bits_per_value - @as(u16, leading_bucket) - @as(u16, trailing_zeros);
-                const meaningful_bits = xor >> trailing_zeros;
+                    shared_structs.bits_per_value - @as(u16, leading_bucket) - @as(u16, trailing_zeros);
 
                 try bit_writer.writeBits(@as(u2, 0b01), 2);
-                try bit_writer.writeBits(ring_slot, 7);
-                try bit_writer.writeBits(leading_bucket_index, leading_zero_bucket_bits);
+                try bit_writer.writeBits(ring_slot, ring_slot_bits);
+                try bit_writer.writeBits(leading_bucket_index, shared_structs.leading_zero_bucket_bits);
                 try bit_writer.writeBits(@as(u6, @intCast(meaningful_bit_count)), 6);
-                try bit_writer.writeBits(meaningful_bits, meaningful_bit_count);
+                try bit_writer.writeBits(xor >> @intCast(trailing_zeros), meaningful_bit_count);
 
-                previous_leading_zeros = leading_bucket;
-                stored_values[current_index % previous_values] = current_value_bits;
-                if (indices[key] == 0) dirty.appendAssumeCapacity(@intCast(key));
-                indices[key] = @intCast(current_index);
-                current_index += 1;
-                previous_value_bits = current_value_bits;
-                continue;
+                previous_leading_bucket = shared_structs.no_reusable_leading_bucket;
+            } else {
+                // Markers `10`/`11` XOR against the previous value, so no ring slot is stored;
+                // their first bit `1` is shared.
+                try bit_writer.writeBits(@as(u1, 0b1), 1);
+                if (@as(u7, leading_bucket) == previous_leading_bucket) {
+                    // Marker `10`: reuse the previous leading-zero bucket.
+                    try bit_writer.writeBits(@as(u1, 0b0), 1);
+                } else {
+                    // Marker `11`: store a new leading-zero bucket, which the next value may reuse.
+                    try bit_writer.writeBits(@as(u1, 0b1), 1);
+                    try bit_writer.writeBits(leading_bucket_index, shared_structs.leading_zero_bucket_bits);
+                    previous_leading_bucket = leading_bucket;
+                }
+                try bit_writer.writeBits(xor, shared_structs.bits_per_value - @as(u16, leading_bucket));
             }
         }
 
-        // No good ring-buffer predictor: fall back to the immediately previous value (markers `10`/`11`).
-        // No ring slot is stored because the decoder always has the previous value available.
-        const xor = previous_value_bits ^ current_value_bits;
-        const leading_zeros: u6 = @intCast(@clz(xor));
-        const leading_bucket_index = leadingZeroBucketIndex(leading_zeros);
-        const leading_bucket = leading_zero_buckets[leading_bucket_index];
-        const non_leading_bit_count: u16 = bits_per_value - @as(u16, leading_bucket);
-
-        try bit_writer.writeBits(@as(u1, 0b1), 1);
-        if (leading_bucket == previous_leading_zeros) {
-            // Marker `10`: reuse the previous leading-zero bucket.
-            try bit_writer.writeBits(@as(u1, 0b0), 1);
-        } else {
-            // Marker `11`: store a new leading-zero bucket.
-            try bit_writer.writeBits(@as(u1, 0b1), 1);
-            try bit_writer.writeBits(leading_bucket_index, leading_zero_bucket_bits);
-        }
-        try bit_writer.writeBits(xor, non_leading_bit_count);
-
-        previous_leading_zeros = leading_bucket;
-        stored_values[current_index % previous_values] = current_value_bits;
-        if (indices[key] == 0) dirty.appendAssumeCapacity(@intCast(key));
-        indices[key] = @intCast(current_index);
-        current_index += 1;
-        previous_value_bits = current_value_bits;
+        index += 1;
+        stored_values[index % previous_values] = current_value_bits;
+        indices[key] = @intCast(index);
     }
 
-    // Append the end-of-stream marker so the decoder can find where the values stop without an
-    // explicit count; any padding bits flushed afterwards are never read back.
-    try writeEndMarker(&bit_writer);
+    // The end marker tells the decoder where to stop; flushed padding bits are never read.
+    try shared_functions.writeChimpEndMarker(&bit_writer, ring_slot_bits);
     try bit_writer.flushBits();
 }
 
-/// Decompress a Chimp128-encoded `compressed_values` stream into `decompressed_values`.
-/// `allocator` grows `decompressed_values` and backs the ring buffer that mirrors the encoder's so
-/// predictor lookups stay in sync. `compressed_values` must start with the raw `[first_value: f64]`
-/// written by `compress`, followed by the marker bits and the end-of-stream marker; malformed or
-/// truncated streams return `Error.CorruptedCompressedData` rather than trapping. If an error
-/// occurs it is returned.
+/// Decompress a Chimp128 `compressed_values` stream into `decompressed_values`, allocating with
+/// `allocator`. The stream must start with the raw `[first_value: f64]` written by `compress`;
+/// malformed or truncated input returns `Error.CorruptedCompressedData`.
 pub fn decompress(
     allocator: Allocator,
     compressed_values: []const u8,
@@ -243,29 +180,26 @@ pub fn decompress(
 ) Error!void {
     var offset: usize = 0;
 
-    // Every non-empty Chimp128 stream stores the first value raw (8 bytes) before the bit stream.
+    // The stream starts with the raw 8-byte first value.
     if (compressed_values.len < 8) return Error.CorruptedCompressedData;
 
     const first_value = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
     try decompressed_values.append(allocator, first_value);
 
-    const stored_values = try allocator.alloc(u64, previous_values);
-    defer allocator.free(stored_values);
-    @memset(stored_values, 0);
+    // Mirrors the encoder's ring buffer.
+    var stored_values: [previous_values]u64 = @splat(0);
 
-    // The decoder reads ring-slot indices directly from the bitstream (markers `00`/`01`),
-    // so the LSB→slot hash table that the encoder maintains is not needed here.
-
-    var current_index: usize = previous_values;
+    // No lookup table here: ring slots are read directly from the stream.
+    // `index` mirrors the encoder's: the position of the most recently stored value.
+    var index: usize = 0;
 
     const first_value_bits: u64 = @bitCast(first_value);
-    stored_values[current_index % previous_values] = first_value_bits;
-    current_index += 1;
+    stored_values[index % previous_values] = first_value_bits;
 
     var previous_value_bits: u64 = first_value_bits;
-    var previous_leading_zeros: u6 = leading_zero_buckets[0];
+    // Never read before a marker `11` sets it: the encoder cannot emit a reuse marker `10` first.
+    var previous_leading_bucket: u6 = shared_structs.leading_zero_buckets[0];
 
-    // Read the bit stream straight from the remaining bytes with a buffered, byte-slice reader.
     var bit_reader = shared_structs.BulkBitReader.init(compressed_values[offset..]);
 
     while (true) {
@@ -276,76 +210,49 @@ pub fn decompress(
 
         if (first_marker_bit == 0 and second_marker_bit == 0) {
             // Marker `00`: read the 7-bit ring slot and reuse that stored value directly.
-            const ring_slot = bit_reader.readBitsNoEof(u7, 7) catch return Error.CorruptedCompressedData;
+            const ring_slot = bit_reader.readBitsNoEof(u7, ring_slot_bits) catch return Error.CorruptedCompressedData;
             current_value_bits = stored_values[ring_slot];
         } else if (first_marker_bit == 0 and second_marker_bit == 1) {
             // Marker `01`: read the 7-bit ring slot, reconstruct XOR, apply to the stored value.
-            const ring_slot = bit_reader.readBitsNoEof(u7, 7) catch return Error.CorruptedCompressedData;
-            const leading_bucket_index = bit_reader.readBitsNoEof(u3, leading_zero_bucket_bits) catch return Error.CorruptedCompressedData;
-            const leading_bucket = leading_zero_buckets[leading_bucket_index];
+            const ring_slot = bit_reader.readBitsNoEof(u7, ring_slot_bits) catch return Error.CorruptedCompressedData;
+            const leading_bucket_index = bit_reader.readBitsNoEof(u3, shared_structs.leading_zero_bucket_bits) catch return Error.CorruptedCompressedData;
+            const leading_bucket = shared_structs.leading_zero_buckets[leading_bucket_index];
 
             const meaningful_bit_count = bit_reader.readBitsNoEof(u6, 6) catch return Error.CorruptedCompressedData;
-            // A meaningful-bit count of 0 is the end-of-stream marker (the encoder never emits a
-            // zero count for a real value), so decoding stops here.
+            // A count of 0 is the end-of-stream marker.
             if (meaningful_bit_count == 0) break;
-            // Validate the geometry before casting: leading + meaningful must leave room for
-            // a non-negative trailing-zero count that still fits in u6.
+            // Reject counts that leave no room for trailing zeros before the cast below.
             const occupied: u16 = @as(u16, leading_bucket) + @as(u16, meaningful_bit_count);
-            if (occupied > bits_per_value) return Error.CorruptedCompressedData;
-            const trailing_zeros: u6 = @intCast(bits_per_value - occupied);
+            if (occupied > shared_structs.bits_per_value) return Error.CorruptedCompressedData;
+            const trailing_zeros: u6 = @intCast(shared_structs.bits_per_value - occupied);
             const meaningful_bits = bit_reader.readBitsNoEof(u64, meaningful_bit_count) catch return Error.CorruptedCompressedData;
             const xor = meaningful_bits << trailing_zeros;
 
             current_value_bits = stored_values[ring_slot] ^ xor;
-            previous_leading_zeros = leading_bucket;
+            previous_leading_bucket = leading_bucket;
         } else {
             var leading_bucket: u6 = undefined;
             if (second_marker_bit == 0) {
                 // Marker `10`: reuse the previous leading-zero bucket, XOR against previous value.
-                leading_bucket = previous_leading_zeros;
+                leading_bucket = previous_leading_bucket;
             } else {
                 // Marker `11`: read a new leading-zero bucket, XOR against previous value.
-                const leading_bucket_index = bit_reader.readBitsNoEof(u3, leading_zero_bucket_bits) catch return Error.CorruptedCompressedData;
-                leading_bucket = leading_zero_buckets[leading_bucket_index];
-                previous_leading_zeros = leading_bucket;
+                const leading_bucket_index = bit_reader.readBitsNoEof(u3, shared_structs.leading_zero_bucket_bits) catch return Error.CorruptedCompressedData;
+                leading_bucket = shared_structs.leading_zero_buckets[leading_bucket_index];
+                previous_leading_bucket = leading_bucket;
             }
-            const non_leading_bit_count: u16 = bits_per_value - @as(u16, leading_bucket);
+            const non_leading_bit_count: u16 = shared_structs.bits_per_value - @as(u16, leading_bucket);
             const xor = bit_reader.readBitsNoEof(u64, non_leading_bit_count) catch return Error.CorruptedCompressedData;
             current_value_bits = previous_value_bits ^ xor;
         }
 
-        stored_values[current_index % previous_values] = current_value_bits;
-        current_index += 1;
+        index += 1;
+        stored_values[index % previous_values] = current_value_bits;
         previous_value_bits = current_value_bits;
 
         const value: f64 = @bitCast(current_value_bits);
         try decompressed_values.append(allocator, value);
     }
-}
-
-/// Writes the end-of-stream marker: marker `01` with a meaningful-bit count of 0. The encoder never
-/// emits a zero count for a real value (a stored-meaningful-bits value always has at least one
-/// meaningful bit), so the decoder uses it as a sentinel and needs no explicit value count.
-fn writeEndMarker(bit_writer: *shared_structs.BulkBitWriter) Error!void {
-    try bit_writer.writeBits(@as(u2, 0b01), 2);
-    try bit_writer.writeBits(@as(u7, 0), 7);
-    try bit_writer.writeBits(@as(u3, 0), leading_zero_bucket_bits);
-    try bit_writer.writeBits(end_marker_meaningful_bit_count, 6);
-}
-
-/// Map an exact leading-zero count `leading_zeros` (as returned by `@clz`) to the index of the
-/// largest `leading_zero_buckets` boundary that does not exceed it. The returned `u3` is the value
-/// written to the stream so the decoder can recover the same bucket.
-fn leadingZeroBucketIndex(leading_zeros: u6) u3 {
-    var selected_index: u3 = 0;
-
-    for (leading_zero_buckets[1..], 1..) |bucket, index| {
-        if (bucket > leading_zeros) break;
-
-        selected_index = @intCast(index);
-    }
-
-    return selected_index;
 }
 
 test "chimp128 roundtrips generated values across all distributions" {
@@ -369,13 +276,11 @@ test "chimp128 roundtrips generated values across all distributions" {
         .SinusoidalFunctionWithNansAndInfinities,
     };
 
-    for (0..generated_test_rounds) |_| {
-        try tester.testLosslessMethod(
-            allocator,
-            Method.Chimp128,
-            data_distributions,
-        );
-    }
+    try tester.testLosslessMethod(
+        allocator,
+        Method.Chimp128,
+        data_distributions,
+    );
 }
 
 test "chimp128 roundtrips repeated values" {
@@ -477,5 +382,32 @@ test "check chimp128 configuration parsing" {
     try testing.expectError(
         Error.InvalidConfiguration,
         compress(allocator, uncompressed_values, &compressed_values, invalid_configuration),
+    );
+}
+
+test "chimp128 rejects corrupted compressed data" {
+    const allocator = testing.allocator;
+    const uncompressed_values = &[_]f64{ 100.0, 100.01, 100.02, 99.99, -3.5 };
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+    try compress(allocator, uncompressed_values, &compressed_values, "{}");
+
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
+
+    // Shorter than the raw first value.
+    try testing.expectError(
+        Error.CorruptedCompressedData,
+        decompress(allocator, compressed_values.items[0..4], &decompressed_values),
+    );
+
+    // Truncated bit stream: a single byte after the raw first value cannot hold the
+    // end-of-stream marker, so the decoder must report end-of-stream instead of
+    // terminating cleanly.
+    decompressed_values.clearRetainingCapacity();
+    try testing.expectError(
+        Error.CorruptedCompressedData,
+        decompress(allocator, compressed_values.items[0..9], &decompressed_values),
     );
 }
