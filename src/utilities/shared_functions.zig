@@ -397,6 +397,24 @@ pub fn calculateTriangleArea(left_point: shared_structs.DiscretePoint, central_p
     return @abs((x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2)) / 2.0);
 }
 
+/// Return the index of the largest `shared_structs.leading_zero_buckets` entry that does not
+/// exceed `leading_zeros`. Chimp-family streams store this index in
+/// `shared_structs.leading_zero_bucket_bits` bits.
+pub fn leadingZeroBucketIndex(leading_zeros: u6) u3 {
+    return shared_structs.leading_zero_bucket_index[leading_zeros];
+}
+
+/// Write the Chimp-family end-of-stream marker with `bit_writer`: a "stored meaningful bits"
+/// marker whose meaningful-bit count is 0, preceded by `ring_slot_bits` zero bits for the ring
+/// slot (0 for Chimp64). Real values always store at least one meaningful bit, so a count of 0
+/// unambiguously ends the stream and the decoder needs no explicit value count.
+pub fn writeChimpEndMarker(bit_writer: *shared_structs.BulkBitWriter, ring_slot_bits: u16) Error!void {
+    try bit_writer.writeBits(@as(u2, 0b01), 2);
+    if (ring_slot_bits > 0) try bit_writer.writeBits(@as(u7, 0), ring_slot_bits);
+    try bit_writer.writeBits(@as(u3, 0), shared_structs.leading_zero_bucket_bits);
+    try bit_writer.writeBits(@as(u6, 0), 6);
+}
+
 test "zigzag can encode and decode small signed integers correctly" {
     const default_random = tester.getDefaultRandomGenerator();
     const number_of_tests = tester.generateNumberOfValues(default_random);
