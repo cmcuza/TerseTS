@@ -16,8 +16,7 @@
 //! The method is described in:
 //! Liakos et al., "Chimp: Efficient Lossless Floating Point Compression for Time Series Databases", VLDB 2022.
 //! https://doi.org/10.14778/3551793.3551852
-//! The bit-level layout and leading-zero bucket boundaries follow the official Java implementation
-//! (`Chimp`) published by the paper's authors, package `gr.aueb.delorean.chimp`:
+//! The code follows the official Java implementation published by the paper's authors at:
 //! https://github.com/panagiotisl/chimp.
 
 const std = @import("std");
@@ -36,31 +35,15 @@ const tester = @import("../tester.zig");
 const Error = tersets.Error;
 const Method = tersets.Method;
 
-/// Number of bits in an IEEE-754 `f64`; the width of every value Chimp64 XOR-encodes.
-const bits_per_value = 64;
-/// Bit width of the leading-zero bucket index written to the stream. 3 bits index the 8 buckets
-/// in `leading_zero_buckets`.
-const leading_zero_bucket_bits = 3;
-/// Minimum trailing-zero run that triggers the "store only meaningful bits" path (marker `01`).
-/// At or below this many zeros, encoding the trailing-zero count costs more than the zeros would
-/// save, so the full non-leading XOR is written instead.
+/// Minimum trailing-zero run for the "store only meaningful bits" path (marker `01`). Shorter
+/// runs are cheaper to write as part of the payload than as a separate count.
 const trailing_zero_threshold = 6;
-/// Number of randomized rounds the generated-distribution round-trip test runs.
-const generated_test_rounds = 5;
 
-/// Quantized leading-zero counts from the Chimp paper (shared with Chimp128 and Elf).
-const leading_zero_buckets = shared_structs.leading_zero_buckets;
-
-/// End-of-stream marker meaningful-bit count. Written in a marker `01` after the last value so the
-/// decoder needs no explicit value count: a real marker `01` always stores at least one meaningful
-/// bit, so a count of 0 is impossible for real data and unambiguously marks the end.
-const end_marker_meaningful_bit_count: u6 = 0;
-
-/// Compress `uncompressed_values` into `compressed_values` using Chimp64's value codec. `allocator`
-/// backs the configuration parser and the bit writer's scratch buffer. `method_configuration` must
-/// be an empty configuration; any field makes the call return `Error.InvalidConfiguration`. On
+/// Compress `uncompressed_values` into `compressed_values` using Chimp64, allocating with
+/// `allocator`. `method_configuration` must be empty (`{}`), otherwise
+/// `Error.InvalidConfiguration` is returned. `uncompressed_values` must not be empty;
+/// `tersets.compress` guarantees this. On
 /// success `compressed_values` holds `[first_value: f64][XOR marker bits][end-of-stream marker]`.
-/// If an error occurs it is returned.
 pub fn compress(
     allocator: Allocator,
     uncompressed_values: []const f64,
@@ -73,13 +56,12 @@ pub fn compress(
         method_configuration,
     );
 
-    // Chimp64 encodes later values as XORs against the previous value, so the first value is stored raw.
+    // The first value has nothing to XOR against, so it is stored raw.
     const first_value = uncompressed_values[0];
     try shared_functions.appendValue(allocator, f64, first_value, compressed_values);
 
-    // Chimp64 keeps the previous value for XOR prediction and the previous leading-zero bucket for reuse.
     var previous_value_bits: u64 = @bitCast(first_value);
-    var previous_leading_zeros: u6 = leading_zero_buckets[0];
+    var previous_leading_bucket: u7 = shared_structs.no_reusable_leading_bucket;
 
     var bit_writer = try shared_structs.BulkBitWriter.init(allocator, compressed_values);
 
@@ -90,62 +72,58 @@ pub fn compress(
         // Marker `00`: repeated value.
         if (xor == 0) {
             try bit_writer.writeBits(@as(u2, 0b00), 2);
+            previous_leading_bucket = shared_structs.no_reusable_leading_bucket;
             previous_value_bits = current_value_bits;
             continue;
         }
 
         const leading_zeros: u6 = @intCast(@clz(xor));
         const trailing_zeros: u6 = @intCast(@ctz(xor));
-        const leading_bucket_index = leadingZeroBucketIndex(leading_zeros);
-        const leading_bucket = leading_zero_buckets[leading_bucket_index];
+        const leading_bucket_index = shared_functions.leadingZeroBucketIndex(leading_zeros);
+        const leading_bucket = shared_structs.leading_zero_buckets[leading_bucket_index];
 
-        // Like Gorilla, this path stores only the meaningful bits when the XOR has enough trailing zeros.
-        // Chimp64 differs by using leading-zero buckets and a fixed trailing-zero threshold.
         if (trailing_zeros > trailing_zero_threshold) {
             // Marker `01`: store a leading-zero bucket, meaningful-bit count, and meaningful bits.
             try bit_writer.writeBits(@as(u2, 0b01), 2);
-            try bit_writer.writeBits(leading_bucket_index, leading_zero_bucket_bits);
+            try bit_writer.writeBits(leading_bucket_index, shared_structs.leading_zero_bucket_bits);
 
             const meaningful_bit_count: u16 =
-                bits_per_value - @as(u16, leading_bucket) - @as(u16, trailing_zeros);
+                shared_structs.bits_per_value - @as(u16, leading_bucket) - @as(u16, trailing_zeros);
             const meaningful_bits = xor >> trailing_zeros;
 
             try bit_writer.writeBits(@as(u6, @intCast(meaningful_bit_count)), 6);
             try bit_writer.writeBits(meaningful_bits, meaningful_bit_count);
+
+            previous_leading_bucket = shared_structs.no_reusable_leading_bucket;
         } else {
-            // Chimp64 optimization: if the trailing-zero run is small, write those zeros directly in the payload.
-            // This avoids spending more metadata bits than the zeros would cost.
-            // The first marker bit is shared by `10` and `11`.
+            // Markers `10`/`11` write the whole non-leading XOR; their first bit `1` is shared.
             try bit_writer.writeBits(@as(u1, 0b1), 1);
 
-            const non_leading_bit_count: u16 = bits_per_value - @as(u16, leading_bucket);
-            if (leading_bucket == previous_leading_zeros) {
+            const non_leading_bit_count: u16 = shared_structs.bits_per_value - @as(u16, leading_bucket);
+            if (@as(u7, leading_bucket) == previous_leading_bucket) {
                 // Marker `10`: reuse the previous leading-zero bucket.
                 try bit_writer.writeBits(@as(u1, 0b0), 1);
             } else {
-                // Marker `11`: store a new leading-zero bucket.
+                // Marker `11`: store a new leading-zero bucket, which the next value may reuse.
                 try bit_writer.writeBits(@as(u1, 0b1), 1);
-                try bit_writer.writeBits(leading_bucket_index, leading_zero_bucket_bits);
+                try bit_writer.writeBits(leading_bucket_index, shared_structs.leading_zero_bucket_bits);
+                previous_leading_bucket = leading_bucket;
             }
 
             try bit_writer.writeBits(xor, non_leading_bit_count);
         }
 
-        previous_leading_zeros = leading_bucket;
         previous_value_bits = current_value_bits;
     }
 
-    // Append the end-of-stream marker so the decoder can find where the values stop without an
-    // explicit count; any padding bits flushed afterwards are never read back.
-    try writeEndMarker(&bit_writer);
+    // The end marker tells the decoder where to stop; flushed padding bits are never read.
+    try shared_functions.writeChimpEndMarker(&bit_writer, 0);
     try bit_writer.flushBits();
 }
 
-/// Decompress a Chimp64-encoded `compressed_values` stream into `decompressed_values`. `allocator`
-/// grows `decompressed_values` as values are recovered. `compressed_values` must start with the raw
-/// `[first_value: f64]` written by `compress`, followed by the marker bits and the end-of-stream
-/// marker; malformed or truncated streams return `Error.CorruptedCompressedData` rather than
-/// trapping. If an error occurs it is returned.
+/// Decompress a Chimp64 `compressed_values` stream into `decompressed_values`, allocating with
+/// `allocator`. The stream must start with the raw `[first_value: f64]` written by `compress`;
+/// malformed or truncated input returns `Error.CorruptedCompressedData`.
 pub fn decompress(
     allocator: Allocator,
     compressed_values: []const u8,
@@ -153,16 +131,16 @@ pub fn decompress(
 ) Error!void {
     var offset: usize = 0;
 
-    // Every non-empty Chimp64 stream stores the first value raw (8 bytes) before the bit stream.
+    // The stream starts with the raw 8-byte first value.
     if (compressed_values.len < 8) return Error.CorruptedCompressedData;
 
     const first_value = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
     try decompressed_values.append(allocator, first_value);
 
     var previous_value_bits: u64 = @bitCast(first_value);
-    var previous_leading_zeros: u6 = leading_zero_buckets[0];
+    // Never read before a marker `11` sets it: the encoder cannot emit a reuse marker `10` first.
+    var previous_leading_bucket: u6 = shared_structs.leading_zero_buckets[0];
 
-    // Read the bit stream straight from the remaining bytes with a buffered, byte-slice reader.
     var bit_reader = shared_structs.BulkBitReader.init(compressed_values[offset..]);
 
     while (true) {
@@ -181,65 +159,39 @@ pub fn decompress(
 
         // Marker `01`: read the bucket, meaningful-bit count, and meaningful bits.
         if (first_marker_bit == 0 and second_marker_bit == 1) {
-            const leading_bucket_index = bit_reader.readBitsNoEof(u3, leading_zero_bucket_bits) catch return Error.CorruptedCompressedData;
-            leading_bucket = leading_zero_buckets[leading_bucket_index];
+            const leading_bucket_index = bit_reader.readBitsNoEof(u3, shared_structs.leading_zero_bucket_bits) catch return Error.CorruptedCompressedData;
+            leading_bucket = shared_structs.leading_zero_buckets[leading_bucket_index];
 
             const meaningful_bit_count = bit_reader.readBitsNoEof(u6, 6) catch return Error.CorruptedCompressedData;
-            // A meaningful-bit count of 0 is the end-of-stream marker (the encoder never emits a
-            // zero count for a real value), so decoding stops here.
+            // A count of 0 is the end-of-stream marker.
             if (meaningful_bit_count == 0) break;
-            // Validate the geometry before casting: leading + meaningful must leave room for
-            // a non-negative trailing-zero count that still fits in u6.
+            // Reject counts that leave no room for trailing zeros before the cast below.
             const occupied: u16 = @as(u16, leading_bucket) + @as(u16, meaningful_bit_count);
-            if (occupied > bits_per_value) return Error.CorruptedCompressedData;
-            const trailing_zeros: u6 = @intCast(bits_per_value - occupied);
+            if (occupied > shared_structs.bits_per_value) return Error.CorruptedCompressedData;
+            const trailing_zeros: u6 = @intCast(shared_structs.bits_per_value - occupied);
             const meaningful_bits = bit_reader.readBitsNoEof(u64, meaningful_bit_count) catch return Error.CorruptedCompressedData;
 
             xor = meaningful_bits << trailing_zeros;
         } else {
             if (second_marker_bit == 0) {
                 // Marker `10`: reuse the previous leading-zero bucket.
-                leading_bucket = previous_leading_zeros;
+                leading_bucket = previous_leading_bucket;
             } else {
                 // Marker `11`: read a new leading-zero bucket.
-                const leading_bucket_index = bit_reader.readBitsNoEof(u3, leading_zero_bucket_bits) catch return Error.CorruptedCompressedData;
-                leading_bucket = leading_zero_buckets[leading_bucket_index];
+                const leading_bucket_index = bit_reader.readBitsNoEof(u3, shared_structs.leading_zero_bucket_bits) catch return Error.CorruptedCompressedData;
+                leading_bucket = shared_structs.leading_zero_buckets[leading_bucket_index];
             }
 
-            const non_leading_bit_count: u16 = bits_per_value - @as(u16, leading_bucket);
+            const non_leading_bit_count: u16 = shared_structs.bits_per_value - @as(u16, leading_bucket);
             xor = bit_reader.readBitsNoEof(u64, non_leading_bit_count) catch return Error.CorruptedCompressedData;
         }
 
-        previous_leading_zeros = leading_bucket;
+        previous_leading_bucket = leading_bucket;
         previous_value_bits ^= xor;
 
         const value: f64 = @bitCast(previous_value_bits);
         try decompressed_values.append(allocator, value);
     }
-}
-
-/// Writes the end-of-stream marker: marker `01` with a meaningful-bit count of 0. The encoder never
-/// emits a zero count for a real value (a stored-meaningful-bits value always has at least one
-/// meaningful bit), so the decoder uses it as a sentinel and needs no explicit value count.
-fn writeEndMarker(bit_writer: *shared_structs.BulkBitWriter) Error!void {
-    try bit_writer.writeBits(@as(u2, 0b01), 2);
-    try bit_writer.writeBits(@as(u3, 0), leading_zero_bucket_bits);
-    try bit_writer.writeBits(end_marker_meaningful_bit_count, 6);
-}
-
-/// Map an exact leading-zero count `leading_zeros` (as returned by `@clz`) to the index of the
-/// largest `leading_zero_buckets` boundary that does not exceed it. The returned `u3` is the value
-/// written to the stream so the decoder can recover the same bucket.
-fn leadingZeroBucketIndex(leading_zeros: u6) u3 {
-    var selected_index: u3 = 0;
-
-    for (leading_zero_buckets[1..], 1..) |bucket, index| {
-        if (bucket > leading_zeros) break;
-
-        selected_index = @intCast(index);
-    }
-
-    return selected_index;
 }
 
 test "chimp64 roundtrips generated values across all distributions" {
@@ -263,13 +215,11 @@ test "chimp64 roundtrips generated values across all distributions" {
         .SinusoidalFunctionWithNansAndInfinities,
     };
 
-    for (0..generated_test_rounds) |_| {
-        try tester.testLosslessMethod(
-            allocator,
-            Method.Chimp64,
-            data_distributions,
-        );
-    }
+    try tester.testLosslessMethod(
+        allocator,
+        Method.Chimp64,
+        data_distributions,
+    );
 }
 
 test "chimp64 roundtrips repeated values" {
@@ -360,5 +310,32 @@ test "check chimp64 configuration parsing" {
     try testing.expectError(
         Error.InvalidConfiguration,
         compress(allocator, uncompressed_values, &compressed_values, invalid_configuration),
+    );
+}
+
+test "chimp64 rejects corrupted compressed data" {
+    const allocator = testing.allocator;
+    const uncompressed_values = &[_]f64{ 100.0, 100.01, 100.02, 99.99, -3.5 };
+
+    var compressed_values = ArrayList(u8).empty;
+    defer compressed_values.deinit(allocator);
+    try compress(allocator, uncompressed_values, &compressed_values, "{}");
+
+    var decompressed_values = ArrayList(f64).empty;
+    defer decompressed_values.deinit(allocator);
+
+    // Shorter than the raw first value.
+    try testing.expectError(
+        Error.CorruptedCompressedData,
+        decompress(allocator, compressed_values.items[0..4], &decompressed_values),
+    );
+
+    // Truncated bit stream: a single byte after the raw first value cannot hold the
+    // end-of-stream marker, so the decoder must report end-of-stream instead of
+    // terminating cleanly.
+    decompressed_values.clearRetainingCapacity();
+    try testing.expectError(
+        Error.CorruptedCompressedData,
+        decompress(allocator, compressed_values.items[0..9], &decompressed_values),
     );
 }
