@@ -55,6 +55,7 @@ const rle_encoding = @import("lossless_compression/run_length_encoding.zig");
 const delta_encoding = @import("lossless_compression/bitpacked_delta_encoding.zig");
 const chimp64 = @import("lossless_compression/chimp64.zig");
 const chimp128 = @import("lossless_compression/chimp128.zig");
+const lttb = @import("lossy_compression/line_simplification/largest_triangle_three_buckets.zig");
 
 const extractors = @import("utilities/extractors.zig");
 const tester = @import("tester.zig");
@@ -105,6 +106,7 @@ pub const Method = enum {
     DiscreteFourierTransform,
     MacaqueS,
     MacaqueV,
+    LargestTriangleThreeBuckets,
 };
 
 /// Compress `uncompressed_values` using `method` and its `configuration` and returns the results
@@ -328,6 +330,14 @@ pub fn compress(
                 try compressed_values.appendSlice(allocator, value_as_bytes[0..]);
             }
         },
+        .LargestTriangleThreeBuckets => {
+            try lttb.compress(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                configuration,
+            );
+        },
     }
     try compressed_values.append(allocator, @intFromEnum(method));
     return compressed_values;
@@ -428,6 +438,9 @@ pub fn decompress(
                 const value: f64 = @bitCast(compressed_values_slice[offset..][0..8].*);
                 try decompressed_values.append(allocator, value);
             }
+        },
+        .LargestTriangleThreeBuckets => {
+            try lttb.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
     }
 
@@ -554,6 +567,14 @@ pub fn extract(
         },
         .DiscreteFourierTransform => {
             try dft.extract(
+                allocator,
+                compressed_values_slice,
+                indices,
+                coefficients,
+            );
+        },
+        .LargestTriangleThreeBuckets => {
+            try lttb.extract(
                 allocator,
                 compressed_values_slice,
                 indices,
@@ -704,6 +725,14 @@ pub fn rebuild(
         },
         .DiscreteFourierTransform => {
             try dft.rebuild(
+                allocator,
+                indices,
+                coefficients,
+                &compressed_values,
+            );
+        },
+        .LargestTriangleThreeBuckets => {
+            try lttb.rebuild(
                 allocator,
                 indices,
                 coefficients,

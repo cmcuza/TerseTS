@@ -380,6 +380,23 @@ pub fn bitsNeededUnsigned(value: u64) u8 {
     return @intCast(64 - @clz(value));
 }
 
+/// Return the absolute area of the triangle defined by three points. The points are represented as
+/// `DiscretePoint` structs, which contain an `index` and a `value`. The `index` represents the
+/// position of the point in the original uncompressed series, while the `value` represents the value
+/// of the point. The function calculates the area using the formula for the area of a triangle given
+/// by three points in a 2D plane, where the x-coordinate is given by the `index` and the y-coordinate
+/// is given by the `value`. The function returns the absolute value of the area.
+pub fn calculateTriangleArea(left_point: shared_structs.DiscretePoint, central_point: shared_structs.DiscretePoint, right_point: shared_structs.DiscretePoint) f64 {
+    const x1: f64 = @floatFromInt(left_point.index);
+    const y1: f64 = left_point.value;
+    const x2: f64 = @floatFromInt(central_point.index);
+    const y2: f64 = central_point.value;
+    const x3: f64 = @floatFromInt(right_point.index);
+    const y3: f64 = right_point.value;
+
+    return @abs((x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2)) / 2.0);
+}
+
 test "zigzag can encode and decode small signed integers correctly" {
     const default_random = tester.getDefaultRandomGenerator();
     const number_of_tests = tester.generateNumberOfValues(default_random);
