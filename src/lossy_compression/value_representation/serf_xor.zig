@@ -22,7 +22,8 @@
 //! longest suffix with the previous value, maximizing trailing zeros), a three-case XOR encoder,
 //! and adaptive leading/trailing-zero rules recomputed per window by the post-office solver.
 //! The bit-level layout and the approximator follow the paper authors' reference C++
-//! implementation (`serf_xor_compressor.cc`, `serf_xor_decompressor.cc`, `serf_utils_64.cc`).
+//! implementation (`serf_xor_compressor.cc`, `serf_xor_decompressor.cc`, `serf_utils_64.cc`)
+//! released at https://github.com/Spatio-Temporal-Lab/Serf (accessed on 27-07-26).
 //! Like the streaming reference, the stream is terminated with a NaN sentinel: this adaptation
 //! stores a `[shift: f64]` header followed by one continuous bit stream and a final XOR-encoded
 //! NaN value that marks the end, and both sides run the window rule update after every

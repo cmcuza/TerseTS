@@ -24,6 +24,8 @@
 //! reference C++ implementation of the paper "Li, Ruiyuan, Zechao Chen, Ruyun Lu, Xiaolong Xu,
 //! Guangchao Yang, Chao Chen, Jie Bao, and Yu Zheng. Serf: Streaming Error-Bounded Floating-Point
 //! Compression. ACM SIGMOD 2025. https://doi.org/10.1145/3725353".
+//! The implementation is partially based on the code released at
+//! https://github.com/Spatio-Temporal-Lab/Serf (accessed on 27-07-26).
 
 const std = @import("std");
 const math = std.math;
