@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A "post-office placement" dynamic program: given a distribution of counts over a fixed axis,
-//! it picks up to `max_positions` bucket boundaries ("office positions") that minimize the total
-//! number of wasted bits, exactly like placing post offices on a line to minimize the total
-//! distance walked by all residents. From the chosen positions it derives a `round` table
-//! (mapping each count to its bucket boundary) and a `representation` table (mapping each count to
-//! a transmitted code).
-//! The SerfXOR method uses this solver to re-optimize its leading-zero and trailing-zero rounding
-//! rules per window from the exact zero-count distribution observed over the window's XORed
-//! values. This file is a semantically faithful port of `post_office_solver.{h,cc}` from the
+//! Selects which leading-zero or trailing-zero counts SerfXOR transmits as short codes, and
+//! derives the codec's two lookup tables from that selection.
+//! Sending an exact zero count needs six bits, so only a small set of counts is transmitted and
+//! every other count is rounded down to the nearest one in that set, at the cost of encoding the
+//! difference explicitly. Selecting more counts shortens the rounding gaps but lengthens every
+//! code, so `initRoundAndRepresentation` picks the set minimizing both by dynamic programming
+//! over the observed distribution, then fills in `round` (which count each zero count rounds
+//! down to) and `representation` (the code sent for it). SerfXOR recomputes both per window.
+//! This file is a semantically faithful port of `post_office_solver.{h,cc}` from the
 //! reference C++ implementation of the paper "Li, Ruiyuan, Zechao Chen, Ruyun Lu, Xiaolong Xu,
 //! Guangchao Yang, Chao Chen, Jie Bao, and Yu Zheng. Serf: Streaming Error-Bounded Floating-Point
 //! Compression. ACM SIGMOD 2025. https://doi.org/10.1145/3725353".
@@ -37,17 +37,19 @@ const shared_structs = @import("shared_structs.zig");
 
 const Error = tersets.Error;
 
-/// Length of the zero-count distributions and of the `round`/`representation` tables. A 64-bit
-/// XOR result has between 0 and 63 leading (or trailing) zeros, one table entry each.
+/// Number of distinct zero counts, i.e. the length of the distributions and of the
+/// `round`/`representation` tables, and the first dimension of the dynamic-programming cache. A
+/// 64-bit XOR result has between 0 and 63 leading (or trailing) zeros, one entry each.
 pub const table_size = 64;
 
-/// Maximum number of office positions. The position count is transmitted in 5 bits, so at most
-/// `2^5 = 32` positions can be encoded (a count of 32 wraps to 0 on the wire).
+/// Maximum number of zero counts that can be transmitted, and the second dimension of the
+/// dynamic-programming cache. How many are transmitted is itself sent in 5 bits, so at most
+/// `2^5 = 32` fit on the wire (a count of 32 wraps to 0).
 pub const max_positions = 32;
 
-/// Maps a representation-table entry count (0 to 64) to the number of bits needed to transmit one
-/// code of that table, i.e. `ceil(log2(count))`. Mirrors `kPositionLength2Bits` in the reference
-/// implementation; only counts up to `max_positions` occur in practice.
+/// Maps a number of transmitted zero counts (0 to 64) to the number of bits one code then needs,
+/// i.e. `ceil(log2(count))`. Mirrors `kPositionLength2Bits` in the reference implementation; only
+/// counts up to `max_positions` occur in practice.
 pub const position_length_to_bits = [65]u8{
     0, 0, 1, 2, 2, 3, 3, 3, 3,
     4, 4, 4, 4, 4, 4, 4, 4, 5,
@@ -66,42 +68,44 @@ pub const position_length_to_bits = [65]u8{
 /// `maxInt(i32)` — SerfXOR's windows of 1000 values are far below that limit.
 const cost_sentinel: i64 = math.maxInt(i32);
 
-/// Office positions chosen by `initRoundAndRepresentation`: the first `len` entries of `values`
-/// are the selected zero counts, in increasing order, starting with position 0.
+/// The set of zero counts selected for transmission: the first `len` entries of `values`, in
+/// increasing order and always starting at zero. The encoder writes the set into the stream at
+/// every window boundary and the decoder rebuilds its own tables from it.
 pub const Positions = struct {
     values: [max_positions]u6 = @splat(0),
     len: usize = 0,
 };
 
-/// Result of one `buildPostOffice` run: the chosen `positions` and the total approximation cost
-/// (the number of wasted bits) of serving `distribution` with those positions.
+/// The selected zero counts and the total number of bits wasted by rounding `distribution` down
+/// to them.
 const BuildResult = struct {
     positions: Positions,
     total_app_cost: i64,
 };
 
-/// Recompute `representation` and `round` (both indexed by exact zero count) from the observed
-/// `distribution` of zero counts, and return the chosen office positions. For every zero count
-/// `j`, `round[j]` becomes the greatest chosen position that is less than or equal to `j`, and
-/// `representation[j]` becomes the index of that position, i.e. the code transmitted on the wire.
-/// The number of candidate positions is chosen by trying powers of two `2^bits_per_code` in
+/// Select the zero counts to transmit for the observed `distribution` and rebuild the two lookup
+/// tables from them. All three are indexed by exact zero count: `distribution[j]` is how many
+/// values had exactly `j` zeros, `round[j]` is the greatest selected count less than or equal to
+/// `j`, and `representation[j]` is the code transmitted for it, i.e. the position of `round[j]`
+/// within the selected set.
+/// How many counts to select is decided by trying each power of two `2^bits_per_code` in
 /// increasing order with `bits_per_code <= min(position_length_to_bits[non_zeros_count], 5)`,
-/// keeping the one minimizing `total_count * bits_per_code + approximation_cost` and stopping
-/// early once the code cost alone reaches the best total found so far, mirroring
+/// keeping the one that minimizes the total cost `total_count * bits_per_code + wasted_bits` and
+/// stopping early once the code cost alone reaches the best total found so far. Mirrors
 /// `InitRoundAndRepresentation` of the reference implementation.
 pub fn initRoundAndRepresentation(
     distribution: *const [table_size]u32,
     representation: *[table_size]u6,
     round: *[table_size]u6,
 ) Positions {
-    // Number of non-zero buckets up to and including each index (index 0 counts as non-zero).
+    // Number of observed zero counts up to and including each index (index 0 always counts).
     var pre_non_zeros: [table_size]u32 = undefined;
-    // Number of non-zero buckets strictly after each index.
+    // Number of observed zero counts strictly after each index.
     var post_non_zeros: [table_size]u32 = undefined;
 
     var total_count: i64 = distribution[0];
     var non_zeros_count: usize = table_size;
-    pre_non_zeros[0] = 1; // The first bucket is treated as non-zero like in the reference.
+    pre_non_zeros[0] = 1; // Index 0 is treated as observed like in the reference.
     for (1..table_size) |index| {
         total_count += distribution[index];
         if (distribution[index] == 0) {
@@ -158,8 +162,8 @@ pub fn initRoundAndRepresentation(
 }
 
 /// Write `positions` to `bit_writer` as a 5-bit count (a count of 32 wraps to 0) followed by each
-/// position as a 6-bit value, exactly like `WritePositions` of the reference implementation.
-/// Returns the number of bits written. If an error occurs it is returned.
+/// selected zero count as a 6-bit value, exactly like `WritePositions` of the reference
+/// implementation. Returns the number of bits written. If an error occurs it is returned.
 pub fn writePositions(
     positions: Positions,
     bit_writer: *shared_structs.BulkBitWriter,
@@ -171,13 +175,15 @@ pub fn writePositions(
     return @intCast(5 + 6 * positions.len);
 }
 
-/// Solve the post-office placement problem for `distribution` with `original_num` offices via
-/// dynamic programming: `dp[i][j]` is the minimal cost of serving buckets `0..i` when bucket `i`
-/// hosts office `j`, and `pre[i][j]` remembers the bucket hosting office `j - 1` in that optimum.
-/// When `original_num` exceeds `non_zeros_count`, the reference clamps the office count for the
-/// dynamic program and afterwards pads the result back to `original_num` positions; that block is
-/// ported as well. `pre_non_zeros` and `post_non_zeros` are the prefix/suffix non-zero counts
-/// computed by `initRoundAndRepresentation`.
+/// Select exactly `original_num` zero counts from `distribution` so that rounding every observed
+/// count down to the nearest selected one wastes as few bits as possible. Solved by dynamic
+/// programming over the zero counts: `dp[i][j]` is the fewest bits wasted by counts `0..i` when
+/// count `i` is the `j`-th selected one, and `pre[i][j]` remembers which count was selected
+/// before it in that optimum, so the selection can be recovered by walking the chain backwards.
+/// When `original_num` exceeds `non_zeros_count`, the reference clamps the number selected by the
+/// dynamic program and afterwards pads the result back to `original_num`; that block is ported as
+/// well. `pre_non_zeros` and `post_non_zeros` are the prefix/suffix non-zero counts computed by
+/// `initRoundAndRepresentation`.
 fn buildPostOffice(
     distribution: *const [table_size]u32,
     original_num: usize,
@@ -188,17 +194,17 @@ fn buildPostOffice(
     const num = @min(original_num, non_zeros_count);
 
     var dp: [table_size][max_positions]i64 = @splat(@splat(cost_sentinel));
-    // `pre[i][j]` holds the bucket of office `j - 1`; -1 terminates the chain. Only `pre[0][0]`
+    // `pre[i][j]` holds the previously selected count; -1 terminates the chain. Only `pre[0][0]`
     // is read with `j == 0`, so initializing all to -1 is safe.
     var pre: [table_size][max_positions]i8 = @splat(@splat(-1));
 
-    // Bucket 0 always hosts office 0 at zero cost.
+    // Zero counts always start the selection and waste nothing.
     dp[0][0] = 0;
     pre[0][0] = -1;
 
     for (1..table_size) |i| {
         if (distribution[i] == 0) continue;
-        // Buckets after `i` must still be able to host the remaining `num - j` offices.
+        // Counts after `i` must still accommodate the remaining `num - j` selections.
         var j: usize = if (num + i > table_size) @max(1, num + i - table_size) else 1;
         while (j <= i and j < num) : (j += 1) {
             if (i > 1 and j == 1) {
@@ -211,7 +217,7 @@ fn buildPostOffice(
             } else {
                 if (pre_non_zeros[i] < j + 1 or post_non_zeros[i] < num - 1 - j) continue;
                 var app_cost: i64 = cost_sentinel;
-                var best_previous_bucket: usize = 0;
+                var best_previous_count: usize = 0;
                 var k: usize = j - 1;
                 while (k <= i - 1) : (k += 1) {
                     if ((distribution[k] == 0 and k > 0) or
@@ -225,24 +231,24 @@ fn buildPostOffice(
                     }
                     if (app_cost > sum) {
                         app_cost = sum;
-                        best_previous_bucket = k;
+                        best_previous_count = k;
                         // A zero cost cannot be improved, terminate early.
                         if (sum == 0) break;
                     }
                 }
                 if (app_cost != cost_sentinel) {
                     dp[i][j] = app_cost;
-                    pre[i][j] = @intCast(best_previous_bucket);
+                    pre[i][j] = @intCast(best_previous_count);
                 }
             }
         }
     }
 
-    // Pick the last office's bucket minimizing total cost including all buckets after it.
+    // Pick the last selected count minimizing the total waste, including all counts after it.
     var temp_total_app_cost: i64 = cost_sentinel;
     var temp_best_last: isize = -1;
     for (num - 1..table_size) |i| {
-        // With a single office it must sit at bucket 0.
+        // A single selected count must be zero.
         if (num - 1 == 0 and i > 0) break;
         if ((distribution[i] == 0 and i > 0) or pre_non_zeros[i] < num) continue;
         if (dp[i][num - 1] == cost_sentinel) continue;
@@ -256,12 +262,12 @@ fn buildPostOffice(
         }
     }
 
-    // A feasible placement always exists (`num <= non-zero buckets`), so some `dp[i][num - 1]`
-    // is valid and a best last office is found.
+    // A feasible selection always exists (`num <= non_zeros_count`), so some `dp[i][num - 1]` is
+    // valid and a best last count is found.
     std.debug.assert(temp_best_last != -1);
 
-    // Walk the `pre` chain backwards to recover all positions: exactly `num` links, since every
-    // `dp[i][j>=1]` was set with a `pre` entry and only `pre[0][0]` terminates with -1.
+    // Walk the `pre` chain backwards to recover the whole selection: exactly `num` links, since
+    // every `dp[i][j>=1]` was set with a `pre` entry and only `pre[0][0]` terminates with -1.
     var positions = Positions{ .len = num };
     var count: usize = 1;
     var best_last = temp_best_last;
@@ -288,6 +294,7 @@ fn buildPostOffice(
                 k += 1;
             }
         }
+        std.debug.assert(j == original_num);
         positions = modified;
     }
 
@@ -326,7 +333,7 @@ test "post office solver spreads positions over a uniform distribution" {
     var round: [table_size]u6 = @splat(0);
     const positions = initRoundAndRepresentation(&distribution, &representation, &round);
 
-    // Eight equally weighted buckets are served exactly by eight offices at zero cost.
+    // Eight equally weighted zero counts are selected exactly, wasting no bits.
     try testing.expectEqual(@as(usize, 8), positions.len);
     try testing.expectEqualSlices(u6, &expected_positions, positions.values[0..positions.len]);
     try expectConsistentTables(positions, &representation, &round);
@@ -340,7 +347,7 @@ test "post office solver handles a distribution concentrated at one index" {
     var round: [table_size]u6 = @splat(0);
     const positions = initRoundAndRepresentation(&distribution, &representation, &round);
 
-    // Position 0 is always an office; a second office at index 10 absorbs the whole mass.
+    // Zero is always selected; a second selection at index 10 absorbs the whole mass.
     try testing.expectEqual(@as(usize, 2), positions.len);
     try testing.expectEqual(@as(u6, 0), positions.values[0]);
     try testing.expectEqual(@as(u6, 10), positions.values[1]);
@@ -391,7 +398,7 @@ test "post office solver positions survive a write and read round trip" {
 
 test "post office solver handles zeros interleaved with non-zero buckets" {
     var distribution: [table_size]u32 = @splat(0);
-    // Irregular gaps between non-zero buckets exercise the pre/post non-zero-count guards.
+    // Irregular gaps between observed zero counts exercise the pre/post non-zero-count guards.
     distribution[1] = 3;
     distribution[2] = 900;
     distribution[13] = 17;
@@ -407,7 +414,7 @@ test "post office solver handles zeros interleaved with non-zero buckets" {
 }
 
 test "post office solver pads offices back when fewer non-zero buckets than requested" {
-    // Only three non-zero buckets {0, 1, 63} give `non_zeros_count == 3`, but
+    // Only three observed zero counts {0, 1, 63} give `non_zeros_count == 3`, but
     // `initRoundAndRepresentation` still probes `original_num == 4`, triggering the pad-back
     // branch (`original_num > non_zeros_count`) that other tests hit only incidentally. Call
     // `buildPostOffice` directly to pin the exact padded ordering.
@@ -443,8 +450,8 @@ test "post office solver pads offices back when fewer non-zero buckets than requ
         &post_non_zeros,
     );
 
-    // The three offices sit exactly on the non-zero buckets (zero cost); the pad-back inserts
-    // the unused position 2 in ascending order, preserving the real positions.
+    // The three selections sit exactly on the observed counts (no waste); the pad-back inserts
+    // the unobserved count 2 in ascending order, preserving the real ones.
     const expected_positions = [_]u6{ 0, 1, 2, 63 };
     try testing.expectEqual(@as(usize, 4), result.positions.len);
     try testing.expectEqualSlices(
@@ -463,7 +470,7 @@ test "post office solver handles all-zero distribution except index zero" {
     var round: [table_size]u6 = @splat(0);
     const positions = initRoundAndRepresentation(&distribution, &representation, &round);
 
-    // A single non-zero bucket needs a single office at position 0 and zero-bit codes.
+    // A single observed zero count needs a single selection at zero and zero-bit codes.
     try testing.expectEqual(@as(usize, 1), positions.len);
     try testing.expectEqual(@as(u6, 0), positions.values[0]);
     try testing.expectEqual(@as(u8, 0), position_length_to_bits[positions.len]);
