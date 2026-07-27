@@ -163,7 +163,8 @@ pub fn initRoundAndRepresentation(
 
 /// Write `positions` to `bit_writer` as a 5-bit count (a count of 32 wraps to 0) followed by each
 /// selected zero count as a 6-bit value, exactly like `WritePositions` of the reference
-/// implementation. Returns the number of bits written. If an error occurs it is returned.
+/// implementation. Returns the number of bits written, or `Error.WriteFailed`/
+/// `Error.ByteStreamError` if a write fails.
 pub fn writePositions(
     positions: Positions,
     bit_writer: *shared_structs.BulkBitWriter,

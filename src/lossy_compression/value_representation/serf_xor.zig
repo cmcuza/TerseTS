@@ -151,7 +151,7 @@ fn buildDecodeTable(entries: []const u6) [zero_count_rounding.table_size]u6 {
 /// lossless mode in which values are XOR-encoded bit-exactly without shifting or approximation.
 /// Inputs that are not finite, exceed `tester.max_test_value` in magnitude, or defeat the
 /// error-bound guarantee through floating-point rounding are rejected with
-/// `Error.UnsupportedInput`. If an error occurs it is returned.
+/// `Error.UnsupportedInput`.
 pub fn compress(
     allocator: Allocator,
     uncompressed_values: []const f64,
@@ -250,7 +250,8 @@ pub fn compress(
 
 /// Decompress `compressed_values` produced by "Serf-XOR". The function writes the result to
 /// `decompressed_values`. The `allocator` is used to manage the memory of intermediate results.
-/// If an error occurs it is returned.
+/// A stream shorter than the `[shift: f64]` header or a malformed bit stream is rejected with
+/// `Error.CorruptedCompressedData` or `Error.ByteStreamError`.
 pub fn decompress(
     allocator: Allocator,
     compressed_values: []const u8,
@@ -302,7 +303,7 @@ const Compressor = struct {
     /// XOR-encode `value` against the previous stored bits into `bit_writer` using the three-case
     /// layout of the reference (`01` identical, `1` reuse stored bounds, `00` new bounds), update
     /// the zero-count distributions, and store `value` as the new previous bits. Returns the
-    /// number of bits written. If an error occurs it is returned.
+    /// number of bits written, or `Error.WriteFailed`/`Error.ByteStreamError` if a write fails.
     fn compressValue(
         self: *Compressor,
         bit_writer: *shared_structs.BulkBitWriter,
@@ -368,7 +369,8 @@ const Compressor = struct {
     /// Run the window rule update: if the compression ratio of the closing window got worse,
     /// recompute the rounding rules from the observed distributions with `zero_count_rounding`,
     /// write flag bit 1 and the new positions; otherwise write flag bit 0. Either way remember
-    /// the ratio and reset the window bookkeeping. If an error occurs it is returned.
+    /// the ratio and reset the window bookkeeping. Returns `Error.WriteFailed`/
+    /// `Error.ByteStreamError` if a write fails.
     fn updateRules(self: *Compressor, bit_writer: *shared_structs.BulkBitWriter) Error!void {
         const compression_ratio_this_window = @as(f64, @floatFromInt(self.bits_this_window)) /
             @as(f64, @floatFromInt(@as(u64, self.values_this_window) * bits_per_value));
@@ -417,7 +419,7 @@ const Decompressor = struct {
 
     /// Read one XOR-encoded value from `bit_reader`, reversing the three-case layout written by
     /// `Compressor.compressValue`, and return the reconstructed bits (also stored as the new
-    /// previous bits). If an error occurs it is returned.
+    /// previous bits). A malformed bit stream is rejected with `Error.ByteStreamError`.
     fn readValue(self: *Decompressor, bit_reader: *shared_structs.BulkBitReader) Error!u64 {
         const first_bit = bit_reader.readBitsNoEof(u1, 1) catch return Error.ByteStreamError;
         if (first_bit == 1) {
@@ -450,7 +452,7 @@ const Decompressor = struct {
     /// Read `64 - stored_leading_zeros - stored_trailing_zeros` center bits and XOR them, shifted
     /// back in place, into the stored bits. A valid stream always keeps the bound sum below 64;
     /// larger sums (including the initial sentinels) only occur for corrupted streams and are
-    /// rejected. If an error occurs it is returned.
+    /// rejected.
     fn readCenterBits(self: *Decompressor, bit_reader: *shared_structs.BulkBitReader) Error!void {
         const bound_sum = self.stored_leading_zeros + self.stored_trailing_zeros;
         if (bound_sum >= bits_per_value) return Error.CorruptedCompressedData;
