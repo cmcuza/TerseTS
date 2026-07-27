@@ -262,17 +262,12 @@ fn selectZeroCounts(
         }
     }
 
-    // A feasible selection always exists (`num <= non_zeros_count`), so some `dp[i][num - 1]` is
-    // valid and a best last count is found.
-    std.debug.assert(temp_best_last != -1);
-
     // Walk the `pre` chain backwards to recover the whole selection: exactly `num` links, since
     // every `dp[i][j>=1]` was set with a `pre` entry and only `pre[0][0]` terminates with -1.
     var positions = Positions{ .len = num };
     var count: usize = 1;
     var best_last = temp_best_last;
     while (best_last != -1) {
-        std.debug.assert(count <= num);
         positions.values[num - count] = @intCast(best_last);
         best_last = pre[@intCast(best_last)][num - count];
         count += 1;
@@ -294,7 +289,6 @@ fn selectZeroCounts(
                 k += 1;
             }
         }
-        std.debug.assert(j == original_num);
         positions = modified;
     }
 

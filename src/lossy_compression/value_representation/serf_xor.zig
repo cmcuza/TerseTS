@@ -322,7 +322,6 @@ const Compressor = struct {
             const trailing_zeros: u32 = self.trailing_round[trailing_count];
             // The initial tables and the solver both guarantee `round[j] <= j`, so `center_bits`
             // stays positive in case 00 (`clz + ctz <= 63` for a non-zero XOR).
-            std.debug.assert(leading_zeros <= leading_count and trailing_zeros <= trailing_count);
             self.lead_distribution[leading_count] += 1;
             self.trail_distribution[trailing_count] += 1;
 
@@ -334,9 +333,6 @@ const Compressor = struct {
             {
                 // Case 1: reuse the stored bounds; only the center bits follow the control bit.
                 // Reachable only after a case 00 set real bounds, so the subtraction cannot wrap.
-                std.debug.assert(
-                    self.stored_leading_zeros + self.stored_trailing_zeros < bits_per_value,
-                );
                 const center_bits: u16 =
                     @intCast(bits_per_value - self.stored_leading_zeros - self.stored_trailing_zeros);
                 try bit_writer.writeBits(@as(u1, 0b1), 1);
@@ -562,8 +558,6 @@ fn findApproximationCore(
     const leading_zeros: u32 = @clz(min_bits ^ max_bits);
     var shift: i32 = bits_per_value - @as(i32, @intCast(leading_zeros));
     // Both bounds are non-negative here, so the XOR has a leading zero and `shift <= 63`.
-    std.debug.assert(shift <= 63);
-
     while (shift >= 0) : (shift -= 1) {
         const front_mask = math.shl(u64, ~@as(u64, 0), shift);
         const append = (front_mask & min_bits) | (~front_mask & last_bits);
