@@ -61,12 +61,12 @@ pub const position_length_to_bits = [65]u8{
     6, 6,
 };
 
-/// Sentinel marking dynamic-programming cells that hold no valid cost yet. The reference C++
-/// implementation uses `std::numeric_limits<int>::max()` for the same purpose. Real costs must
-/// stay below the sentinel for the "unreached cell" comparisons to be unambiguous, which holds
-/// as long as callers pass distributions whose total count times `table_size` is below
-/// `maxInt(i32)` — SerfXOR's windows of 1000 values are far below that limit.
-const cost_sentinel: i64 = math.maxInt(i32);
+/// Marks dynamic-programming cells that hold no valid cost yet. The reference C++ implementation
+/// uses `std::numeric_limits<int>::max()` for the same purpose. Real costs must stay below this
+/// value for the "unreached cell" comparisons to be unambiguous, which holds as long as callers
+/// pass distributions whose total count times `table_size` is below `maxInt(i32)` — SerfXOR's
+/// windows of 1000 values are far below that limit.
+const no_valid_cost_value: i64 = math.maxInt(i32);
 
 /// The set of zero counts selected for transmission: the first `len` entries of `values`, in
 /// increasing order and always starting at zero. The encoder writes the set into the stream at
@@ -121,7 +121,7 @@ pub fn initRoundAndRepresentation(
 
     // At most 5 bits are used to represent one code, hence at most 2^5 positions.
     const max_bits_per_code: usize = @min(position_length_to_bits[non_zeros_count], 5);
-    var total_cost: i64 = cost_sentinel;
+    var total_cost: i64 = no_valid_cost_value;
     var positions = Positions{};
 
     var bits_per_code: usize = 0;
@@ -193,7 +193,7 @@ fn selectZeroCounts(
 ) BuildResult {
     const num = @min(original_num, non_zeros_count);
 
-    var dp: [table_size][max_positions]i64 = @splat(@splat(cost_sentinel));
+    var dp: [table_size][max_positions]i64 = @splat(@splat(no_valid_cost_value));
     // `pre[i][j]` holds the previously selected count; -1 terminates the chain. Only `pre[0][0]`
     // is read with `j == 0`, so initializing all to -1 is safe.
     var pre: [table_size][max_positions]i8 = @splat(@splat(-1));
@@ -216,15 +216,15 @@ fn selectZeroCounts(
                 pre[i][1] = 0;
             } else {
                 if (pre_non_zeros[i] < j + 1 or post_non_zeros[i] < num - 1 - j) continue;
-                var app_cost: i64 = cost_sentinel;
+                var app_cost: i64 = no_valid_cost_value;
                 var best_previous_count: usize = 0;
                 var k: usize = j - 1;
                 while (k <= i - 1) : (k += 1) {
                     if ((distribution[k] == 0 and k > 0) or
                         pre_non_zeros[k] < j or
                         post_non_zeros[k] < num - j) continue;
-                    // Explicit sentinel check: skip cells the reference's guards leave undefined.
-                    if (dp[k][j - 1] == cost_sentinel) continue;
+                    // Explicit check: skip cells the reference's guards leave undefined.
+                    if (dp[k][j - 1] == no_valid_cost_value) continue;
                     var sum: i64 = dp[k][j - 1];
                     for (k + 1..i) |p| {
                         sum += @as(i64, distribution[p]) * @as(i64, @intCast(p - k));
@@ -236,7 +236,7 @@ fn selectZeroCounts(
                         if (sum == 0) break;
                     }
                 }
-                if (app_cost != cost_sentinel) {
+                if (app_cost != no_valid_cost_value) {
                     dp[i][j] = app_cost;
                     pre[i][j] = @intCast(best_previous_count);
                 }
@@ -245,13 +245,13 @@ fn selectZeroCounts(
     }
 
     // Pick the last selected count minimizing the total waste, including all counts after it.
-    var temp_total_app_cost: i64 = cost_sentinel;
+    var temp_total_app_cost: i64 = no_valid_cost_value;
     var temp_best_last: isize = -1;
     for (num - 1..table_size) |i| {
         // A single selected count must be zero.
         if (num - 1 == 0 and i > 0) break;
         if ((distribution[i] == 0 and i > 0) or pre_non_zeros[i] < num) continue;
-        if (dp[i][num - 1] == cost_sentinel) continue;
+        if (dp[i][num - 1] == no_valid_cost_value) continue;
         var sum: i64 = dp[i][num - 1];
         for (i + 1..table_size) |j| {
             sum += @as(i64, distribution[j]) * @as(i64, @intCast(j - i));
