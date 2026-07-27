@@ -130,7 +130,7 @@ pub fn initRoundAndRepresentation(
         const present_cost: i64 = total_count * @as(i64, @intCast(bits_per_code));
         if (present_cost >= total_cost) break;
         const num = @as(usize, 1) << @intCast(bits_per_code);
-        const result = buildPostOffice(
+        const result = selectZeroCounts(
             distribution,
             num,
             non_zeros_count,
@@ -184,7 +184,7 @@ pub fn writePositions(
 /// dynamic program and afterwards pads the result back to `original_num`; that block is ported as
 /// well. `pre_non_zeros` and `post_non_zeros` are the prefix/suffix non-zero counts computed by
 /// `initRoundAndRepresentation`.
-fn buildPostOffice(
+fn selectZeroCounts(
     distribution: *const [table_size]u32,
     original_num: usize,
     non_zeros_count: usize,
@@ -279,8 +279,8 @@ fn buildPostOffice(
     }
 
     if (original_num > non_zeros_count) {
-        // Fewer non-zero buckets than requested offices: pad back to `original_num` positions
-        // by inserting unused positions in ascending order.
+        // Fewer observed zero counts than requested selections: pad back to `original_num` by
+        // inserting unobserved counts in ascending order.
         var modified = Positions{ .len = original_num };
         var j: usize = 0;
         var k: usize = 0;
@@ -322,7 +322,7 @@ fn expectConsistentTables(
     }
 }
 
-test "post office solver spreads positions over a uniform distribution" {
+test "zero count rounding spreads positions over a uniform distribution" {
     var distribution: [table_size]u32 = @splat(0);
     const expected_positions = [_]u6{ 0, 8, 16, 24, 32, 40, 48, 56 };
     for (expected_positions) |position| {
@@ -339,7 +339,7 @@ test "post office solver spreads positions over a uniform distribution" {
     try expectConsistentTables(positions, &representation, &round);
 }
 
-test "post office solver handles a distribution concentrated at one index" {
+test "zero count rounding handles a distribution concentrated at one index" {
     var distribution: [table_size]u32 = @splat(0);
     distribution[10] = 500;
 
@@ -365,7 +365,7 @@ test "post office solver handles a distribution concentrated at one index" {
     }
 }
 
-test "post office solver positions survive a write and read round trip" {
+test "zero count rounding positions survive a write and read round trip" {
     const allocator = testing.allocator;
 
     var distribution: [table_size]u32 = @splat(0);
@@ -396,7 +396,7 @@ test "post office solver positions survive a write and read round trip" {
     }
 }
 
-test "post office solver handles zeros interleaved with non-zero buckets" {
+test "zero count rounding handles gaps between observed zero counts" {
     var distribution: [table_size]u32 = @splat(0);
     // Irregular gaps between observed zero counts exercise the pre/post non-zero-count guards.
     distribution[1] = 3;
@@ -413,18 +413,18 @@ test "post office solver handles zeros interleaved with non-zero buckets" {
     try expectConsistentTables(positions, &representation, &round);
 }
 
-test "post office solver pads offices back when fewer non-zero buckets than requested" {
+test "zero count rounding pads back when fewer counts observed than requested" {
     // Only three observed zero counts {0, 1, 63} give `non_zeros_count == 3`, but
     // `initRoundAndRepresentation` still probes `original_num == 4`, triggering the pad-back
     // branch (`original_num > non_zeros_count`) that other tests hit only incidentally. Call
-    // `buildPostOffice` directly to pin the exact padded ordering.
+    // `selectZeroCounts` directly to pin the exact padded ordering.
     var distribution: [table_size]u32 = @splat(0);
     distribution[0] = 100;
     distribution[1] = 100;
     distribution[63] = 100;
 
     // Reproduce the prefix/suffix non-zero bookkeeping `initRoundAndRepresentation` computes
-    // before it calls `buildPostOffice`.
+    // before it calls `selectZeroCounts`.
     var pre_non_zeros: [table_size]u32 = undefined;
     var post_non_zeros: [table_size]u32 = undefined;
     var non_zeros_count: usize = table_size;
@@ -442,7 +442,7 @@ test "post office solver pads offices back when fewer non-zero buckets than requ
     }
     try testing.expectEqual(@as(usize, 3), non_zeros_count);
 
-    const result = buildPostOffice(
+    const result = selectZeroCounts(
         &distribution,
         4,
         non_zeros_count,
@@ -462,7 +462,7 @@ test "post office solver pads offices back when fewer non-zero buckets than requ
     try testing.expectEqual(@as(i64, 0), result.total_app_cost);
 }
 
-test "post office solver handles all-zero distribution except index zero" {
+test "zero count rounding handles all-zero distribution except index zero" {
     var distribution: [table_size]u32 = @splat(0);
     distribution[0] = 100;
 

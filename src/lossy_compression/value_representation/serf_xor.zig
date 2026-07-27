@@ -20,7 +20,8 @@
 //! SerfXOR combines a Shifter (adds an integer offset so all values share one exponent and the
 //! XORs gain leading zeros), an Approximator (picks bits within the error bound that share the
 //! longest suffix with the previous value, maximizing trailing zeros), a three-case XOR encoder,
-//! and adaptive leading/trailing-zero rules recomputed per window by the post-office solver.
+//! and adaptive leading/trailing-zero rounding rules recomputed per window by
+//! `zero_count_rounding`.
 //! The bit-level layout and the approximator follow the paper authors' reference C++
 //! implementation (`serf_xor_compressor.cc`, `serf_xor_decompressor.cc`, `serf_utils_64.cc`)
 //! released at https://github.com/Spatio-Temporal-Lab/Serf (accessed on 27-07-26).
@@ -40,7 +41,7 @@ const tersets = @import("../../tersets.zig");
 const configuration = @import("../../configuration.zig");
 const shared_functions = @import("../../utilities/shared_functions.zig");
 const shared_structs = @import("../../utilities/shared_structs.zig");
-const post_office_solver = @import("../../utilities/post_office_solver.zig");
+const zero_count_rounding = @import("../../utilities/zero_count_rounding.zig");
 const tester = @import("../../tester.zig");
 
 const Error = tersets.Error;
@@ -76,7 +77,7 @@ const sign_bit_mask: u64 = 0x8000000000000000;
 const magnitude_mask: u64 = 0x7fffffffffffffff;
 
 /// Initial encoder table rounding an exact leading-zero count down to its bucket boundary.
-const initial_leading_round = [post_office_solver.table_size]u6{
+const initial_leading_round = [zero_count_rounding.table_size]u6{
     0,  0,  0,  0,  0,  0,  0,  0,
     8,  8,  8,  8,  12, 12, 12, 12,
     16, 16, 18, 18, 20, 20, 22, 22,
@@ -88,7 +89,7 @@ const initial_leading_round = [post_office_solver.table_size]u6{
 };
 
 /// Initial encoder table mapping an exact leading-zero count to the code written to the stream.
-const initial_leading_representation = [post_office_solver.table_size]u6{
+const initial_leading_representation = [zero_count_rounding.table_size]u6{
     0, 0, 0, 0, 0, 0, 0, 0,
     1, 1, 1, 1, 2, 2, 2, 2,
     3, 3, 4, 4, 5, 5, 6, 6,
@@ -100,7 +101,7 @@ const initial_leading_representation = [post_office_solver.table_size]u6{
 };
 
 /// Initial encoder table rounding an exact trailing-zero count down to its bucket boundary.
-const initial_trailing_round = [post_office_solver.table_size]u6{
+const initial_trailing_round = [zero_count_rounding.table_size]u6{
     0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  22, 22,
@@ -112,7 +113,7 @@ const initial_trailing_round = [post_office_solver.table_size]u6{
 };
 
 /// Initial encoder table mapping an exact trailing-zero count to the code written to the stream.
-const initial_trailing_representation = [post_office_solver.table_size]u6{
+const initial_trailing_representation = [zero_count_rounding.table_size]u6{
     0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 1, 1,
@@ -125,19 +126,19 @@ const initial_trailing_representation = [post_office_solver.table_size]u6{
 
 /// Initial decoder table mapping a leading-zero code back to the zero count. Only the first
 /// eight entries are meaningful initially; rule updates may rewrite up to `max_positions`.
-const initial_leading_decode: [post_office_solver.table_size]u6 = buildDecodeTable(
+const initial_leading_decode: [zero_count_rounding.table_size]u6 = buildDecodeTable(
     &[_]u6{ 0, 8, 12, 16, 18, 20, 22, 24 },
 );
 
 /// Initial decoder table mapping a trailing-zero code back to the zero count.
-const initial_trailing_decode: [post_office_solver.table_size]u6 = buildDecodeTable(
+const initial_trailing_decode: [zero_count_rounding.table_size]u6 = buildDecodeTable(
     &[_]u6{ 0, 22, 28, 32, 36, 40, 42, 46 },
 );
 
 /// Build a zero-padded decoder table of `table_size` entries from the `entries` prefix. The
 /// table is oversized so that any code read from a (possibly corrupted) stream indexes safely.
-fn buildDecodeTable(entries: []const u6) [post_office_solver.table_size]u6 {
-    var table: [post_office_solver.table_size]u6 = @splat(0);
+fn buildDecodeTable(entries: []const u6) [zero_count_rounding.table_size]u6 {
+    var table: [zero_count_rounding.table_size]u6 = @splat(0);
     for (entries, 0..) |entry, index| table[index] = entry;
     return table;
 }
@@ -288,12 +289,12 @@ const Compressor = struct {
     stored_trailing_zeros: u32 = zeros_sentinel,
     leading_bits_per_value: u16 = 3,
     trailing_bits_per_value: u16 = 3,
-    leading_round: [post_office_solver.table_size]u6 = initial_leading_round,
-    leading_representation: [post_office_solver.table_size]u6 = initial_leading_representation,
-    trailing_round: [post_office_solver.table_size]u6 = initial_trailing_round,
-    trailing_representation: [post_office_solver.table_size]u6 = initial_trailing_representation,
-    lead_distribution: [post_office_solver.table_size]u32 = @splat(0),
-    trail_distribution: [post_office_solver.table_size]u32 = @splat(0),
+    leading_round: [zero_count_rounding.table_size]u6 = initial_leading_round,
+    leading_representation: [zero_count_rounding.table_size]u6 = initial_leading_representation,
+    trailing_round: [zero_count_rounding.table_size]u6 = initial_trailing_round,
+    trailing_representation: [zero_count_rounding.table_size]u6 = initial_trailing_representation,
+    lead_distribution: [zero_count_rounding.table_size]u32 = @splat(0),
+    trail_distribution: [zero_count_rounding.table_size]u32 = @splat(0),
     bits_this_window: u64 = 0,
     values_this_window: u32 = 0,
     compression_ratio_last_window: f64 = 0.0,
@@ -369,7 +370,7 @@ const Compressor = struct {
     }
 
     /// Run the window rule update: if the compression ratio of the closing window got worse,
-    /// recompute the rounding rules from the observed distributions with the post-office solver,
+    /// recompute the rounding rules from the observed distributions with `zero_count_rounding`,
     /// write flag bit 1 and the new positions; otherwise write flag bit 0. Either way remember
     /// the ratio and reset the window bookkeeping. If an error occurs it is returned.
     fn updateRules(self: *Compressor, bit_writer: *shared_structs.BulkBitWriter) Error!void {
@@ -378,23 +379,23 @@ const Compressor = struct {
 
         if (self.compression_ratio_last_window < compression_ratio_this_window) {
             // The ratio got worse: re-optimize the rules and transmit the new positions.
-            const lead_positions = post_office_solver.initRoundAndRepresentation(
+            const lead_positions = zero_count_rounding.initRoundAndRepresentation(
                 &self.lead_distribution,
                 &self.leading_representation,
                 &self.leading_round,
             );
             self.leading_bits_per_value =
-                post_office_solver.position_length_to_bits[lead_positions.len];
-            const trail_positions = post_office_solver.initRoundAndRepresentation(
+                zero_count_rounding.position_length_to_bits[lead_positions.len];
+            const trail_positions = zero_count_rounding.initRoundAndRepresentation(
                 &self.trail_distribution,
                 &self.trailing_representation,
                 &self.trailing_round,
             );
             self.trailing_bits_per_value =
-                post_office_solver.position_length_to_bits[trail_positions.len];
+                zero_count_rounding.position_length_to_bits[trail_positions.len];
             try bit_writer.writeBits(@as(u1, 0b1), 1);
-            _ = try post_office_solver.writePositions(lead_positions, bit_writer);
-            _ = try post_office_solver.writePositions(trail_positions, bit_writer);
+            _ = try zero_count_rounding.writePositions(lead_positions, bit_writer);
+            _ = try zero_count_rounding.writePositions(trail_positions, bit_writer);
         } else {
             try bit_writer.writeBits(@as(u1, 0b0), 1);
         }
@@ -415,8 +416,8 @@ const Decompressor = struct {
     stored_trailing_zeros: u32 = zeros_sentinel,
     leading_bits_per_value: u16 = 3,
     trailing_bits_per_value: u16 = 3,
-    leading_decode: [post_office_solver.table_size]u6 = initial_leading_decode,
-    trailing_decode: [post_office_solver.table_size]u6 = initial_trailing_decode,
+    leading_decode: [zero_count_rounding.table_size]u6 = initial_leading_decode,
+    trailing_decode: [zero_count_rounding.table_size]u6 = initial_trailing_decode,
 
     /// Read one XOR-encoded value from `bit_reader`, reversing the three-case layout written by
     /// `Compressor.compressValue`, and return the reconstructed bits (also stored as the new
@@ -482,7 +483,7 @@ const Decompressor = struct {
     /// returned.
     fn readDecodeTable(
         bit_reader: *shared_structs.BulkBitReader,
-        decode: *[post_office_solver.table_size]u6,
+        decode: *[zero_count_rounding.table_size]u6,
     ) Error!u16 {
         const raw_count = bit_reader.readBitsNoEof(u8, 5) catch return Error.ByteStreamError;
         const count: usize = if (raw_count == 0) 32 else raw_count;
@@ -490,7 +491,7 @@ const Decompressor = struct {
         for (0..count) |index| {
             decode[index] = bit_reader.readBitsNoEof(u6, 6) catch return Error.ByteStreamError;
         }
-        return post_office_solver.position_length_to_bits[count];
+        return zero_count_rounding.position_length_to_bits[count];
     }
 };
 
