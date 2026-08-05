@@ -55,6 +55,7 @@ const rle_encoding = @import("lossless_compression/run_length_encoding.zig");
 const delta_encoding = @import("lossless_compression/bitpacked_delta_encoding.zig");
 const chimp64 = @import("lossless_compression/chimp64.zig");
 const chimp128 = @import("lossless_compression/chimp128.zig");
+const elf = @import("lossless_compression/elf.zig");
 const lttb = @import("lossy_compression/line_simplification/largest_triangle_three_buckets.zig");
 
 const extractors = @import("utilities/extractors.zig");
@@ -107,6 +108,7 @@ pub const Method = enum {
     MacaqueS,
     MacaqueV,
     LargestTriangleThreeBuckets,
+    Elf,
 };
 
 /// Compress `uncompressed_values` using `method` and its `configuration` and returns the results
@@ -324,6 +326,14 @@ pub fn compress(
                 configuration,
             );
         },
+        .Elf => {
+            try elf.compress(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                configuration,
+            );
+        },
         .Uncompressed => {
             for (uncompressed_values) |value| {
                 const value_as_bytes: [8]u8 = @bitCast(value);
@@ -430,6 +440,9 @@ pub fn decompress(
         },
         .MacaqueV => {
             try macaque.decompressMacaqueV(allocator, compressed_values_slice, &decompressed_values);
+        },
+        .Elf => {
+            try elf.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
         .Uncompressed => {
             if (compressed_values_slice.len % 8 != 0) return Error.CorruptedCompressedData;
@@ -608,6 +621,9 @@ pub fn extract(
         => {
             return Error.UnsupportedMethod;
         },
+        .Elf => {
+            return Error.UnsupportedMethod;
+        },
     }
 }
 
@@ -766,6 +782,9 @@ pub fn rebuild(
         => {
             return Error.UnsupportedMethod;
         },
+        .Elf => {
+            return Error.UnsupportedMethod;
+        },
     }
     try compressed_values.append(allocator, @intFromEnum(method));
     return compressed_values;
@@ -804,7 +823,8 @@ test "extract and rebuild works for any compression method supported" {
             method == Method.Chimp64 or
             method == Method.Chimp128 or
             method == Method.MacaqueS or
-            method == Method.MacaqueV)
+            method == Method.MacaqueV or
+            method == Method.Elf)
         {
             // These compression methods are not supported for extraction
             // of the coefficients and indices. This is because even small
