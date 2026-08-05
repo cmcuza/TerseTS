@@ -80,9 +80,18 @@ pub const DecimalPrecision = struct {
 };
 
 /// Configuration for lossy_compression/functional_approximation/shrink.zig.
-/// Example: { "abs_error_bound": 0.1, "lambda": 0.1 }
+///
+/// Either:
+/// - `abs_error_bound` must be provided, or
+/// - both `base_error_bound` and `residual_error_bound` must be provided.
+///
+/// Examples:
+/// { "abs_error_bound": 0.1, "lambda": 0.1 }
+/// { "base_error_bound": 0.2, "residual_error_bound": 0.1, "lambda": 0.1 }
 pub const ShrinkConfiguration = struct {
-    abs_error_bound: f32,
+    abs_error_bound: ?f32 = null,
+    base_error_bound: ?f32 = null,
+    residual_error_bound: ?f32 = null,
     lambda: f32 = 0.1,
 };
 
@@ -142,8 +151,30 @@ pub fn parse(
                 return error.InvalidConfiguration;
         },
         ShrinkConfiguration => {
-            if (parsed_value.abs_error_bound <= 0.0 or
-                parsed_value.lambda <= 0.0 or parsed_value.lambda > 1.0)
+            const has_abs = parsed_value.abs_error_bound != null;
+            const has_base = parsed_value.base_error_bound != null;
+            const has_residual = parsed_value.residual_error_bound != null;
+
+            if (!((has_abs and !has_base and !has_residual) or
+                (!has_abs and has_base and has_residual)))
+            {
+                return error.InvalidConfiguration;
+            }
+
+            const residual_error_bound = if (has_abs)
+                parsed_value.abs_error_bound.?
+            else
+                parsed_value.residual_error_bound.?;
+
+            const base_error_bound = if (has_abs)
+                parsed_value.abs_error_bound.? * 2.0
+            else
+                parsed_value.base_error_bound.?;
+
+            if (base_error_bound <= 0.0 or
+                residual_error_bound <= 0.0 or
+                parsed_value.lambda <= 0.0 or
+                parsed_value.lambda > 1.0)
             {
                 return error.InvalidConfiguration;
             }

@@ -72,14 +72,35 @@ pub fn compress(
 
     // The original SHRINK paper proposes a scheme with different error resolutions for the
     // residual part. In this implementation, the error bound is fixed for the whole sequence.
-    const residual_error_bound: f32 = parsed_configuration.abs_error_bound;
-    const base_error_bound: f32 = parsed_configuration.abs_error_bound * 2.0;
+    const has_abs =
+        parsed_configuration.abs_error_bound != null;
+    const has_base =
+        parsed_configuration.base_error_bound != null;
+    const has_residual =
+        parsed_configuration.residual_error_bound != null;
+
+    if (!((has_abs and !has_base and !has_residual) or
+        (!has_abs and has_base and has_residual)))
+    {
+        return error.InvalidConfiguration;
+    }
+
+    const residual_error_bound: f32 = if (has_abs)
+        parsed_configuration.abs_error_bound.?
+    else
+        parsed_configuration.residual_error_bound.?;
+
+    const base_error_bound: f32 = if (has_abs)
+        parsed_configuration.abs_error_bound.? * 2.0
+    else
+        parsed_configuration.base_error_bound.?;
 
     // `lambda` controls the default interval length `L = lambda * n * base_error_bound` used to
     // estimate the local fluctuation level of the data, see SHRINK paper Section III-B, Eq. (4).
     const lambda: f32 = parsed_configuration.lambda;
 
     if (residual_error_bound <= 0.0 or
+        base_error_bound <= 0.0 or
         lambda <= 0.0 or lambda > 1.0)
     {
         return error.InvalidConfiguration;
@@ -702,7 +723,7 @@ test "SHRINK handles a single-point series" {
     defer compressed_values.deinit(allocator);
 
     const method_configuration =
-        \\ {"abs_error_bound": 0.01, "lambda": 0.1}
+        \\ {"base_error_bound": 0.02, "residual_error_bound": 0.01, "lambda": 0.1}
     ;
 
     try compress(allocator, uncompressed_values, &compressed_values, method_configuration);
@@ -743,7 +764,7 @@ test "SHRINK handles a constant series exactly" {
     defer compressed_values.deinit(allocator);
 
     const method_configuration =
-        \\ {"abs_error_bound": 0.0001, "lambda": 0.1}
+        \\ {"base_error_bound": 0.0002, "residual_error_bound": 0.0001, "lambda": 0.1}
     ;
 
     try compress(allocator, &uncompressed_values, &compressed_values, method_configuration);
@@ -772,7 +793,7 @@ test "SHRINK round trip preserves length for a noisy sinusoid with residual corr
     var compressed_values = ArrayList(u8).empty;
     defer compressed_values.deinit(allocator);
     const method_configuration =
-        \\ {"abs_error_bound": 0.15, "lambda": 0.1}
+        \\ {"base_error_bound": 0.3, "residual_error_bound": 0.15, "lambda": 0.1}
     ;
     try compress(allocator, &uncompressed_values, &compressed_values, method_configuration);
     var decompressed_values = ArrayList(f64).empty;
@@ -797,7 +818,7 @@ test "SHRINK rejects lambda greater than 1.0" {
     defer compressed_values.deinit(allocator);
 
     const method_configuration =
-        \\ {"abs_error_bound": 0.01, "lambda": 1.5}
+        \\ {"base_error_bound": 0.02, "residual_error_bound": 0.01, "lambda": 1.5}
     ;
 
     try testing.expectError(Error.InvalidConfiguration, compress(
