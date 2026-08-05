@@ -220,6 +220,15 @@ pub fn defaultConfigurationBuilder(
             );
         },
 
+        .Camel => blk: {
+            const precision: u8 = 4;
+            break :blk try std.fmt.allocPrint(
+                allocator,
+                "{{\"decimal_precision\": {d}}}",
+                .{precision},
+            );
+        },
+
         // Methods using lower downsampling bounds.
         .LargestTriangleThreeBuckets => blk: {
             const default_target_point_count: u32 = 2; // Minimum allowed.

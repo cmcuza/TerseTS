@@ -417,28 +417,42 @@ pub fn testGeneratedLosslessCompression(
     }
 }
 
-/// Round-trip helper for lossless codecs. Compresses `uncompressed_values` with `compressFn`,
-/// decompresses with `decompressFn`, and asserts the recovered values match the originals
-/// bit-for-bit: each value is reinterpreted as a `u64` and compared exactly. Because the bit-cast
-/// keeps the sign bit, +0.0 (`0x0000…`) and -0.0 (`0x8000…`) map to different integers and are
-/// distinguished, and NaN payloads are preserved — neither survives a plain `f64` equality check.
-/// Calls the codec functions directly rather than going through the public dispatcher so that
-/// edge cases like empty and single-value inputs can be exercised.
+/// Use `compress_fn` and `decompress_fn` to round-trip `uncompressed_values` with configuration
+/// `{}`. `allocator` backs scratch buffers; returns codec, allocation, or assertion errors.
 pub fn expectLosslessRoundTrip(
     allocator: Allocator,
-    compressFn: *const fn (Allocator, []const f64, *ArrayList(u8), []const u8) tersets.Error!void,
-    decompressFn: *const fn (Allocator, []const u8, *ArrayList(f64)) tersets.Error!void,
+    compress_fn: *const fn (Allocator, []const f64, *ArrayList(u8), []const u8) tersets.Error!void,
+    decompress_fn: *const fn (Allocator, []const u8, *ArrayList(f64)) tersets.Error!void,
     uncompressed_values: []const f64,
+) !void {
+    try expectExactRoundTrip(
+        allocator,
+        compress_fn,
+        decompress_fn,
+        uncompressed_values,
+        "{}",
+    );
+}
+
+/// Use `compress_fn` and `decompress_fn` with `method_configuration` and require a bit-exact
+/// round trip of `uncompressed_values`. `allocator` backs scratch buffers; encountered errors are
+/// returned.
+pub fn expectExactRoundTrip(
+    allocator: Allocator,
+    compress_fn: *const fn (Allocator, []const f64, *ArrayList(u8), []const u8) tersets.Error!void,
+    decompress_fn: *const fn (Allocator, []const u8, *ArrayList(f64)) tersets.Error!void,
+    uncompressed_values: []const f64,
+    method_configuration: []const u8,
 ) !void {
     var compressed_values = ArrayList(u8).empty;
     defer compressed_values.deinit(allocator);
 
-    try compressFn(allocator, uncompressed_values, &compressed_values, "{}");
+    try compress_fn(allocator, uncompressed_values, &compressed_values, method_configuration);
 
     var decompressed_values = ArrayList(f64).empty;
     defer decompressed_values.deinit(allocator);
 
-    try decompressFn(allocator, compressed_values.items, &decompressed_values);
+    try decompress_fn(allocator, compressed_values.items, &decompressed_values);
 
     try testing.expectEqual(uncompressed_values.len, decompressed_values.items.len);
     for (uncompressed_values, decompressed_values.items) |expected, actual| {

@@ -41,6 +41,7 @@ const bitpacked_quantization = @import("lossy_compression/value_representation/b
 const serfqt = @import("lossy_compression/value_representation/serf_qt.zig");
 const buff = @import("lossy_compression/value_representation/bounded_fast_floats.zig");
 const macaque = @import("lossy_compression/value_representation/macaque.zig");
+const camel = @import("lossy_compression/value_representation/camel.zig");
 
 // Import line simplification methods.
 const vw = @import("lossy_compression/line_simplification/visvalingam_whyatt.zig");
@@ -109,6 +110,7 @@ pub const Method = enum {
     MacaqueV,
     LargestTriangleThreeBuckets,
     Elf,
+    Camel,
 };
 
 /// Compress `uncompressed_values` using `method` and its `configuration` and returns the results
@@ -134,6 +136,12 @@ pub fn compress(
     }
 
     switch (method) {
+        .Uncompressed => {
+            for (uncompressed_values) |value| {
+                const value_as_bytes: [8]u8 = @bitCast(value);
+                try compressed_values.appendSlice(allocator, value_as_bytes[0..]);
+            }
+        },
         .PoorMansCompressionMidrange => {
             try poor_mans_compression.compressMidrange(
                 allocator,
@@ -334,14 +342,16 @@ pub fn compress(
                 configuration,
             );
         },
-        .Uncompressed => {
-            for (uncompressed_values) |value| {
-                const value_as_bytes: [8]u8 = @bitCast(value);
-                try compressed_values.appendSlice(allocator, value_as_bytes[0..]);
-            }
-        },
         .LargestTriangleThreeBuckets => {
             try lttb.compress(
+                allocator,
+                uncompressed_values,
+                &compressed_values,
+                configuration,
+            );
+        },
+        .Camel => {
+            try camel.compress(
                 allocator,
                 uncompressed_values,
                 &compressed_values,
@@ -375,6 +385,14 @@ pub fn decompress(
     const compressed_values_slice = compressed_values[0 .. compressed_values.len - 1];
 
     switch (method) {
+        .Uncompressed => {
+            if (compressed_values_slice.len % 8 != 0) return Error.CorruptedCompressedData;
+            var offset: usize = 0;
+            while (offset < compressed_values_slice.len) : (offset += 8) {
+                const value: f64 = @bitCast(compressed_values_slice[offset..][0..8].*);
+                try decompressed_values.append(allocator, value);
+            }
+        },
         .PoorMansCompressionMidrange, .PoorMansCompressionMean => {
             try poor_mans_compression.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
@@ -444,16 +462,11 @@ pub fn decompress(
         .Elf => {
             try elf.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
-        .Uncompressed => {
-            if (compressed_values_slice.len % 8 != 0) return Error.CorruptedCompressedData;
-            var offset: usize = 0;
-            while (offset < compressed_values_slice.len) : (offset += 8) {
-                const value: f64 = @bitCast(compressed_values_slice[offset..][0..8].*);
-                try decompressed_values.append(allocator, value);
-            }
-        },
         .LargestTriangleThreeBuckets => {
             try lttb.decompress(allocator, compressed_values_slice, &decompressed_values);
+        },
+        .Camel => {
+            try camel.decompress(allocator, compressed_values_slice, &decompressed_values);
         },
     }
 
@@ -618,6 +631,7 @@ pub fn extract(
         .Chimp128,
         .MacaqueS,
         .MacaqueV,
+        .Camel,
         => {
             return Error.UnsupportedMethod;
         },
@@ -779,6 +793,7 @@ pub fn rebuild(
         .Chimp128,
         .MacaqueS,
         .MacaqueV,
+        .Camel,
         => {
             return Error.UnsupportedMethod;
         },
@@ -824,7 +839,8 @@ test "extract and rebuild works for any compression method supported" {
             method == Method.Chimp128 or
             method == Method.MacaqueS or
             method == Method.MacaqueV or
-            method == Method.Elf)
+            method == Method.Elf or
+            method == Method.Camel)
         {
             // These compression methods are not supported for extraction
             // of the coefficients and indices. This is because even small
