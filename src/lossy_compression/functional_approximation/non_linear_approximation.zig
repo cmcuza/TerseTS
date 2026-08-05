@@ -78,8 +78,11 @@ const encoded_segment_size = @sizeOf(f64) * 2 + @sizeOf(u64);
 /// Relative rounding margin reserved from the public error bound.
 const relative_error_bound_margin: f32 = 1e-5;
 
-/// Magnitude-scaled rounding margin for shift round-trips and segment evaluation.
-const magnitude_error_bound_margin: f64 = 8.0 * math.floatEps(f64);
+/// TerseTS-specific safety factor for magnitude-dependent f64 rounding error.
+/// The factor 5 is a conservative choice, not a mathematically proven minimum.
+/// It was setup by running several tests with different time series and error bounds,
+/// and checking the maximum observed rounding error in the reconstructed values.
+const magnitude_error_bound_margin: f64 = 5.0 * math.floatEps(f64);
 
 /// Compresses `uncompressed_data` using the NeaTS algorithm by partitioning the time series into
 /// optimal segments with different nonlinear function types and error-bounded approximations.
