@@ -15,26 +15,27 @@
 # limitations under the License.
 
 from __future__ import annotations
-import sys
-import pathlib
-import sysconfig
+
 import json
-from typing import List, Tuple, Union, Dict, Any
-from enum import Enum, unique
+import pathlib
+import sys
+import sysconfig
 from ctypes import (
-    cdll,
-    Structure,
-    c_ubyte,
-    c_int,
-    c_char_p,
-    c_uint8,
-    c_double,
-    c_size_t,
     POINTER,
+    Structure,
     byref,
-    string_at,
+    c_char_p,
+    c_double,
+    c_int,
+    c_size_t,
+    c_ubyte,
+    c_uint8,
     cast,
+    cdll,
+    string_at,
 )
+from enum import Enum, unique
+from typing import Any, Dict, List, Tuple, Union
 
 try:
     import numpy
@@ -160,15 +161,17 @@ class Method(Enum):
     MacaqueS = 23
     MacaqueV = 24
     LargestTriangleThreeBuckets = 25
-    Shrink = 26
+    Elf = 26
+    Camel = 27
+    Shrink = 28
 
 
 # Public API.
 def compress(
-    uncompressed_values: Union["numpy.ndarray", List[float], Tuple[float, ...]],
+    uncompressed_values: Union[numpy.ndarray, List[float], Tuple[float, ...]],
     method: Method,
     configuration: Union[Dict[str, Any], str],
-) -> Union[bytes, "numpy.ndarray"]:
+) -> Union[bytes, numpy.ndarray]:
     """Compress a sequence of float64 values with a selected TerseTS method.
 
     This function uses a zero-copy fast path when
@@ -215,9 +218,16 @@ def compress(
         # If `values` is already float64 and C-contiguous, no copy is made.
         # Otherwise, numpy.ascontiguousarray() converts it (potentially copying)
         # so we can safely pass its data pointer directly to the native layer.
-        if uncompressed_values.dtype != numpy.float64 or not uncompressed_values.flags["C_CONTIGUOUS"]:
-            uncompressed_values = numpy.ascontiguousarray(uncompressed_values, dtype=numpy.float64)
-        uncompressed_values_struct.data = uncompressed_values.ctypes.data_as(POINTER(c_double))
+        if (
+            uncompressed_values.dtype != numpy.float64
+            or not uncompressed_values.flags["C_CONTIGUOUS"]
+        ):
+            uncompressed_values = numpy.ascontiguousarray(
+                uncompressed_values, dtype=numpy.float64
+            )
+        uncompressed_values_struct.data = uncompressed_values.ctypes.data_as(
+            POINTER(c_double)
+        )
         uncompressed_values_struct.len = uncompressed_values.size
     elif isinstance(uncompressed_values, (list, tuple)):
         # Build a contiguous C array of f64 values from the Python sequence.
@@ -251,7 +261,7 @@ def compress(
             uncompressed_values_struct,
             byref(compressed_values_struct),
             c_uint8(method.value),
-            c_char_p(json_configuration)
+            c_char_p(json_configuration),
         )
         if tersets_error != 0:
             raise RuntimeError(f"compress failed: {tersets_error}")
@@ -273,8 +283,8 @@ def compress(
 
 
 def decompress(
-    compressed_values: Union[bytes, bytearray, memoryview, "numpy.ndarray"],
-) -> Union[List[float], "numpy.ndarray"]:
+    compressed_values: Union[bytes, bytearray, memoryview, numpy.ndarray],
+) -> Union[List[float], numpy.ndarray]:
     """Decompress a TerseTS-compressed array into a list of floats.
 
     This function restores the float64 values from a compressed TerseTS compressed
@@ -363,10 +373,10 @@ def decompress(
 
 
 def extract(
-    compressed_values: Union[bytes, bytearray, memoryview, "numpy.ndarray"],
+    compressed_values: Union[bytes, bytearray, memoryview, numpy.ndarray],
 ) -> Union[
     Tuple[List[int], List[float]],
-    Tuple["numpy.ndarray", "numpy.ndarray"],
+    Tuple[numpy.ndarray, numpy.ndarray],
 ]:
     """Extract indices and coefficients from a compressed TerseTS compressed representation.
 
@@ -416,7 +426,9 @@ def extract(
         if not compressed_values.flags["C_CONTIGUOUS"]:
             raise TypeError("NumPy array must be C-contiguous")
 
-        compressed_values_struct.data = compressed_values.ctypes.data_as(POINTER(c_ubyte))
+        compressed_values_struct.data = compressed_values.ctypes.data_as(
+            POINTER(c_ubyte)
+        )
         compressed_values_struct.len = compressed_values.size
 
     elif isinstance(compressed_values, (bytes, bytearray, memoryview)):
@@ -427,7 +439,9 @@ def extract(
             compressed_values_struct.len = view.size
         else:
             # ctypes fallback.
-            buffer = (c_ubyte * len(compressed_values)).from_buffer_copy(compressed_values)
+            buffer = (c_ubyte * len(compressed_values)).from_buffer_copy(
+                compressed_values
+            )
             compressed_values_struct.data = cast(buffer, POINTER(c_ubyte))
             compressed_values_struct.len = len(compressed_values)
 
@@ -451,10 +465,12 @@ def extract(
         if _INSTALLED_NUMPY:
             # Create views onto native memory, then copy into NumPy-owned arrays
             # before we free the native allocations in `finally`.
-            indices = numpy.ctypeslib.as_array(indices_struct.data,
-                                               shape=(indices_struct.len,)).copy()
-            coefficients = numpy.ctypeslib.as_array(coefficients_struct.data,
-                                                    shape=(coefficients_struct.len,)).copy()
+            indices = numpy.ctypeslib.as_array(
+                indices_struct.data, shape=(indices_struct.len,)
+            ).copy()
+            coefficients = numpy.ctypeslib.as_array(
+                coefficients_struct.data, shape=(coefficients_struct.len,)
+            ).copy()
             return indices, coefficients
 
         # No NumPy: copy into Python lists.
@@ -470,10 +486,10 @@ def extract(
 
 
 def rebuild(
-    indices: Union["numpy.ndarray", List[int], Tuple[int, ...]],
-    coefficients: Union["numpy.ndarray", List[float], Tuple[float, ...]],
+    indices: Union[numpy.ndarray, List[int], Tuple[int, ...]],
+    coefficients: Union[numpy.ndarray, List[float], Tuple[float, ...]],
     method: Method,
-) -> Union[bytes, "numpy.ndarray"]:
+) -> Union[bytes, numpy.ndarray]:
     """Rebuild a compressed TerseTS representation from extracted indices and coefficients.
 
     This function is the inverse of :func:`extract` and constructs a valid
@@ -550,17 +566,25 @@ def rebuild(
         indices_struct.data = indices_buffer
         indices_struct.len = len(indices)
     else:
-        raise TypeError("rebuild(): 'indices' must be ndarray[uintp] or list/tuple[int]")
+        raise TypeError(
+            "rebuild(): 'indices' must be ndarray[uintp] or list/tuple[int]"
+        )
 
     # Prepare coefficients (double*).
     coefficients_struct = __Coefficients()
     if _INSTALLED_NUMPY and isinstance(coefficients, numpy.ndarray):
         if coefficients.dtype != numpy.float64:
-            raise TypeError("rebuild(): 'coefficients' NumPy array must have dtype=np.float64")
+            raise TypeError(
+                "rebuild(): 'coefficients' NumPy array must have dtype=np.float64"
+            )
         if coefficients.ndim != 1:
-            raise TypeError("rebuild(): 'coefficients' NumPy array must be 1-dimensional")
+            raise TypeError(
+                "rebuild(): 'coefficients' NumPy array must be 1-dimensional"
+            )
         if not coefficients.flags["C_CONTIGUOUS"]:
-            raise TypeError("rebuild(): 'coefficients' NumPy array must be C-contiguous")
+            raise TypeError(
+                "rebuild(): 'coefficients' NumPy array must be C-contiguous"
+            )
 
         coefficients_struct.data = coefficients.ctypes.data_as(POINTER(c_double))
         coefficients_struct.len = coefficients.size
@@ -569,7 +593,9 @@ def rebuild(
         coefficients_struct.data = buffer
         coefficients_struct.len = len(coefficients)
     else:
-        raise TypeError("rebuild(): 'coefficients' must be ndarray[float64] or list/tuple[float]")
+        raise TypeError(
+            "rebuild(): 'coefficients' must be ndarray[float64] or list/tuple[float]"
+        )
 
     compressed_values_struct = __CompressedValues()
 

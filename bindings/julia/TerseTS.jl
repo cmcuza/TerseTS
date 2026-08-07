@@ -46,7 +46,9 @@ Mirror TerseTS Method Enum.
     MacaqueS = 23
     MacaqueV = 24
     LargestTriangleThreeBuckets = 25
-    Shrink = 26
+    Elf = 26
+    Camel = 27
+    Shrink = 28
 end
 
 """

@@ -53,6 +53,8 @@ pub enum Method {
     MacaqueS,
     MacaqueV,
     LargestTriangleThreeBuckets,
+    Elf,
+    Camel,
     Shrink,
 }
 

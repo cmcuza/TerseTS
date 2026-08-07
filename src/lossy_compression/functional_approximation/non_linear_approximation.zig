@@ -18,14 +18,11 @@
 //! https://doi.org/10.48550/arXiv.2412.16266.
 //! The implementation is partially based on the authors implementation at
 //! https://github.com/and-gue/NeaTS (accessed on 15-08-25).
-//! NeaTS compresses time series in two stages:
-//!   1. A lossy functional approximation under a pointwise error bound.
-//!   2. A lossless residual encoding that enables exact decompression.
-//! In this file, we implement only the lossy compression phase, which partitions the series
-//! into segments and fits them using nonlinear functions under multiple error bounds.
-//! The lossless residual compression phase is left as future work. Moreover, this version
-//! supports only a single error bound per run. This decision is aligned with the design of
-//! the TerseTS framework, where only a single error bound is currently supported.
+//! NeaTS combines piecewise nonlinear approximation with lossless residual encoding. TerseTS
+//! implements only the lossy phase and accepts one absolute error bound per call. Unlike the
+//! integer-oriented reference implementation, this codec operates on `f64` values without integer
+//! rounding. It also stores two coefficients for every model, adds a power model, and restricts the
+//! quadratic model to `a*x^2 + b` so every segment has the same serialized shape.
 
 const std = @import("std");
 const mem = std.mem;
@@ -50,26 +47,42 @@ const BorderLine = convex_polygon.BorderLine;
 
 /// Represents the different function types available for approximating time series segments,
 /// as defined in Table I of the NeaTS paper. Each type corresponds to a specific mathematical form:
-/// - Linear: slope * x + intercept.
-/// - Quadratic: slope * x ^ 2 + intercept.
-/// - Exponential: intercept * e ^ (slope * x).
-/// - Sqrt: slope * sqrt(x) + intercept.
-/// - Power: intercept * x ^ slope.
-/// - Undefined: Used as a fallback when the function type cannot be determined or does not match
-///   any of the predefined mathematical forms. It also serves as coherent intialization value
+/// - linear: slope * x + intercept.
+/// - quadratic: slope * x ^ 2 + intercept.
+/// - exponential: intercept * e ^ (slope * x).
+/// - sqrt: slope * sqrt(x) + intercept.
+/// - power: intercept * x ^ slope.
+/// - undefined: Used as a fallback when the function type cannot be determined or does not match
+///   any of the predefined mathematical forms. It also serves as a coherent initialization value
 ///   instead of `Null`, avoiding the overhead of optionals.
 const FunctionType = enum(u8) {
-    Linear = 1,
-    Quadratic = 2,
-    Exponential = 3,
-    Sqrt = 4,
-    Power = 5,
-    Undefined = 6,
+    linear = 1,
+    quadratic = 2,
+    exponential = 3,
+    sqrt = 4,
+    power = 5,
+    undefined = 6,
 };
 
 /// Set of function types available for approximating time series segments.
 /// TODO: Make this configurable at running time.
-const function_types = [5]FunctionType{ .Linear, .Quadratic, .Exponential, .Power, .Sqrt };
+const function_types = [5]FunctionType{ .linear, .quadratic, .exponential, .power, .sqrt };
+
+/// Auxiliary constants for packing function types into bytes.
+const function_types_per_byte: usize = 2;
+const function_type_shift: u3 = 4;
+const function_type_mask: u8 = 0x0F;
+const encoded_header_size = @sizeOf(f64) + @sizeOf(u64);
+const encoded_segment_size = @sizeOf(f64) * 2 + @sizeOf(u64);
+
+/// Relative rounding margin reserved from the public error bound.
+const relative_error_bound_margin: f32 = 1e-5;
+
+/// TerseTS-specific safety factor for magnitude-dependent f64 rounding error.
+/// The factor 5 is a conservative choice, not a mathematically proven minimum.
+/// It was setup by running several tests with different time series and error bounds,
+/// and checking the maximum observed rounding error in the reconstructed values.
+const magnitude_error_bound_margin: f64 = 5.0 * math.floatEps(f64);
 
 /// Compresses `uncompressed_data` using the NeaTS algorithm by partitioning the time series into
 /// optimal segments with different nonlinear function types and error-bounded approximations.
@@ -81,7 +94,7 @@ const function_types = [5]FunctionType{ .Linear, .Quadratic, .Exponential, .Powe
 /// If any other error occurs during the execution of the method, it is returned.
 pub fn compress(
     allocator: Allocator,
-    uncompressed_data: []const f64,
+    uncompressed_values: []const f64,
     compressed_values: *ArrayList(u8),
     method_configuration: []const u8,
 ) Error!void {
@@ -91,13 +104,16 @@ pub fn compress(
         method_configuration,
     );
 
-    const error_bound: f32 = parsed_configuration.abs_error_bound - shared_structs.ErrorBoundMargin;
+    const given_error_bound = parsed_configuration.abs_error_bound;
 
-    // Validates that the input contains at least 2 data points for meaningful compression.
-    if (error_bound == 0.0) return Error.InvalidConfiguration;
-
-    const preprocessing = try shiftValues(allocator, uncompressed_data, error_bound);
+    // Shift before computing the rounding margin because shifted magnitude controls f64 resolution.
+    const preprocessing = try shiftValues(allocator, uncompressed_values, given_error_bound);
     defer if (preprocessing.shift_amount != 0.0) allocator.free(preprocessing.shifted_data);
+
+    var maximum_magnitude: f64 = 0.0;
+    for (preprocessing.shifted_data) |value| maximum_magnitude = @max(maximum_magnitude, @abs(value));
+
+    const error_bound = try adjustErrorBound(given_error_bound, maximum_magnitude);
 
     // Stores the preprocessing information - shift amount is always written (0.0 indicates no shift).
     try shared_functions.appendValue(allocator, f64, preprocessing.shift_amount, compressed_values);
@@ -115,12 +131,17 @@ pub fn compress(
 
     const segments_count = optimal_approximation.items.len;
     // Store the number of segments used in the partitioning.
-    try shared_functions.appendValue(allocator, u64, @intCast(segments_count), compressed_values);
+    try shared_functions.appendValue(
+        allocator,
+        u64,
+        @intCast(segments_count),
+        compressed_values,
+    );
 
     // All function types are stored using 4 bits each, so we can pack 2 per byte.
     // This saves space in the compressed representation.
     // For it, we first calculate the number of bytes needed to store all function types.
-    const packed_len: u64 = (segments_count + 1) / 2; // Equal to (segments_count/2).
+    const packed_len = packedFunctionTypeByteCount(segments_count);
 
     // Allocates space for packed function types (2 per byte).
     var packed_function_types = try allocator.alloc(u8, packed_len);
@@ -133,14 +154,14 @@ pub fn compress(
     // Approximations are packed in order: [0,1], [2,3], ...
     for (optimal_approximation.items, 0..) |approximation, idx| {
         const code: u8 = @intCast(@intFromEnum(approximation.function_type));
-        const byte_idx: u64 = idx / 2;
-        const is_high_nibble: bool = (idx % 2) == 0;
+        const byte_idx = idx / function_types_per_byte;
+        const is_high_nibble = (idx % function_types_per_byte) == 0;
         if (is_high_nibble) {
             // Store the function type in the high nibble (bits 4-7).
-            packed_function_types[byte_idx] |= @as(u8, code) << 4;
+            packed_function_types[byte_idx] |= code << function_type_shift;
         } else {
             // Store the function type in the low nibble (bits 0-3).
-            packed_function_types[byte_idx] |= @as(u8, code) & 0x0F;
+            packed_function_types[byte_idx] |= code & function_type_mask;
         }
     }
 
@@ -151,38 +172,41 @@ pub fn compress(
         // The end point is exclusive, so it indicates where the next segment starts.
         try shared_functions.appendValue(allocator, f64, segment.definition.slope, compressed_values);
         try shared_functions.appendValue(allocator, f64, segment.definition.intercept, compressed_values);
-        try shared_functions.appendValue(allocator, u64, segment.end_idx, compressed_values);
+        try shared_functions.appendValue(
+            allocator,
+            u64,
+            @intCast(segment.end_idx),
+            compressed_values,
+        );
     }
 }
 
 /// Decompress `compressed_values` produced by "NeaTS". The function writes the result to
-/// `decompressed_values`. If an error occurs it is returned.
+/// `decompressed_values`. The 'allocator' is used for dynamic memory allocation.
+/// If an error occurs it is returned.
 pub fn decompress(
     allocator: Allocator,
     compressed_values: []const u8,
     decompressed_values: *ArrayList(f64),
 ) Error!void {
-    // Validates that the compressed data contains some bytes to process.
-    if (compressed_values.len < 16) return Error.CorruptedCompressedData;
+    if (compressed_values.len < encoded_header_size) return Error.CorruptedCompressedData;
 
     var offset: usize = 0; // Tracks the current position in the compressed stream.
 
-    // Reads the preprocessing shift amount from the compressed stream.
     const shift_amount = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
-    // Reads the number of segments that were used in the partitioning.
-    const num_segments: u64 = try shared_functions.readOffsetValue(u64, compressed_values, &offset);
+    const encoded_num_segments = try shared_functions.readOffsetValue(
+        u64,
+        compressed_values,
+        &offset,
+    );
+    const num_segments = math.cast(usize, encoded_num_segments) orelse
+        return Error.CorruptedCompressedData;
 
-    // Read packed function types (2 per byte, low nibble = even index, high nibble = odd).
-    const type_bytes_len: u64 = (num_segments + 1) / 2;
+    // Read packed function types (2 per byte, high nibble = even index, low nibble = odd).
+    const type_bytes_len = packedFunctionTypeByteCount(num_segments);
 
-    // Validate that the compressed stream contains exactly the expected number of bytes.
-    // Each segment stores: 2 * f64 (slope, intercept) + usize (end_idx).
-    const bytes_per_segment = @sizeOf(f64) * 2 + @sizeOf(u64);
     const expected_total_bytes =
-        @sizeOf(f64) + // shift_amount.
-        @sizeOf(u64) + // num_segments.
-        type_bytes_len + // packed function types.
-        num_segments * bytes_per_segment;
+        encoded_header_size + type_bytes_len + num_segments * encoded_segment_size;
 
     if (compressed_values.len != expected_total_bytes)
         return Error.CorruptedCompressedData;
@@ -193,24 +217,29 @@ pub fn decompress(
     var optimal_approximation = ArrayList(FunctionalApproximation).empty;
     defer optimal_approximation.deinit(allocator);
 
-    var current_start_idx: usize = 0; // Tracks the inferred start index for sequential segments.
-    for (0..num_segments) |segment_idx| { // Iterates through each segment.
-        const packed_code = packed_function_types[segment_idx / 2];
-        const code: u4 = if (segment_idx % 2 != 0)
-            @truncate(packed_code & 0x0F)
+    var current_start_idx: usize = 0;
+    for (0..num_segments) |segment_idx| {
+        const packed_code = packed_function_types[segment_idx / function_types_per_byte];
+        const code: u4 = if (segment_idx % function_types_per_byte != 0)
+            @truncate(packed_code & function_type_mask)
         else
-            @truncate((packed_code >> 4) & 0x0F);
+            @truncate((packed_code >> function_type_shift) & function_type_mask);
 
         const function_type: FunctionType = @enumFromInt(@as(u8, code));
 
-        // Reads the main function parameters (slope and intercept) and end index.
         const slope = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
         const intercept = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
-        const end_idx: u64 = try shared_functions.readOffsetValue(u64, compressed_values, &offset);
+        const encoded_end_idx = try shared_functions.readOffsetValue(
+            u64,
+            compressed_values,
+            &offset,
+        );
+        const end_idx = math.cast(usize, encoded_end_idx) orelse
+            return Error.CorruptedCompressedData;
 
         // Creates a segment with the inferred start index.
         const functional_approximation = FunctionalApproximation{
-            .start_idx = current_start_idx, // Uses the inferred start index.
+            .start_idx = current_start_idx,
             .end_idx = end_idx,
             .function_type = function_type,
             .definition = LinearFunction{
@@ -221,7 +250,6 @@ pub fn decompress(
 
         try optimal_approximation.append(allocator, functional_approximation);
 
-        // Updates the start index for the next segment (segments are contiguous).
         current_start_idx = end_idx;
     }
 
@@ -240,55 +268,40 @@ pub fn decompress(
     unshiftValues(decompressed_values, shift_amount);
 }
 
-/// Extracts `indices` and `coefficients` from NonLinearApproximation's `compressed_values`.
-/// The `compressed_values` encodes: a shift amount (f64), the number of segments (u64), packed
-/// function-type codes (two per byte), for each segment: (slope: f64, intercept: f64, end_index: u64).
-/// A `indices` ArrayList stores the number of segments, all function type codes, and the end
-/// indices. A `coefficients` ArrayList stores the shift amount and the per-segment (slope, intercept)
-/// values. Any loss of information on the indices, for example, incorrect function codes,
-/// wrong segment count, corrupted end indices, can lead to unexpected failures during decompression.
-/// Only structural checks are performed. The caller must ensure semantic validity. If the compressed
-/// stream does not follow the expected representation, `Error.CorruptedCompressedData` is returned.
-/// The `allocator` handles the memory allocations of the output arrays. Allocation errors are propagated.
+/// Extracts indices and coefficients from a NonLinearApproximation `compressed_values`.
+/// `compressed_values` must contain the layout written by `compress`. `indices` is appended with
+/// the segment count, all function-type codes, then all exclusive segment end indices.
+/// `coefficients` is appended with the shift amount, then slope and intercept pairs for each
+/// segment. `allocator` is used for appending to the output arrays. Returns
+/// `CorruptedCompressedData` when the byte stream does not match the expected layout.
 pub fn extract(
     allocator: Allocator,
     compressed_values: []const u8,
     indices: *ArrayList(u64),
     coefficients: *ArrayList(f64),
 ) Error!void {
-    // Must contain at least shift_amount (f64) and number_of_segments (u64).
-    if (compressed_values.len < @sizeOf(f64) + @sizeOf(u64))
+    if (compressed_values.len < encoded_header_size)
         return Error.CorruptedCompressedData;
 
-    var offset: u64 = 0;
+    var offset: usize = 0;
 
-    // Read shift amount.
     const shift_amount =
         try shared_functions.readOffsetValue(f64, compressed_values, &offset);
-
-    // Read number of segments.
-    const number_of_segments: u64 =
+    const encoded_number_of_segments =
         try shared_functions.readOffsetValue(u64, compressed_values, &offset);
+    const number_of_segments = math.cast(usize, encoded_number_of_segments) orelse
+        return Error.CorruptedCompressedData;
 
-    // Insert into output.
     try coefficients.append(allocator, shift_amount);
-    try indices.append(allocator, number_of_segments);
+    try indices.append(allocator, encoded_number_of_segments);
 
-    // Number of bytes containing packed 4-bit type codes.
-    const type_bytes_len: u64 = (number_of_segments + 1) / 2;
-
-    // Each segment has slope, intercept, end_index.
-    const bytes_per_segment =
-        @sizeOf(f64) * 2 + @sizeOf(u64);
-
-    // Entire payload must match exactly the expected size.
+    const type_bytes_len = packedFunctionTypeByteCount(number_of_segments);
     const expected_total_bytes =
-        @sizeOf(f64) + @sizeOf(u64) + type_bytes_len + number_of_segments * bytes_per_segment;
+        encoded_header_size + type_bytes_len + number_of_segments * encoded_segment_size;
 
     if (compressed_values.len != expected_total_bytes)
         return Error.CorruptedCompressedData;
 
-    // Ensure availability of packed type data.
     if (offset + type_bytes_len > compressed_values.len)
         return Error.CorruptedCompressedData;
 
@@ -296,34 +309,31 @@ pub fn extract(
         compressed_values[offset .. offset + type_bytes_len];
     offset += type_bytes_len;
 
-    // Unpack function types.
     for (0..number_of_segments) |segment_index| {
-        const packed_information = packed_function_types[segment_index / 2];
+        const packed_information = packed_function_types[segment_index / function_types_per_byte];
 
-        const code: u4 = if (segment_index % 2 != 0)
-            @truncate(packed_information & 0x0F)
+        const code: u4 = if (segment_index % function_types_per_byte != 0)
+            @truncate(packed_information & function_type_mask)
         else
-            @truncate((packed_information >> 4) & 0x0F);
+            @truncate((packed_information >> function_type_shift) & function_type_mask);
 
         try indices.append(allocator, @intCast(code));
     }
 
-    // Read the per-segment (slope, intercept, end_index).
     for (0..number_of_segments) |_| {
-        // Prevent buffer overrun.
-        if (offset + bytes_per_segment > compressed_values.len)
+        if (offset + encoded_segment_size > compressed_values.len)
             return Error.CorruptedCompressedData;
 
         const slope =
             try shared_functions.readOffsetValue(f64, compressed_values, &offset);
         const intercept =
             try shared_functions.readOffsetValue(f64, compressed_values, &offset);
-        const end_index =
+        const end_idx =
             try shared_functions.readOffsetValue(u64, compressed_values, &offset);
 
         try coefficients.append(allocator, slope);
         try coefficients.append(allocator, intercept);
-        try indices.append(allocator, end_index);
+        try indices.append(allocator, end_idx);
     }
 
     // If offset does not end exactly here, data was malformed.
@@ -331,16 +341,14 @@ pub fn extract(
         return Error.CorruptedCompressedData;
 }
 
-/// Rebuilds NonLinearApproximation's `compressed_values` from the given `indices` and
-/// `coefficients`. The encoding consists of shift_amount (coefficients[0]), number_of_segments
-/// (indices[0]), packed function types (indices[1 .. number_of_segments]), for each segment:
-/// slope, intercept, end_index. Any loss or misalignment of indices information, for example,
-/// incorrect function type, wrong segment count, missing end_index, can lead to failures during
-/// decompression. The function checks for structural consistency and returns
-/// `Error.CorruptedCompressedData` for malformed input. The `allocator` handles the memory
-/// allocations of the output arrays. Allocation errors are propagated.
+/// Rebuilds a NonLinearApproximation `compressed_values` from `indices` and `coefficients`.
+/// `indices` must contain the segment count, function-type codes, then exclusive segment end
+/// indices. `coefficients` must contain the shift amount followed by slope and intercept pairs.
+/// Both slices must have the shape produced by `extract`. `compressed_values` receives the rebuilt
+/// byte stream. `allocator` is used for temporary packed function-type bytes. Returns
+/// `CorruptedCompressedData` when the arrays do not match the expected representation.
 pub fn rebuild(
-    allocator: mem.Allocator,
+    allocator: Allocator,
     indices: []const u64,
     coefficients: []const f64,
     compressed_values: *ArrayList(u8),
@@ -359,42 +367,49 @@ pub fn rebuild(
     try shared_functions.appendValue(allocator, f64, coefficients[0], compressed_values);
 
     // Append number_of_segments.
-    const number_of_segments: u64 = indices[0];
-    try shared_functions.appendValue(allocator, u64, number_of_segments, compressed_values);
+    const encoded_number_of_segments = indices[0];
+    const number_of_segments = math.cast(usize, encoded_number_of_segments) orelse
+        return Error.CorruptedCompressedData;
+    try shared_functions.appendValue(
+        allocator,
+        u64,
+        encoded_number_of_segments,
+        compressed_values,
+    );
 
-    // There must be at least "number_of_segments" functios type.
-    if (1 + number_of_segments > indices.len)
+    // There must be at least "number_of_segments" function type codes.
+    if (number_of_segments > indices.len - 1)
         return Error.CorruptedCompressedData;
 
     // Prepare the functions type packing.
-    const packed_len = (number_of_segments + 1) / 2;
+    const packed_len = packedFunctionTypeByteCount(number_of_segments);
     var packed_function_types = try allocator.alloc(u8, packed_len);
     defer allocator.free(packed_function_types);
     // Allocate memory for packed functions type and initialize it to zero.
     // This enables the bitwise OR operations during packing.
     @memset(packed_function_types, 0);
 
-    var coefficient_index: u64 = 1; // After shift_amount.
-    var indices_index: u64 = 1; // After number_of_segments.
+    var coefficient_index: usize = 1; // After shift_amount.
+    var indices_index: usize = 1; // After number_of_segments.
 
     // Pack the functions type.
     for (0..number_of_segments) |index| {
         const code_u64 = indices[indices_index];
         // Validate that the code fits in 4 bits.
-        if (code_u64 > 0x0F)
+        if (code_u64 > function_type_mask)
             return Error.CorruptedCompressedData;
 
         const code: u8 = @intCast(code_u64);
-        const byte_index = index / 2;
-        const is_high = (index % 2) == 0;
+        const byte_index = index / function_types_per_byte;
+        const is_high = (index % function_types_per_byte) == 0;
 
         if (byte_index >= packed_len)
             return Error.CorruptedCompressedData;
 
         if (is_high) {
-            packed_function_types[byte_index] |= (code << 4);
+            packed_function_types[byte_index] |= code << function_type_shift;
         } else {
-            packed_function_types[byte_index] |= (code & 0x0F);
+            packed_function_types[byte_index] |= code & function_type_mask;
         }
 
         indices_index += 1;
@@ -422,8 +437,13 @@ pub fn rebuild(
         if (indices_index >= indices.len)
             return Error.CorruptedCompressedData;
 
-        const end_index: u64 = indices[indices_index];
-        try shared_functions.appendValue(allocator, u64, end_index, compressed_values);
+        const encoded_end_idx = indices[indices_index];
+        try shared_functions.appendValue(
+            allocator,
+            u64,
+            encoded_end_idx,
+            compressed_values,
+        );
         indices_index += 1;
     }
 
@@ -446,29 +466,29 @@ const FunctionalApproximation = struct {
     function_type: FunctionType,
     definition: LinearFunction,
 
-    /// Evaluates the function defined in `self` at the given `x_axis` position.
-    /// The `x_axis` is expected to be 1-based index relative to the start of the segment.
-    /// Returns the computed value or an error if the function type is unsupported.
+    /// Evaluates this segment at the absolute 1-based sample position `x_axis`.
+    /// The first point covered by `self` must be evaluated with `x_axis = self.start_idx + 1`;
+    /// the method converts it to the segment-relative coordinate used during fitting.
+    /// Returns `UnsupportedInput` when `self.function_type` is `.undefined`.
     pub fn evaluate(self: *const FunctionalApproximation, x_axis: f64) !f64 {
         const x_rel = x_axis - @as(f64, @floatFromInt(self.start_idx));
         return switch (self.function_type) {
-            .Linear => @mulAdd(f64, self.definition.slope, x_rel, self.definition.intercept),
-            .Quadratic => @mulAdd(f64, self.definition.slope, (x_rel * x_rel), self.definition.intercept),
-            .Exponential => self.definition.intercept * @exp(self.definition.slope * x_rel),
-            .Power => self.definition.intercept * math.pow(f64, x_rel, self.definition.slope),
-            .Sqrt => @mulAdd(f64, self.definition.slope, @sqrt(x_rel), self.definition.intercept),
-            .Undefined => return Error.UnsupportedInput,
+            .linear => @mulAdd(f64, self.definition.slope, x_rel, self.definition.intercept),
+            .quadratic => @mulAdd(f64, self.definition.slope, (x_rel * x_rel), self.definition.intercept),
+            .exponential => self.definition.intercept * @exp(self.definition.slope * x_rel),
+            .power => self.definition.intercept * math.pow(f64, x_rel, self.definition.slope),
+            .sqrt => @mulAdd(f64, self.definition.slope, @sqrt(x_rel), self.definition.intercept),
+            .undefined => return Error.UnsupportedInput,
         };
     }
 
-    /// Returns the cost associated with the current functional approximation type in `self`.
-    /// The cost is determined based on the `function_type` field of the `FunctionalApproximation`.
-    /// Currently, all defined function types have a uniform cost of 2 (slope and intercept),
-    /// while the `.Undefined` type is assigned a high cost to prevent its selection.
+    /// Returns the number of coefficient values stored for `self.function_type`.
+    /// Defined function types currently store slope and intercept. `.undefined` returns the
+    /// maximum `usize` value so dynamic programming does not select an uninitialized segment.
     pub fn getCost(self: *const FunctionalApproximation) usize {
-        // `.Undefined` returns a big number to unsure that it is not selected.
+        // `.undefined` returns a big number to ensure that it is not selected.
         return switch (self.function_type) {
-            .Undefined => math.maxInt(usize),
+            .undefined => math.maxInt(usize),
             // All functional approximation implemented so far only need to store slope and intercept.
             // Therefore, they all have a cost of 2. Future function types may have different costs.
             else => 2,
@@ -476,13 +496,10 @@ const FunctionalApproximation = struct {
     }
 };
 
-/// Applies a preprocessing shift to ensure all values in `values` are positive considering the
-/// `error_bound`. This is required for exponential and power functions. The function calculates
-/// the shift amount and returns a new array with shifted values. If no shift is needed, it returns
-/// the original `values`. The `allocator` is used for dynamic memory allocation if a shift is applied.
-/// The function returns a tuple containing `shifted_data` and `shift_amount`. shifted_data is the
-/// shifted data array (or the original array if no shift is needed).`shift_amount` is the
-/// calculated shift amount (0.0 if no shift is needed).
+/// Returns `values` shifted into the positive domain required by exponential and power constraints.
+/// `error_bound` is the public absolute error bound used to keep `value - error_bound` positive
+/// after shifting. `allocator` is used only when a shifted copy is required; in that case the
+/// caller owns the returned `shifted_data` allocation. Otherwise `shifted_data` aliases `values`.
 fn shiftValues(
     allocator: Allocator,
     values: []const f64,
@@ -506,10 +523,11 @@ fn shiftValues(
     return .{ .shifted_data = mutable_data, .shift_amount = shift_amount };
 }
 
-/// Calculates the preprocessing shift amount needed to ensure all data values are positive.
-/// This is required for exponential and power functions. The function first inspects the
-/// `uncompressed_data` and shifts all values by the minimum value plus the `error_bound`.
-/// If all values are already positive, no shift is applied (returns 0.0).
+/// Returns the value that must be added to `uncompressed_data` before fitting.
+/// `error_bound` is the public absolute error bound; the returned shift keeps the lower
+/// exponential and power constraint, `min(uncompressed_data) - error_bound`, positive.
+/// Returns `UnsupportedInput` for non-finite samples or samples outside the supported magnitude
+/// range. A return value of zero means no shift is required.
 fn calculateShiftAmount(uncompressed_data: []const f64, error_bound: f32) !f64 {
     var min_val = math.inf(f64);
     for (uncompressed_data) |val| {
@@ -530,13 +548,32 @@ fn calculateShiftAmount(uncompressed_data: []const f64, error_bound: f32) !f64 {
     return 0.0;
 }
 
-/// Finds the optimal segmentation of `uncompressed_data` into segments approximated by different
-/// function types while maintaining the `error_bound`. Uses dynamic programming to minimize the
-/// total cost of the segmentation. The cost of the segmentation is measured as the number of
-/// parameters to store in the compressed representation. The resulting optimal segments are
-/// appended to `optimal_approximation`. The `allocator` is used for dynamic memory allocation of
-/// the convex polygon, dynamic programming arrays, and FunctionalApproximation arrays.
-/// If an error occurs, it is returned.
+/// Returns the internal error bound after subtracting the required rounding margin.
+/// `error_bound` is the public absolute error bound from `method_configuration`.
+/// `maximum_magnitude` is the largest absolute value after preprocessing shift and controls the
+/// f64-resolution component of the rounding margin. Returns `InvalidConfiguration` when
+/// `error_bound` is non-positive or no remaining internal error bound can be represented.
+fn adjustErrorBound(error_bound: f32, maximum_magnitude: f64) Error!f32 {
+    if (error_bound <= 0.0) return Error.InvalidConfiguration;
+
+    const error_bound_f64: f64 = error_bound;
+    const margin: f64 = @max(
+        @max(
+            @as(f64, shared_structs.ErrorBoundMargin),
+            error_bound_f64 * relative_error_bound_margin,
+        ),
+        maximum_magnitude * magnitude_error_bound_margin,
+    );
+    if (error_bound_f64 <= margin) return Error.InvalidConfiguration;
+
+    return @floatCast(error_bound_f64 - margin);
+}
+
+/// Appends the minimum-cost segment sequence for shifted `uncompressed_data`.
+/// `error_bound` is the internal error bound after subtracting the rounding margin. The dynamic
+/// program minimizes stored coefficient count across all `function_types`. `optimal_approximation`
+/// receives contiguous segments in decompression order. `allocator` is used for the polygon,
+/// dynamic-programming arrays, and segment scratch space.
 fn findOptimalFunctionalApproximation(
     allocator: Allocator,
     uncompressed_data: []const f64,
@@ -561,6 +598,10 @@ fn findOptimalFunctionalApproximation(
     var current_approximation = try allocator.alloc(FunctionalApproximation, function_types.len);
     defer allocator.free(current_approximation);
 
+    // Reused by exponential and power fits to defer value-space validation until a segment is chosen.
+    var candidate_definitions = ArrayList(LinearFunction).empty;
+    defer candidate_definitions.deinit(allocator);
+
     // Initializes array used by the dynamic programming algorithm.
     for (0..n + 1) |i| {
         distances[i] = math.maxInt(usize); // Sets all distances to infinity initially.
@@ -571,7 +612,7 @@ fn findOptimalFunctionalApproximation(
         current_approximation[i] = FunctionalApproximation{
             .start_idx = 0,
             .end_idx = 0,
-            .function_type = .Undefined,
+            .function_type = .undefined,
             .definition = .{
                 .slope = 0.0,
                 .intercept = 0.0,
@@ -591,6 +632,7 @@ fn findOptimalFunctionalApproximation(
                 // starting at the current position.
                 const functional_approximation = try computeApproximation(
                     &polygon,
+                    &candidate_definitions,
                     uncompressed_data,
                     current_position,
                     function_type,
@@ -634,14 +676,15 @@ fn findOptimalFunctionalApproximation(
     mem.reverse(FunctionalApproximation, optimal_approximation.items);
 }
 
-/// Computes the longest segment starting from `start_idx` that can be approximated by
-/// the specified `function_type` while maintaining the `error_bound`. Uses O'Rourke's
-/// algorithm generalized to nonlinear functions through parameter space transformation.
-/// The function returns a `FunctionalApproximation` representing the best segment found.
-/// The `polygon` parameter is used to maintain the feasible region of parameters.
-/// If an error occurs, it is returned.
+/// Returns the longest segment starting at `start_idx` that `function_type` can fit.
+/// `uncompressed_data` is the shifted input series. `error_bound` is the internal error bound.
+/// `polygon` is reusable feasible-region state and is cleared before return.
+/// `candidate_definitions` is reusable scratch for exponential and power candidates; it is cleared
+/// on entry and stores value-space definitions until they are validated. Returns a one-point
+/// segment when every longer candidate misses the internal error bound.
 fn computeApproximation(
     polygon: *convex_polygon.ConvexPolygon,
+    candidate_definitions: *ArrayList(LinearFunction),
     uncompressed_data: []const f64,
     start_idx: usize,
     function_type: FunctionType,
@@ -663,13 +706,12 @@ fn computeApproximation(
         };
     }
 
-    // Tracks the end of the longest valid segment found. Always can fit two points
-    // (start_idx and start_idx+1) with a linear function.
-    var longest_valid_end: usize = start_idx + 2;
+    // A single point is the exact fallback when every longer segment misses the internal error bound.
+    var longest_valid_end: usize = start_idx + 1;
 
-    // LinearFunction for storing the longest segment which is the best approximation since it
-    // needs less parameters to fit more points.
-    var best_approximation: LinearFunction = .{ .slope = 0, .intercept = 0 };
+    var best_approximation: LinearFunction = .{ .slope = 0, .intercept = uncompressed_data[start_idx] };
+    const needs_value_space_validation = function_type == .exponential or function_type == .power;
+    candidate_definitions.clearRetainingCapacity();
 
     // Implements O'Rourke's algorithm: processes data points from left to right.
     for (start_idx..n) |end_idx| {
@@ -706,12 +748,41 @@ fn computeApproximation(
         // Checks if the feasible region is still non-empty after adding constraints.
         if (!intercept) break;
 
+        // The first point only seeds an unbounded polygon; use the exact fallback until two points exist.
+        if (end_idx == start_idx) continue;
+
         const feasible_solution = polygon.computeFeasibleSolution();
-        best_approximation = transformParameters(feasible_solution, function_type);
-        longest_valid_end = start_idx + x_axis; // Updates the longest valid segment end.
+        const candidate_definition = transformParameters(feasible_solution, function_type);
+
+        if (needs_value_space_validation) {
+            try candidate_definitions.append(polygon.allocator, candidate_definition);
+        } else {
+            best_approximation = candidate_definition;
+            longest_valid_end = start_idx + x_axis; // Updates the longest valid segment end.
+        }
     }
 
     polygon.clear();
+
+    // Exponential and Power fit in log-space but reconstruct in value-space. Validate after finding
+    // the longest polygon-valid candidate, then walk backward only if it misses the internal bound.
+    if (needs_value_space_validation) {
+        var candidate_idx = candidate_definitions.items.len;
+        while (candidate_idx > 0) {
+            candidate_idx -= 1;
+            const candidate = FunctionalApproximation{
+                .start_idx = start_idx,
+                .end_idx = start_idx + candidate_idx + 2,
+                .function_type = function_type,
+                .definition = candidate_definitions.items[candidate_idx],
+            };
+            if (segmentWithinErrorBound(candidate, uncompressed_data, error_bound)) {
+                best_approximation = candidate.definition;
+                longest_valid_end = candidate.end_idx;
+                break;
+            }
+        }
+    }
 
     return FunctionalApproximation{
         .start_idx = start_idx,
@@ -721,11 +792,11 @@ fn computeApproximation(
     };
 }
 
-/// Transforms and returns the lower and upper border line constraints for the given
-/// `function_type`, `x_axis`, `y_axis`, and `error_bound`. This function maps the
-/// the nonlinear function constraints into linear constraints in parameter space,
-/// enabling the use of O'Rourke's algorithm for linear functions. The transformation
-/// is based on the mathematical formulations provided in Table I of the NeaTS paper.
+/// Returns the lower and upper border lines for one sample's feasible parameter region.
+/// `x_axis` is the segment-relative 1-based sample position. `y_axis` is the shifted sample value.
+/// `error_bound` is the internal error bound. `function_type` selects the parameter transform used
+/// by O'Rourke's algorithm; exponential and power callers must provide positive
+/// `y_axis - error_bound`.
 fn getConstraints(
     x_axis: usize,
     y_axis: f64,
@@ -739,69 +810,95 @@ fn getConstraints(
     const slope: f64 = @floatFromInt(x_axis);
 
     return switch (function_type) {
-        .Linear => .{
+        .linear => .{
             .lower = LinearFunction{ .slope = -slope, .intercept = y_axis - eps },
             .upper = LinearFunction{ .slope = -slope, .intercept = y_axis + eps },
         },
-        .Quadratic => .{
+        .quadratic => .{
             .lower = LinearFunction{ .slope = -(slope * slope), .intercept = y_axis - eps },
             .upper = LinearFunction{ .slope = -(slope * slope), .intercept = y_axis + eps },
         },
-        .Exponential => .{
+        .exponential => .{
             .lower = LinearFunction{ .slope = -slope, .intercept = @log(y_axis - eps) },
             .upper = LinearFunction{ .slope = -slope, .intercept = @log(y_axis + eps) },
         },
-        .Power => .{
+        .power => .{
             .lower = LinearFunction{ .slope = -@log(slope), .intercept = @log(y_axis - eps) },
             .upper = LinearFunction{ .slope = -@log(slope), .intercept = @log(y_axis + eps) },
         },
-        .Sqrt => .{
+        .sqrt => .{
             .lower = LinearFunction{ .slope = -@sqrt(slope), .intercept = y_axis - eps },
             .upper = LinearFunction{ .slope = -@sqrt(slope), .intercept = y_axis + eps },
         },
-        .Undefined => .{
+        .undefined => .{
             .lower = LinearFunction{ .slope = math.inf(f64), .intercept = math.inf(f64) },
             .upper = LinearFunction{ .slope = math.inf(f64), .intercept = math.inf(f64) },
         },
     };
 }
 
-/// Transforms the parameters of a `linear_function` obtained in the transformed parameter space
-/// back to the original parameter space corresponding to the specified `function_type`.
+/// Converts `linear_function` from transformed parameter space into a value-space definition.
+/// `function_type` selects the inverse transform; exponential and power definitions exponentiate
+/// the transformed intercept.
 fn transformParameters(
     linear_function: LinearFunction,
     function_type: FunctionType,
 ) LinearFunction {
     return switch (function_type) {
-        .Linear => LinearFunction{
+        .linear => LinearFunction{
             .slope = linear_function.slope,
             .intercept = linear_function.intercept,
         },
-        .Quadratic => LinearFunction{
+        .quadratic => LinearFunction{
             .slope = linear_function.slope,
             .intercept = linear_function.intercept,
         },
-        .Exponential => LinearFunction{
+        .exponential => LinearFunction{
             .slope = linear_function.slope,
             .intercept = @exp(linear_function.intercept),
         },
-        .Power => LinearFunction{
+        .power => LinearFunction{
             .slope = linear_function.slope,
             .intercept = @exp(linear_function.intercept),
         },
-        .Sqrt => LinearFunction{
+        .sqrt => LinearFunction{
             .slope = linear_function.slope,
             .intercept = linear_function.intercept,
         },
-        .Undefined => LinearFunction{
+        .undefined => LinearFunction{
             .slope = math.inf(f64),
             .intercept = math.inf(f64),
         },
     };
 }
 
-/// Reverts the preprocessing shift applied to `values`. This function subtracts the `shift_amount`
-/// from each value in the array.
+/// Returns whether `approximation` reconstructs its covered samples within `error_bound`.
+/// `approximation.start_idx` and `approximation.end_idx` must be valid bounds into
+/// `uncompressed_data`. `error_bound` is the internal error bound. The check uses the same absolute
+/// 1-based sample positions as `decompress` and returns false for evaluation errors or non-finite
+/// reconstructed values.
+fn segmentWithinErrorBound(
+    approximation: FunctionalApproximation,
+    uncompressed_data: []const f64,
+    error_bound: f32,
+) bool {
+    for (approximation.start_idx..approximation.end_idx) |idx| {
+        // Decompression evaluates each segment with 1-based indices (see `decompress`).
+        const reconstructed = approximation.evaluate(@floatFromInt(idx + 1)) catch return false;
+        if (!math.isFinite(reconstructed)) return false;
+        if (@abs(reconstructed - uncompressed_data[idx]) > error_bound) return false;
+    }
+    return true;
+}
+
+/// Returns the bytes required to store `number_of_segments` four-bit model codes.
+fn packedFunctionTypeByteCount(number_of_segments: usize) usize {
+    return number_of_segments / function_types_per_byte +
+        number_of_segments % function_types_per_byte;
+}
+
+/// Subtracts the preprocessing `shift_amount` from every item in `values`.
+/// `values` is modified in place. A zero `shift_amount` leaves `values` unchanged.
 fn unshiftValues(values: *ArrayList(f64), shift_amount: f64) void {
     if (shift_amount == 0.0) return;
 
@@ -1006,5 +1103,39 @@ test "rebuildNonLinearApproximation rejects incomplete coefficient pair" {
     try testing.expectError(
         Error.CorruptedCompressedData,
         rebuild(allocator, indices[0..], coefficients[0..], &compressed),
+    );
+}
+
+test "non linear approximator reserves a scale-aware rounding margin" {
+    const reported_error_bound: f32 = 52059.992;
+
+    // Small magnitudes still reserve the relative rounding margin.
+    const small_magnitude_bound = try adjustErrorBound(reported_error_bound, 0.0);
+    try testing.expect(reported_error_bound - small_magnitude_bound > 0.015625);
+
+    // Large fitted magnitudes reserve a larger rounding margin.
+    const large_magnitude_bound = try adjustErrorBound(reported_error_bound, 1e15);
+    try testing.expect(
+        (reported_error_bound - large_magnitude_bound) > (reported_error_bound - small_magnitude_bound),
+    );
+
+    // Reject requests whose error bound is smaller than the required rounding margin.
+    try testing.expectError(Error.InvalidConfiguration, adjustErrorBound(1e-3, 1e15));
+}
+
+test "non linear approximator rejects a zero error bound" {
+    const allocator = testing.allocator;
+    var compressed = ArrayList(u8).empty;
+    defer compressed.deinit(allocator);
+
+    try testing.expectError(
+        Error.InvalidConfiguration,
+        compress(
+            allocator,
+            &[_]f64{ 1.0, 2.0 },
+            &compressed,
+            \\{"abs_error_bound": 0}
+            ,
+        ),
     );
 }
