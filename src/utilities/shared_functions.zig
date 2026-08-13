@@ -415,6 +415,20 @@ pub fn writeChimpEndMarker(bit_writer: *shared_structs.BulkBitWriter, ring_slot_
     try bit_writer.writeBits(@as(u6, 0), 6);
 }
 
+/// Quantizes the given `value` by the specified `error_bound` and `how`. If the `error_bound` is
+/// equal to zero, the value is directly returned. 'how' specifies whether to round down (`floor`)
+/// or up (`ceil`) to the nearest quantization bucket.
+pub fn quantize(value: f64, error_bound: f32, how: enum { floor, ceil }) f64 {
+    if (error_bound != 0) {
+        if (how == .floor) {
+            return @floor(value / error_bound) * error_bound;
+        } else {
+            return @ceil(value / error_bound) * error_bound;
+        }
+    }
+    return value;
+}
+
 test "zigzag can encode and decode small signed integers correctly" {
     const default_random = tester.getDefaultRandomGenerator();
     const number_of_tests = tester.generateNumberOfValues(default_random);

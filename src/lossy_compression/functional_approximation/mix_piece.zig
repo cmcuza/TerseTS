@@ -621,10 +621,10 @@ fn computeSegmentsMetadata(
 
     // The quantization can only be done using the original error bound. Afterwards, we add
     // `shared_structs.ErrorBoundMargin` to avoid exceeding the error bound during decompression.
-    var quantized_intercept_floor = quantizeFloor(uncompressed_values[0], error_bound) +
+    var quantized_intercept_floor = shared_functions.quantize(uncompressed_values[0], error_bound, .floor) +
         shared_structs.ErrorBoundMargin;
 
-    var quantized_intercept_ceil = quantizeCeil(uncompressed_values[0], error_bound) +
+    var quantized_intercept_ceil = shared_functions.quantize(uncompressed_values[0], error_bound, .ceil) +
         shared_structs.ErrorBoundMargin;
 
     // Track which quantization mode is still valid.
@@ -731,9 +731,9 @@ fn computeSegmentsMetadata(
             // Reset for next segment.
             start_point = end_point;
 
-            quantized_intercept_floor = quantizeFloor(start_point.value, error_bound) +
+            quantized_intercept_floor = shared_functions.quantize(start_point.value, error_bound, .floor) +
                 shared_structs.ErrorBoundMargin;
-            quantized_intercept_ceil = quantizeCeil(start_point.value, error_bound) +
+            quantized_intercept_ceil = shared_functions.quantize(start_point.value, error_bound, .ceil) +
                 shared_structs.ErrorBoundMargin;
 
             upper_bound_slope_floor = math.floatMax(f64);
@@ -1267,26 +1267,6 @@ fn createCompressedRepresentationUngroupedSegments(
         try shared_functions.appendValue(allocator, usize, segment.index - previous_index, compressed_values);
         previous_index = segment.index;
     }
-}
-
-/// Quantizes the given `value` by the specified `error_bound`. This process ensures that
-/// the quantized value remains within the error bound of the original value. If the
-/// `error_bound` is equal to zero, the value is directly returned.
-fn quantizeFloor(value: f64, error_bound: f32) f64 {
-    if (error_bound != 0) {
-        return @floor(value / error_bound) * error_bound;
-    }
-    return value;
-}
-
-/// Quantizes the given `value` by the specified `error_bound`. This process ensures that
-/// the quantized value remains within the error bound of the original value. If the
-/// `error_bound` is equal to zero, the value is directly returned.
-fn quantizeCeil(value: f64, error_bound: f32) f64 {
-    if (error_bound != 0) {
-        return @ceil(value / error_bound) * error_bound;
-    }
-    return value;
 }
 
 test "mix-piece can compress and decompress bounded values with positive error bound" {

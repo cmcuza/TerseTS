@@ -338,7 +338,7 @@ fn computeSegmentsMetadata(
 
     // The quantization can only be done using the original error bound. Afterwards, we add
     // `tersets.ErrorBoundMargin` to avoid exceeding the error bound during decompression.
-    var quantized_intercept = quantize(uncompressed_values[0], error_bound) +
+    var quantized_intercept = shared_functions.quantize(uncompressed_values[0], error_bound, .floor) +
         shared_structs.ErrorBoundMargin;
 
     // The first point is already part of `current_segment`, the next point is at index one.
@@ -373,7 +373,7 @@ fn computeSegmentsMetadata(
             });
 
             start_point = end_point;
-            quantized_intercept = quantize(start_point.value, error_bound) +
+            quantized_intercept = shared_functions.quantize(start_point.value, error_bound, .floor) +
                 shared_structs.ErrorBoundMargin;
             upper_bound_slope = math.floatMax(f64);
             lower_bound_slope = -math.floatMax(f64);
@@ -602,16 +602,6 @@ pub fn createCompressedRepresentation(
             }
         }
     }
-}
-
-/// Quantizes the given `value` by the specified `error_bound`. This process ensures that
-/// the quantized value remains within the error bound of the original value. If the
-/// `error_bound` is equal to zero, the value is directly returned.
-pub fn quantize(value: f64, error_bound: f32) f64 {
-    if (error_bound != 0) {
-        return @floor(value / error_bound) * error_bound;
-    }
-    return value;
 }
 
 /// Appends the `metadata` to the HashMap `metadata_map`. The `allocator` is used for allocating

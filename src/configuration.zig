@@ -83,7 +83,8 @@ pub const DecimalPrecision = struct {
 ///
 /// Either:
 /// - `abs_error_bound` must be provided, or
-/// - both `base_error_bound` and `residual_error_bound` must be provided.
+/// - both `base_error_bound` and `residual_error_bound` must be provided, with
+///   `residual_error_bound <= base_error_bound`.
 ///
 /// Examples:
 /// { "abs_error_bound": 0.1, "lambda": 0.1 }

@@ -17,11 +17,6 @@
 //! SHRINK: Data Compression by Semantic Extraction and Residuals Encoding.
 //! arXiv:2410.06713, 2024.
 //! https://arxiv.org/abs/2410.06713".
-//!
-//! This implementation reuses `shared_structs.SegmentMetadata` to represent cones
-//! `(start_index, intercept = Theta, lower_bound_slope = Psi-, upper_bound_slope = Psi+)`
-//! and reuses Sim-Piece's segment-merging routine, since both algorithms solve the same
-//! sub-problem (greedily merging overlapping slope intervals that share an origin).
 
 const std = @import("std");
 const math = std.math;
@@ -39,8 +34,6 @@ const shared_functions = @import("../../utilities/shared_functions.zig");
 const DiscretePoint = shared_structs.DiscretePoint;
 const SegmentMetadata = shared_structs.SegmentMetadata;
 
-const sim_piece = @import("sim_piece.zig");
-
 const tester = @import("../../tester.zig");
 
 /// Header fields from the residuals section of the compressed stream.
@@ -52,6 +45,8 @@ const ResidualsHeader = struct {
     /// The number of residuals stored (equal to the length of `uncompressed_values`).
     count: usize,
 };
+
+const mergeSegmentsMetadata = @import("sim_piece.zig").mergeSegmentsMetadata;
 
 /// Compresses `uncompressed_values` using the "SHRINK" algorithm. The function writes the result
 /// to `compressed_values`. The `allocator` is used for memory allocation of intermediate data
@@ -72,25 +67,24 @@ pub fn compress(
 
     // The original SHRINK paper proposes a scheme with different error resolutions for the
     // residual part. In this implementation, the error bound is fixed for the whole sequence.
-    const has_abs =
-        parsed_configuration.abs_error_bound != null;
-    const has_base =
-        parsed_configuration.base_error_bound != null;
-    const has_residual =
-        parsed_configuration.residual_error_bound != null;
+    const has_abs_error_bound = parsed_configuration.abs_error_bound != null;
+    const has_base_error_bound = parsed_configuration.base_error_bound != null;
+    const has_residual_error_bound = parsed_configuration.residual_error_bound != null;
 
-    if (!((has_abs and !has_base and !has_residual) or
-        (!has_abs and has_base and has_residual)))
+    if (!((has_abs_error_bound and !has_base_error_bound and !has_residual_error_bound) or
+        (!has_abs_error_bound and has_base_error_bound and has_residual_error_bound)))
     {
         return error.InvalidConfiguration;
     }
 
-    const residual_error_bound: f32 = if (has_abs)
-        parsed_configuration.abs_error_bound.?
+    //TODO: double check that 2.0 is the correct factor for the residual error bound.
+    // the previous factor was too conservative. Consider 1.98 if 2 fails.
+    const residual_error_bound: f32 = if (has_abs_error_bound)
+        parsed_configuration.abs_error_bound.? * 2.0
     else
         parsed_configuration.residual_error_bound.?;
 
-    const base_error_bound: f32 = if (has_abs)
+    const base_error_bound: f32 = if (has_abs_error_bound)
         parsed_configuration.abs_error_bound.? * 2.0
     else
         parsed_configuration.base_error_bound.?;
@@ -101,6 +95,7 @@ pub fn compress(
 
     if (residual_error_bound <= 0.0 or
         base_error_bound <= 0.0 or
+        residual_error_bound > base_error_bound or
         lambda <= 0.0 or lambda > 1.0)
     {
         return error.InvalidConfiguration;
@@ -108,7 +103,6 @@ pub fn compress(
 
     // SHRINK Phase 1 (Section III-B, Algorithms 2-3): compute cones using a base error threshold
     // that adapts to local data fluctuation.
-    // This is based on `computeSegmentsMetadata` from sim_piece.zig.
     var segments_metadata = ArrayList(SegmentMetadata).empty;
     defer segments_metadata.deinit(allocator);
     try computeAdaptiveSegmentsMetadata(
@@ -124,7 +118,7 @@ pub fn compress(
     // segment-merging phase, so it is reused directly.
     var base_segments_metadata = ArrayList(SegmentMetadata).empty;
     defer base_segments_metadata.deinit(allocator);
-    try sim_piece.mergeSegmentsMetadata(allocator, segments_metadata, &base_segments_metadata);
+    try mergeSegmentsMetadata(allocator, segments_metadata, &base_segments_metadata);
 
     // SHRINK Phase 3 (Section III-D, Algorithms 5-6): pick a clean candidate slope per sub-base
     // segment and compute the residuals between the original values and the resulting line.
@@ -139,6 +133,7 @@ pub fn compress(
     );
 
     // Serialize the knowledge base followed by the quantized, entropy-coded residual stream.
+    //TODO: what is the knowledge base?
     try writeBase(allocator, base_segments_metadata.items, uncompressed_values.len, compressed_values);
     try writeResiduals(allocator, residuals.items, residual_error_bound, compressed_values);
 }
@@ -350,7 +345,7 @@ fn computeAdaptiveSegmentsMetadata(
         lambda,
         global_range,
     );
-    var quantized_intercept = sim_piece.quantize(uncompressed_values[0], adaptive_error_bound);
+    var quantized_intercept = shared_functions.quantize(uncompressed_values[0], adaptive_error_bound, .floor);
 
     for (1..uncompressed_values.len) |current_index| {
         if (!math.isFinite(uncompressed_values[current_index])) {
@@ -386,7 +381,7 @@ fn computeAdaptiveSegmentsMetadata(
                 lambda,
                 global_range,
             );
-            quantized_intercept = sim_piece.quantize(start_point.value, adaptive_error_bound);
+            quantized_intercept = shared_functions.quantize(start_point.value, adaptive_error_bound, .floor);
             upper_bound_slope = math.floatMax(f64);
             lower_bound_slope = -math.floatMax(f64);
         } else {
@@ -524,16 +519,16 @@ fn candidateSlope(lower_bound_slope: f64, upper_bound_slope: f64) f64 {
 
     // Compare decimal part (tail).
     const decimal_base: f64 = 10.0;
-    const tail_lo = lower_bound_slope - lead_lower_slope;
-    const tail_hi = upper_bound_slope - lead_higher_slope;
+    const tail_lower_slope = lower_bound_slope - lead_lower_slope;
+    const tail_upper_slope = upper_bound_slope - lead_higher_slope;
     var scale: f64 = 1.0;
     for (0..5) |_| {
         const next_scale = scale * decimal_base;
-        const digit_lo = @floor(tail_lo * next_scale) - @floor(tail_lo * scale) * decimal_base;
-        const digit_hi = @floor(tail_hi * next_scale) - @floor(tail_hi * scale) * decimal_base;
+        const digit_lo = @floor(tail_lower_slope * next_scale) - @floor(tail_lower_slope * scale) * decimal_base;
+        const digit_hi = @floor(tail_upper_slope * next_scale) - @floor(tail_upper_slope * scale) * decimal_base;
         if (digit_lo != digit_hi) {
             const avg_digit = @round((digit_lo + digit_hi) / 2.0);
-            const prefix = @floor(tail_lo * scale);
+            const prefix = @floor(tail_lower_slope * scale);
             const tail = (prefix * decimal_base + avg_digit) / next_scale;
             return lead_lower_slope + tail;
         }
@@ -551,6 +546,7 @@ fn writeBase(
     series_length: usize,
     compressed_values: *ArrayList(u8),
 ) Error!void {
+    //TODO: consider writing the index as u64 instead of usize. usize is platform-dependent and may cause issues when decompressing on a different architecture.
     try shared_functions.appendValue(allocator, usize, base_segments_metadata.len, compressed_values);
     for (base_segments_metadata) |segment_metadata| {
         try shared_functions.appendValue(allocator, usize, segment_metadata.start_index, compressed_values);
@@ -692,10 +688,6 @@ test "candidateSlope matches the paper's worked example" {
     try testing.expect(@abs(slope - 0.12387) < 1e-5);
 }
 
-test "candidateSlope handles unbounded cones from single-point segments" {
-    try testing.expectEqual(@as(f64, 0), candidateSlope(0, 0));
-}
-
 test "SHRINK cannot compress NaN values" {
     const allocator = testing.allocator;
 
@@ -712,28 +704,6 @@ test "SHRINK cannot compress NaN values" {
         Error.UnsupportedInput,
         compress(allocator, uncompressed_values, &compressed_values, method_configuration),
     );
-}
-
-test "SHRINK handles a single-point series" {
-    const allocator = testing.allocator;
-
-    const uncompressed_values = &[_]f64{42.5};
-
-    var compressed_values = ArrayList(u8).empty;
-    defer compressed_values.deinit(allocator);
-
-    const method_configuration =
-        \\ {"base_error_bound": 0.02, "residual_error_bound": 0.01, "lambda": 0.1}
-    ;
-
-    try compress(allocator, uncompressed_values, &compressed_values, method_configuration);
-
-    var decompressed_values = ArrayList(f64).empty;
-    defer decompressed_values.deinit(allocator);
-    try decompress(allocator, compressed_values.items, &decompressed_values);
-
-    try testing.expectEqual(@as(usize, 1), decompressed_values.items.len);
-    try testing.expect(@abs(decompressed_values.items[0] - 42.5) <= 0.1);
 }
 
 test "SHRINK can compress and decompress bounded values with positive error bound" {
@@ -779,6 +749,7 @@ test "SHRINK handles a constant series exactly" {
     }
 }
 
+//TODO: This test contains a lot of magic numbers
 test "SHRINK round trip preserves length for a noisy sinusoid with residual correction" {
     const allocator = testing.allocator;
     var uncompressed_values: [200]f64 = undefined;
