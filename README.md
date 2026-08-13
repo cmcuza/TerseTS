@@ -6,6 +6,8 @@
 
 TerseTS is a library that provides methods for lossless and lossy compression of time series. To match existing literature, the lossy compression methods are organized in the hierarchy below based on [Time Series Compression Survey](https://dl.acm.org/doi/10.1145/3560814). Each category represents a distinct approach to time series compression. The library is implemented in Zig and provides a Zig-API and C-API with [bindings](#usage) for other languages.
 
+ **Try TerseTS in the [live console](https://www.tersets.com).**
+
 <p align="center">
    <img src="docs/figure.svg" alt="Compression Techniques Hierarchy" width="600">
    <br>
