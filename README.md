@@ -13,8 +13,8 @@ TerseTS is a library that provides methods for lossless and lossy compression of
    <em>Figure: Hierarchical organization of lossy time series compression techniques.</em>
 </p>
 
-Try all implemented compression methods on your own data in a [live console](https://console.tersets.com). 
-For more API information, visit [www.tersets.com/reference](https://www.tersets.com/reference/). 
+Try all implemented compression methods on your own data in a live console at [https://console.tersets.com](https://console.tersets.com). 
+For more API information, visit [https://www.tersets.com/reference/](https://www.tersets.com/reference/). 
 The rest of this document explains the compilation and usage from our supported programming languages.
 
 # Compilation
