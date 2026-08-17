@@ -30,6 +30,7 @@ const Clock = std.Io.Clock;
 
 // TODO: Regenerate integration tests when build or use a separate step? Maybe create a step for forcing rebuild for development?
 // TODO: Integrate value generation for multiple types of time series.
+// TODO: Allow tests to fail with an error during compression, incorrect compression is the only thing not allowed.
 // TODO: finish configurations for all methods.
 // TODO: Factor writing out into functions as much as possible.
 // TODO: Move generating tests into a function to make it clear codegen is for other tasks as well.
