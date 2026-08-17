@@ -18,7 +18,6 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 const Random = std.Random;
-const time = std.time;
 
 /// Number of time to run each test. This is a trade-of between test time and coverage.
 const test_execution_count = 50;
@@ -27,12 +26,10 @@ const test_execution_count = 50;
 /// decided by executing `numberOfValuesToGenerate()`. This is a trade-of between test time and coverage.
 const value_generation_count = 50;
 
-/// Default seed used for generating random values. It is initialized by
-/// `getDefaultRandomGenerator()` the first time it is called.
-var default_random_seed: u64 = 0;
-
-/// Default random number generator used for generating random values.
-var default_random_generator: std.Random.DefaultPrng = undefined;
+/// The generators implemented in this file. This is not computed using `comptime` due to the complexity.
+//const generators = [
+//    generateRandomValues
+//];
 
 /// Generate a random number of `f64` values using `random` and add them to `uncompressed_values`.
 /// Each value is a random `f64` generated from a random `u64` bit pattern, which may include
@@ -46,20 +43,8 @@ pub fn generateRandomValues(allocator: Allocator, uncompressed_values: *ArrayLis
     }
 }
 
-/// Generate a random val used for testing. This value needs to be higher than or equal to 2
-/// otherwise some of the tests will fail. The value is set to between [100-150] to ensure that the tests are
-/// not too slow. The values is generated randomly to obtain a different set of values for each test run.
-pub fn numberOfValuesToGenerate(random: Random) usize {
-    return random.intRangeAtMost(u64, 0, value_generation_count);
-}
-
-/// Returns the default `Random` instance, initializing it with the current millisecond timestamp
-/// as the seed if it has not been initialized yet. This ensures that repeated calls return the same
-/// pseudo-random number generator unless the seed is reset by setting it to the integer zero.
-pub fn getDefaultRandomGenerator() Random {
-    if (default_random_seed == 0) {
-        default_random_seed = @bitCast(time.milliTimestamp());
-        default_random_generator = Random.DefaultPrng.init(default_random_seed);
-    }
-    return default_random_generator.random();
+/// Generate how many values that should be generated for this test.
+fn numberOfValuesToGenerate(random: Random) usize {
+    // at_least is two as tersets.zig immediately returns arrays with zero or one values.
+    return random.intRangeAtMost(u64, 2, value_generation_count);
 }
