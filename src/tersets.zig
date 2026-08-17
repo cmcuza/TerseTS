@@ -63,6 +63,13 @@ const extractors = @import("utilities/extractors.zig");
 const tester = @import("tester.zig");
 const configuration_file = @import("configuration.zig");
 
+// Import integration tests.
+// The anonymous test block is required as Zig does not import modules that are not used and
+// tester/integration_tests.zig only contains tests, so zig build test normally ignores it.
+test {
+    _ = @import("tester/integration_tests.zig");
+}
+
 /// The errors that can occur in TerseTS.
 pub const Error = error{
     UnknownMethod,
