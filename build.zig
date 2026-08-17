@@ -68,7 +68,7 @@ pub fn build(b: *std.Build) void {
     const test_builder = b.addExecutable(.{
         .name = "test_builder",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/tester/main.zig"),
+            .root_source_file = b.path("src/codegen.zig"),
             .target = target,
         }),
     });
