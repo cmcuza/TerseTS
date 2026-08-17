@@ -64,12 +64,22 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(library);
 
-    // Task for running tests.
+    // Task for creating and running tests.
+    const test_builder = b.addExecutable(.{
+        .name = "test_builder",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tester/main.zig"),
+            .target = target,
+        }),
+    });
+    const build_tests = b.addRunArtifact(test_builder);
+
     const tests = b.addTest(.{
         .root_module = root_module,
     });
-
     const run_tests = b.addRunArtifact(tests);
+
     const test_step = b.step("test", "Run library tests");
+    test_step.dependOn(&build_tests.step);
     test_step.dependOn(&run_tests.step);
 }
