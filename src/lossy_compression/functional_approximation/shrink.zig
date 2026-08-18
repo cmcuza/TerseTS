@@ -86,7 +86,7 @@ pub fn compress(
     }
 
     const residual_error_bound: f32 = if (has_abs)
-        parsed_configuration.abs_error_bound.?
+        @floatCast(shared_functions.createQuantizationBucket(parsed_configuration.abs_error_bound.?))
     else
         parsed_configuration.residual_error_bound.?;
 
