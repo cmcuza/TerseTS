@@ -61,6 +61,7 @@ pub fn build(b: *Build) void {
 
     const translate_pocketfft_step = b.addUpdateSourceFiles();
     translate_pocketfft_step.addCopyFileToSource(translate_pocketfft.getOutput(), "src/pocketfft.zig");
+    const root_module = create_module_using_tersets(b, "src/capi.zig", target, optimize, pic);
 
     // Task for compilation.
     const library = b.addLibrary(.{
@@ -97,6 +98,7 @@ pub fn build(b: *Build) void {
         optimize,
         null,
     );
+    const integration_test_module = create_module_using_tersets(b, "src/integration_tests.zig", target, optimize, null,);
     const integration_tests = b.addTest(.{ .root_module = integration_test_module });
     const run_integration_tests = b.addRunArtifact(integration_tests);
 
