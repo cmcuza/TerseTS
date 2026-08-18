@@ -28,7 +28,6 @@ const generators = @import("tester/generators.zig");
 const Threaded = std.Io.Threaded;
 const Clock = std.Io.Clock;
 
-// TODO: Regenerate integration tests when build or use a separate step? Maybe create a step for forcing rebuild for development?
 // TODO: Integrate value generation for multiple types of time series.
 // TODO: Allow tests to fail with an error during compression, incorrect compression is the only thing not allowed.
 // TODO: finish configurations for all methods.
