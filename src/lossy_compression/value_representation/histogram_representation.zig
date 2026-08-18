@@ -49,6 +49,7 @@ const configuration = @import("../../configuration.zig");
 const Error = tersets.Error;
 
 const tester = @import("../../tester.zig");
+const tester_random = @import("../../tester/random.zig");
 
 const extractors = @import("../../utilities/extractors.zig");
 const rebuilders = @import("../../utilities/rebuilders.zig");
@@ -652,9 +653,7 @@ test "Hash PriorityQueue with hash_context for MergeError" {
 
 test "Histogram insert, and merge test number buckets in PWCH" {
     // Initialize a random number generator.
-    const seed: u64 = @bitCast(tester.milliTimestamp());
-    var prng = std.Random.DefaultPrng.init(seed);
-    const random = prng.random();
+    const random = tester_random.getRandomGenerator();
 
     const allocator = testing.allocator;
     const maximum_buckets: u32 = 100;
@@ -720,9 +719,7 @@ test "Simple fixed values test of PWCH" {
 
 test "Fixed cluster number with random values for PWCH" {
     // Initialize a random number generator.
-    const seed: u64 = @bitCast(tester.milliTimestamp());
-    var prng = std.Random.DefaultPrng.init(seed);
-    const random = prng.random();
+    const random = tester_random.getRandomGenerator();
 
     const allocator = testing.allocator;
 
@@ -796,7 +793,7 @@ test "Fixed cluster number with random values for PWCH" {
 
 test "Random clusters, elements per cluster and values for PWCH" {
     // Initialize a random number generator.
-    const random = tester.getDefaultRandomGenerator();
+    const random = tester_random.getRandomGenerator();
 
     const allocator = testing.allocator;
     const number_of_cluster: u32 = random.uintLessThan(u32, 100) + 10;
