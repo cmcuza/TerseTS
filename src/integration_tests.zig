@@ -4,6 +4,7 @@ const ArrayList = std.ArrayList;
 const testing = std.testing;
 
 const tersets = @import("tersets.zig");
+const setups = @import("tester/setups.zig");
 const generators = @import("tester/generators.zig");
 const tester_random = @import("tester/random.zig");
 const Method = tersets.Method;
@@ -31,7 +32,7 @@ test "Uncompressed generateRandomValues configuration 1" {
     );
     defer decompressed_values.deinit(allocator);
    
-    try std.testing.expectEqualSlices(f64, uncompressed_values.items, decompressed_values.items);
+    try setups.assertEqual(uncompressed_values.items, decompressed_values.items);
 }
 
 test "Uncompressed generateLinearValues configuration 1" {
@@ -57,6 +58,6 @@ test "Uncompressed generateLinearValues configuration 1" {
     );
     defer decompressed_values.deinit(allocator);
    
-    try std.testing.expectEqualSlices(f64, uncompressed_values.items, decompressed_values.items);
+    try setups.assertEqual(uncompressed_values.items, decompressed_values.items);
 }
 

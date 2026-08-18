@@ -23,16 +23,15 @@
 const std = @import("std");
 
 // TODO: Allow tests to fail with an error during compression, incorrect compression is the only thing not allowed.
-// TODO: finish configurations for all methods.
 // TODO: Factor writing out into functions as much as possible.
 // TODO: Move generating tests into a function to make it clear codegen is for other tasks as well.
 
 // This file cannot be moved to the tester directory as Zig can only import files from
 // the same directory or sub-directories and Method is needed to generate the tests.
 const tersets = @import("tersets.zig");
-const Error = tersets.Error;
 const Method = tersets.Method;
 
+const setups = @import("tester/setups.zig");
 const generators = @import("tester/generators.zig");
 
 pub fn main(init: std.process.Init) !void {
@@ -42,7 +41,7 @@ pub fn main(init: std.process.Init) !void {
     const integration_tests = try cwd.createFile(io, "src/integration_tests.zig", .{});
     defer integration_tests.close(io);
 
-    var buffer: [8192]u8 = undefined; // The writer overwrites it anyway.
+    var buffer: [8192]u8 = undefined; // undefined as the writer overwrites it anyway.
     var file_writer = integration_tests.writer(io, &buffer);
     const writer = &file_writer.interface;
 
@@ -53,6 +52,7 @@ pub fn main(init: std.process.Init) !void {
         \\const testing = std.testing;
         \\
         \\const tersets = @import("tersets.zig");
+        \\const setups = @import("tester/setups.zig");
         \\const generators = @import("tester/generators.zig");
         \\const tester_random = @import("tester/random.zig");
         \\const Method = tersets.Method;
@@ -62,7 +62,8 @@ pub fn main(init: std.process.Init) !void {
     try writer.writeAll(header);
 
     for (std.enums.values(Method)) |method| {
-        const configurations = getConfiguration(method);
+        const configurations = setups.getConfiguration(method);
+        const assert_function = setups.getAssertFunction(method);
         // An index is added to the test name instead of the configuration to not create very long names.
         for (configurations, 1..) |configuration, index| {
             for (generators.generator_names) |generator_name| {
@@ -90,7 +91,7 @@ pub fn main(init: std.process.Init) !void {
                     \\    );
                     \\    defer decompressed_values.deinit(allocator);
                     \\   
-                    \\    try std.testing.expectEqualSlices(f64, uncompressed_values.items, decompressed_values.items);
+                    \\    try setups.{s}(uncompressed_values.items, decompressed_values.items);
                     \\}}
                     \\
                     \\
@@ -102,6 +103,7 @@ pub fn main(init: std.process.Init) !void {
                     generator_name,
                     configuration,
                     @tagName(method),
+                    assert_function,
                 });
             }
         }
@@ -109,12 +111,4 @@ pub fn main(init: std.process.Init) !void {
 
     // try is not allowed in a defer expression.
     try writer.flush();
-}
-
-/// Returns
-fn getConfiguration(method: Method) []const []const u8 {
-    return switch (method) {
-        .Uncompressed => &[_][]const u8{""},
-        else => &[_][]const u8{},
-    };
 }
