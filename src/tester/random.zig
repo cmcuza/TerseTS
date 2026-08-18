@@ -21,7 +21,7 @@ const Threaded = Io.Threaded;
 const Clock = Io.Clock;
 
 /// Default seed used for generating random values. It is initialized by
-/// `getDefaultRandomGenerator()` the first time it is called.
+/// `getRandomGenerator()` the first time it is called.
 var random_seed: u64 = 0;
 
 /// Default random number generator used for generating random values.
