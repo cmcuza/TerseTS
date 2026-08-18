@@ -1150,6 +1150,10 @@ pub fn getDefaultRandomGenerator() Random {
     if (default_seed == 0) {
         default_seed = @bitCast(milliTimestamp());
         default_prng = std.Random.DefaultPrng.init(default_seed);
+
+        // The seed is printed so it can be set to reproduce the same values.
+        // warn is used so that it gets printed for all current default log levels.
+        std.log.warn("\nUnit Tests Seed: {}\n", .{default_seed});
     }
     return default_prng.random();
 }
