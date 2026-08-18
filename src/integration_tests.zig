@@ -12,11 +12,11 @@ const Method = tersets.Method;
 test "Uncompressed generateConstantValues configuration 1" {
     const allocator = testing.allocator;
     const random = tester_random.getRandomGenerator();
-   
+
     var uncompressed_values = ArrayList(f64).empty;
     defer uncompressed_values.deinit(allocator);
     try generators.generateConstantValues(allocator, &uncompressed_values, random);
-   
+
     const configuration = "";
     var compressed_values = tersets.compress(
         allocator,
@@ -28,24 +28,24 @@ test "Uncompressed generateConstantValues configuration 1" {
         else => return err,
     };
     defer compressed_values.deinit(allocator);
-   
+
     var decompressed_values = try tersets.decompress(
         allocator,
         compressed_values.items,
     );
     defer decompressed_values.deinit(allocator);
-   
+
     try setups.assertEqual(uncompressed_values.items, decompressed_values.items);
 }
 
 test "Uncompressed generateLinearValues configuration 1" {
     const allocator = testing.allocator;
     const random = tester_random.getRandomGenerator();
-   
+
     var uncompressed_values = ArrayList(f64).empty;
     defer uncompressed_values.deinit(allocator);
     try generators.generateLinearValues(allocator, &uncompressed_values, random);
-   
+
     const configuration = "";
     var compressed_values = tersets.compress(
         allocator,
@@ -57,24 +57,24 @@ test "Uncompressed generateLinearValues configuration 1" {
         else => return err,
     };
     defer compressed_values.deinit(allocator);
-   
+
     var decompressed_values = try tersets.decompress(
         allocator,
         compressed_values.items,
     );
     defer decompressed_values.deinit(allocator);
-   
+
     try setups.assertEqual(uncompressed_values.items, decompressed_values.items);
 }
 
 test "Uncompressed generateRandomValues configuration 1" {
     const allocator = testing.allocator;
     const random = tester_random.getRandomGenerator();
-   
+
     var uncompressed_values = ArrayList(f64).empty;
     defer uncompressed_values.deinit(allocator);
     try generators.generateRandomValues(allocator, &uncompressed_values, random);
-   
+
     const configuration = "";
     var compressed_values = tersets.compress(
         allocator,
@@ -86,13 +86,12 @@ test "Uncompressed generateRandomValues configuration 1" {
         else => return err,
     };
     defer compressed_values.deinit(allocator);
-   
+
     var decompressed_values = try tersets.decompress(
         allocator,
         compressed_values.items,
     );
     defer decompressed_values.deinit(allocator);
-   
+
     try setups.assertEqual(uncompressed_values.items, decompressed_values.items);
 }
-

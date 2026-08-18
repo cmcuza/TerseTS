@@ -28,9 +28,6 @@ pub const generator_names = &[_][]const u8{
     "generateRandomValues",
 };
 
-/// Number of time to run each test. This is a trade-of between test time and coverage.
-const test_execution_count = 50;
-
 /// Maximum number of values to generate per test. The exact number of values a generators generate is
 /// decided by executing `numberOfValuesToGenerate()`. This is a trade-of between test time and coverage.
 const value_generation_count = 50;

@@ -17,9 +17,6 @@
 //! so `codegen.zig` can generate integration tests that use them.
 
 const std = @import("std");
-const Allocator = std.mem.Allocator;
-const ArrayList = std.ArrayList;
-const Random = std.Random;
 
 const tersets = @import("../tersets.zig");
 const Method = tersets.Method;
