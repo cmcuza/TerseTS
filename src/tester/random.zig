@@ -15,10 +15,10 @@
 //! Provides functions for generating random values throughout TerseTS.
 
 const std = @import("std");
-const Clock = Io.Clock;
 const Io = std.Io;
 const Random = std.Random;
 const Threaded = Io.Threaded;
+const Clock = Io.Clock;
 
 /// Default seed used for generating random values. It is initialized by
 /// `getDefaultRandomGenerator()` the first time it is called.
