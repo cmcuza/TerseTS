@@ -13,6 +13,8 @@
 // limitations under the License.
 
 //! Provides functions for generating test values for testing TerseTS.
+//! New generator function must use the same interface as the existing
+//! so `codegen.zig` can generate integration tests that use them.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -20,9 +22,10 @@ const ArrayList = std.ArrayList;
 const Random = std.Random;
 
 /// The names of the generators implemented in this file. This is not computed using `comptime` due to the complexity.
-pub const generator_name = u8[
-    "generateRandomValues"
-];
+pub const generator_names: [2][]const u8 = .{
+    "generateRandomValues",
+    "generateLinearValues",
+};
 
 /// Number of time to run each test. This is a trade-of between test time and coverage.
 const test_execution_count = 50;
@@ -31,15 +34,23 @@ const test_execution_count = 50;
 /// decided by executing `numberOfValuesToGenerate()`. This is a trade-of between test time and coverage.
 const value_generation_count = 50;
 
-/// Generate a random number of `f64` values using `random` and add them to `uncompressed_values`.
-/// Each value is a random `f64` generated from a random `u64` bit pattern, which may include
-/// special values such as NaN or inf. The final number of values is determined by a random
-/// generation function that returns an integer value between 100 and 150.
+/// Generate a random sequence of `f64` values using `random` and add them to `uncompressed_values`.
 pub fn generateRandomValues(allocator: Allocator, uncompressed_values: *ArrayList(f64), random: Random) !void {
     for (0..numberOfValuesToGenerate(random)) |_| {
-        // Generate a random f64 by bit-casting a random u64.
+        // Generate a random f64 by bit-casting a random u64 to include NaN, Inf, etc.
         const random_value = @as(f64, @bitCast(random.int(u64)));
         try uncompressed_values.append(allocator, random_value);
+    }
+}
+
+/// Generate a linear sequence of `f64` values using `random` and add them to `uncompressed_values`.
+pub fn generateLinearValues(allocator: Allocator, uncompressed_values: *ArrayList(f64), random: Random) !void {
+    const slope = @as(f64, @bitCast(random.int(u64)));
+    const intercept = @as(f64, @bitCast(random.int(u64)));
+
+    for (0..numberOfValuesToGenerate(random), 1..) |_, index| {
+        const linear_value = slope * @as(f64, @bitCast(index)) + intercept;
+        try uncompressed_values.append(allocator, linear_value);
     }
 }
 
