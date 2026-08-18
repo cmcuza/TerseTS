@@ -75,6 +75,7 @@ const testing = std.testing;
 const debug = std.debug;
 
 const tersets = @import("tersets.zig");
+const tester_random = @import("tester/random.zig");
 const Method = tersets.Method;
 
 const shared = @import("utilities/shared_structs.zig");
@@ -147,7 +148,7 @@ pub fn testErrorBoundedCompressionMethod(
     method: Method,
     data_distributions: []const DataDistribution,
 ) !void {
-    const random = getDefaultRandomGenerator();
+    const random = tester_random.getRandomGenerator();
 
     for (data_distributions) |dist| {
         const error_bound: f32 = random.float(f32) + 1e-4; // Ensure a non-zero error bound.
@@ -366,7 +367,7 @@ pub fn testGeneratedLosslessCompression(
     method: Method,
     data_distribution_name: []const u8,
 ) !void {
-    const random = getDefaultRandomGenerator();
+    const random = tester_random.getRandomGenerator();
 
     var uncompressed_values = ArrayList(f64).empty;
     defer uncompressed_values.deinit(allocator);
@@ -479,7 +480,7 @@ pub fn testGeneratedErrorBoundedCompression(
     error_bound: f32,
     data_distribution_name: []const u8,
 ) !void {
-    const random = getDefaultRandomGenerator();
+    const random = tester_random.getRandomGenerator();
 
     var uncompressed_values = ArrayList(f64).empty;
     defer uncompressed_values.deinit(allocator);
@@ -569,7 +570,7 @@ pub fn testGenerateCompressAndDecompress(
         error_bound: f32,
     ) bool,
 ) !void {
-    const random = getDefaultRandomGenerator();
+    const random = tester_random.getRandomGenerator();
 
     var uncompressed_values = ArrayList(f64).empty;
     defer uncompressed_values.deinit(allocator);
@@ -1143,40 +1144,17 @@ pub fn generateNumberOfValues(random: Random) usize {
     return number_of_values;
 }
 
-/// Returns the default `Random` instance, initializing it with the current millisecond timestamp
-/// as the seed if it has not been initialized yet. This ensures that repeated calls return the same
-/// pseudo-random number generator unless the seed is reset.
-pub fn getDefaultRandomGenerator() Random {
-    if (default_seed == 0) {
-        default_seed = @bitCast(milliTimestamp());
-        default_prng = std.Random.DefaultPrng.init(default_seed);
-
-        // The seed is printed so it can be set to reproduce the same values.
-        // warn is used so that it gets printed for all current default log levels.
-        std.log.warn("\nUnit Tests Seed: {}\n", .{default_seed});
-    }
-    return default_prng.random();
-}
-
 /// Returns a `Random` object. If `random_optional` is provided, it is returned directly. Otherwise,
 /// this function returns the default `Random` instance.
 pub fn resolveRandom(random_optional: ?Random) Random {
-    return random_optional orelse getDefaultRandomGenerator();
-}
-
-/// Return a timestamp in milliseconds relative to UTC 1970-01-01.
-pub fn milliTimestamp() i64 {
-    var threaded: Threaded = .init_single_threaded;
-    const timestamp = Clock.real.now(threaded.io());
-    threaded.deinit();
-    return timestamp.toMilliseconds();
+    return random_optional orelse tester_random.getRandomGenerator();
 }
 
 /// Adds noise to a given value based on `noise_scale`. This ensures that the noise is proportional
 /// to the magnitude of the input `value`. Returns the noisy value.
 fn addNoise(value: f64) f64 {
     // Generate a random value in [-0.5, 0.5).
-    const rand_factor = getDefaultRandomGenerator().float(f64) - 0.5;
+    const rand_factor = tester_random.getRandomGenerator().float(f64) - 0.5;
     const noise = rand_factor * noise_scale * @abs(value);
     return value + noise;
 }

@@ -26,6 +26,7 @@ const Error = tersets.Error;
 const testing = std.testing;
 
 const shared_structs = @import("shared_structs.zig");
+const tester_random = @import("../tester/random.zig");
 
 /// Computes the Root-Mean-Squared-Errors (RMSE) for a segment of the `uncompressed_values`.
 /// This function calculates the error between the actual values and the predicted values
@@ -416,8 +417,8 @@ pub fn writeChimpEndMarker(bit_writer: *shared_structs.BulkBitWriter, ring_slot_
 }
 
 test "zigzag can encode and decode small signed integers correctly" {
-    const default_random = tester.getDefaultRandomGenerator();
-    const number_of_tests = tester.generateNumberOfValues(default_random);
+    const random = tester_random.getRandomGenerator();
+    const number_of_tests = tester.generateNumberOfValues(random);
     // Using math.maxInt(i64) would generate only large integers due to the biases.
     // Thus, limit the range to ensure that small integers are generated.
     for (0..number_of_tests) |_| {
@@ -425,7 +426,7 @@ test "zigzag can encode and decode small signed integers correctly" {
             i64,
             -1e5,
             1e5,
-            default_random,
+            random,
         );
         const encoded = encodeZigZag(original);
         const decoded = decodeZigZag(encoded);
@@ -434,15 +435,15 @@ test "zigzag can encode and decode small signed integers correctly" {
 }
 
 test "zigzag can encode and decode big signed integers correctly" {
-    const default_random = tester.getDefaultRandomGenerator();
-    const number_of_tests = tester.generateNumberOfValues(default_random);
+    const random = tester_random.getRandomGenerator();
+    const number_of_tests = tester.generateNumberOfValues(random);
     // Using math.maxInt(i64) would generate only large integers due to the biases.
     for (0..number_of_tests) |_| {
         const original = tester.generateBoundRandomInteger(
             i64,
             -math.maxInt(i64),
             math.maxInt(i64),
-            default_random,
+            random,
         );
         const encoded = encodeZigZag(original);
         const decoded = decodeZigZag(encoded);
@@ -454,7 +455,7 @@ test "zigzag can encode and decode big signed integers correctly" {
             i64,
             -1e5,
             1e5,
-            default_random,
+            random,
         );
         const encoded = encodeZigZag(original);
         const decoded = decodeZigZag(encoded);
@@ -512,14 +513,14 @@ test "decodeEliasGamma can encode and decode complex values correctly" {
     var uncompressed_values = ArrayList(u64).empty;
     defer uncompressed_values.deinit(allocator);
 
-    const default_random = tester.getDefaultRandomGenerator();
-    const number_of_tests = tester.generateNumberOfValues(default_random);
+    const random = tester_random.getRandomGenerator();
+    const number_of_tests = tester.generateNumberOfValues(random);
     for (0..number_of_tests) |_| {
         const value: u64 = tester.generateBoundRandomInteger(
             u64,
             1, // elias gamma is only defined for positive integers.
             tester.max_test_value,
-            default_random,
+            random,
         );
 
         try uncompressed_values.append(allocator, value);
