@@ -5,16 +5,16 @@
 
  const tersets = @import("tersets.zig");
  const generators = @import("tester/generators.zig");
- const random = @import("tester/random.zig");
+ const tester_random = @import("tester/random.zig");
  const Method = tersets.Method;
 
  test "Uncompressed_1" {
  const allocator = testing.allocator;
- const std_random = random.getRandomGenerator();
+ const random = tester_random.getRandomGenerator();
 
  var uncompressed_values = ArrayList(f64).empty;
  defer uncompressed_values.deinit(allocator);
- try generators.generateRandomValues(allocator, &uncompressed_values, std_random);
+ try generators.generateRandomValues(allocator, &uncompressed_values, random);
 
  const configuration = "";
  var compressed_values = try tersets.compress(

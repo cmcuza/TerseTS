@@ -61,6 +61,7 @@ const lttb = @import("lossy_compression/line_simplification/largest_triangle_thr
 
 const extractors = @import("utilities/extractors.zig");
 const tester = @import("tester.zig");
+const tester_random = @import("tester/random.zig");
 const configuration_file = @import("configuration.zig");
 
 /// The errors that can occur in TerseTS.
@@ -812,7 +813,7 @@ pub fn getMaxMethodIndex() usize {
 
 test "extract and rebuild works for any compression method supported" {
     const allocator = testing.allocator;
-    const random = tester.getDefaultRandomGenerator();
+    const random = tester_random.getRandomGenerator();
 
     // Input data
     var uncompressed_values = ArrayList(f64).empty;

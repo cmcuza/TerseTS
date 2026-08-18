@@ -37,7 +37,7 @@ pub fn getRandomGenerator() Random {
 
         // The seed is printed so it can be set to reproduce the same values.
         // warn is used so that it gets printed for all current default log levels.
-        std.log.warn("\nIntegration Tests Seed: {}\n", .{random_seed});
+        std.log.warn("\nTests Seed: {}\n", .{random_seed});
     }
     return random_module.random();
 }
