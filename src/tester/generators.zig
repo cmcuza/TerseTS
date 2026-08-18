@@ -22,9 +22,10 @@ const ArrayList = std.ArrayList;
 const Random = std.Random;
 
 /// The names of the generators implemented in this file. This is not computed using `comptime` due to the complexity.
-pub const generator_names: [2][]const u8 = .{
-    "generateRandomValues",
+pub const generator_names = &[_][]const u8{
+    "generateConstantValues",
     "generateLinearValues",
+    "generateRandomValues",
 };
 
 /// Number of time to run each test. This is a trade-of between test time and coverage.
@@ -43,13 +44,21 @@ pub fn generateRandomValues(allocator: Allocator, uncompressed_values: *ArrayLis
     }
 }
 
+/// Generate a constant sequence of `f64` values using `random` and add them to `uncompressed_values`.
+pub fn generateConstantValues(allocator: Allocator, uncompressed_values: *ArrayList(f64), random: Random) !void {
+    const constant_value = @as(f64, @bitCast(random.int(u64)));
+    for (0..numberOfValuesToGenerate(random)) |_| {
+        try uncompressed_values.append(allocator, constant_value);
+    }
+}
+
 /// Generate a linear sequence of `f64` values using `random` and add them to `uncompressed_values`.
 pub fn generateLinearValues(allocator: Allocator, uncompressed_values: *ArrayList(f64), random: Random) !void {
     const slope = @as(f64, @bitCast(random.int(u64)));
     const intercept = @as(f64, @bitCast(random.int(u64)));
 
-    for (0..numberOfValuesToGenerate(random), 1..) |_, index| {
-        const linear_value = slope * @as(f64, @bitCast(index)) + intercept;
+    for (0..numberOfValuesToGenerate(random)) |index| {
+        const linear_value = slope * @as(f64, @bitCast(index + 1)) + intercept;
         try uncompressed_values.append(allocator, linear_value);
     }
 }
