@@ -316,6 +316,7 @@ test "method enum must match method constants" {
     try testing.expectEqual(@intFromEnum(tersets.Method.LargestTriangleThreeBuckets), 25);
     try testing.expectEqual(@intFromEnum(tersets.Method.Elf), 26);
     try testing.expectEqual(@intFromEnum(tersets.Method.Camel), 27);
+    try testing.expectEqual(@intFromEnum(tersets.Method.ElfPlus), 28);
 }
 
 test "error for unknown compression method" {
