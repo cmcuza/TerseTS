@@ -79,6 +79,22 @@ pub const DecimalPrecision = struct {
     decimal_precision: u8,
 };
 
+/// Configuration for lossy_compression/functional_approximation/shrink.zig.
+///
+/// Either:
+/// - `abs_error_bound` must be provided, or
+/// - both `base_error_bound` and `residual_error_bound` must be provided.
+///
+/// Examples:
+/// { "abs_error_bound": 0.1, "lambda": 0.1 }
+/// { "base_error_bound": 0.2, "residual_error_bound": 0.1, "lambda": 0.1 }
+pub const ShrinkConfiguration = struct {
+    abs_error_bound: ?f32 = null,
+    base_error_bound: ?f32 = null,
+    residual_error_bound: ?f32 = null,
+    lambda: f32 = 0.1,
+};
+
 /// Empty configuration for methods that do not require any parameters.
 pub const EmptyConfiguration = struct {};
 
@@ -133,6 +149,35 @@ pub fn parse(
         DomainTransformation => {
             if (parsed_value.number_of_coefficients == 0)
                 return error.InvalidConfiguration;
+        },
+        ShrinkConfiguration => {
+            const has_abs = parsed_value.abs_error_bound != null;
+            const has_base = parsed_value.base_error_bound != null;
+            const has_residual = parsed_value.residual_error_bound != null;
+
+            if (!((has_abs and !has_base and !has_residual) or
+                (!has_abs and has_base and has_residual)))
+            {
+                return error.InvalidConfiguration;
+            }
+
+            const residual_error_bound = if (has_abs)
+                parsed_value.abs_error_bound.?
+            else
+                parsed_value.residual_error_bound.?;
+
+            const base_error_bound = if (has_abs)
+                parsed_value.abs_error_bound.? * 2.0
+            else
+                parsed_value.base_error_bound.?;
+
+            if (base_error_bound <= 0.0 or
+                residual_error_bound <= 0.0 or
+                parsed_value.lambda <= 0.0 or
+                parsed_value.lambda > 1.0)
+            {
+                return error.InvalidConfiguration;
+            }
         },
         else => return error.InvalidConfiguration,
     }
@@ -246,6 +291,14 @@ pub fn defaultConfigurationBuilder(
         .BitPackedDeltaEncoding,
         .Elf,
         => try allocator.dupe(u8, "{}"),
+
+        .Shrink => blk: {
+            break :blk try getDefaultShrinkConfiguration(
+                allocator,
+                random_f32,
+                0.5,
+            );
+        },
     };
 }
 
@@ -294,6 +347,18 @@ fn getDefaultTargetPointCountConfiguration(allocator: Allocator, output_number: 
         allocator,
         "{{\"target_point_count\": {d}}}",
         .{output_number},
+    );
+}
+
+fn getDefaultShrinkConfiguration(
+    allocator: Allocator,
+    error_bound: f32,
+    lambda: f32,
+) ![]u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "{{\"abs_error_bound\": {d}, \"lambda\": {d}}}",
+        .{ error_bound, lambda },
     );
 }
 
