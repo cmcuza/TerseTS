@@ -68,7 +68,13 @@ pub fn build(b: *Build) void {
     });
     const build_integration_tests = b.addRunArtifact(integration_test_builder);
 
-    const integration_test_module = create_module_using_tersets(b, "src/integration_tests.zig", target, optimize, null);
+    const integration_test_module = create_module_using_tersets(
+        b,
+        "src/integration_tests.zig",
+        target,
+        optimize,
+        null,
+    );
     const integration_tests = b.addTest(.{ .root_module = integration_test_module });
     const run_integration_tests = b.addRunArtifact(integration_tests);
 
