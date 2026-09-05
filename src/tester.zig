@@ -13,8 +13,8 @@
 // limitations under the License.
 
 //! The following testing functions have been deprecated as they where not comprehensive enough.
-//! Thus, leading to flaky tests and bugs in the implementation, use tester/runners.zig instead.
-//! tester.zig will be deleted when all tests have been ported to use tester/runners.zig instead.
+//! Thus, leading to flaky tests and bugs in the implementation, use tester/setups.zig instead.
+//! tester.zig will be deleted when all tests have been ported to use tester/setups.zig instead.
 //!
 //! Provides methods for testing TerseTS.
 //!

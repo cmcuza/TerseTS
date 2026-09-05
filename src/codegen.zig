@@ -38,6 +38,8 @@ fn generateSourceCode(io: Io, output_path: []const u8, code_generator: fn (write
     defer output_file.close(io);
 
     // The contents of the buffer is undefined as the writer overwrites.
+    // 8192 was choosen as 1024, 4096, and 8192 was gennerally recommended online,
+    // and 8192 seems to be the value used for BUFSIZ on many Linux distributions.
     var buffer: [8192]u8 = undefined;
     var file_writer = output_file.writer(io, &buffer);
     const writer = &file_writer.interface;
@@ -66,13 +68,13 @@ fn buildIntegrationTests(writer: *Writer) !void {
         const configurations = setups.getConfiguration(method);
         const assert_function = setups.getAssertFunction(method);
         // An index is added to the test name instead of the configuration to not create very long names.
-        for (configurations, 1..) |configuration, index| {
+        for (configurations) |configuration| {
             for (generators.generator_names) |generator_name| {
                 // The test allow compress() to return an UnsupportedInput error without failing the test
                 // as some compression methods cannot handle all f64 values, however, compressing values
                 // incorrectly is never acceptable, so any other error must always fail the test.
                 const integration_test =
-                    \\test "{s} {s} configuration {d}" {{
+                    \\test "{s} using generator {s} and configuration {s}" {{
                     \\    const allocator = testing.allocator;
                     \\    const random = tester_random.getRandomGenerator();
                     \\   
@@ -98,7 +100,11 @@ fn buildIntegrationTests(writer: *Writer) !void {
                     \\    );
                     \\    defer decompressed_values.deinit(allocator);
                     \\   
-                    \\    try setups.{s}(uncompressed_values.items, decompressed_values.items);
+                    \\    try setups.{s}(allocator,
+                    \\                   uncompressed_values.items,
+                    \\                   decompressed_values.items,
+                    \\                   configuration,
+                    \\    );
                     \\}}
                     \\
                     \\
@@ -106,7 +112,7 @@ fn buildIntegrationTests(writer: *Writer) !void {
                 try writer.print(integration_test, .{
                     @tagName(method),
                     generator_name,
-                    index,
+                    configuration,
                     generator_name,
                     configuration,
                     @tagName(method),
@@ -116,6 +122,6 @@ fn buildIntegrationTests(writer: *Writer) !void {
         }
     }
 
-    // try is not allowed in a defer expression.
+    // The writer is manually flushed as Zig does not allow the try keywrod in a defer expression.
     try writer.flush();
 }
