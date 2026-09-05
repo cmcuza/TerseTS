@@ -21,14 +21,14 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const Random = std.Random;
 
-/// The names of the generators implemented in this file. This is not computed using `comptime` due to the complexity.
+/// The names of the generators implemented in this file.
 pub const generator_names = &[_][]const u8{
     "generateConstantValues",
     "generateLinearValues",
     "generateRandomValues",
 };
 
-/// Maximum number of values to generate per test. The exact number of values a generators generate is
+/// Maximum number of values to generate per test. The exact number of values generators generate is
 /// decided by executing `numberOfValuesToGenerate()`. This is a trade-of between test time and coverage.
 const value_generation_count = 50;
 
@@ -62,6 +62,5 @@ pub fn generateLinearValues(allocator: Allocator, uncompressed_values: *ArrayLis
 
 /// Generate how many values that should be generated for this test.
 fn numberOfValuesToGenerate(random: Random) usize {
-    // at_least is two as tersets.zig immediately returns arrays with zero or one values.
     return random.intRangeAtMost(u64, 0, value_generation_count);
 }
