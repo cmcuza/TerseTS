@@ -13,9 +13,13 @@
 // limitations under the License.
 
 const std = @import("std");
+const Build = std.Build;
 const LinkMode = std.builtin.LinkMode;
+const Module = std.Build.Module;
+const OptimizeMode = std.builtin.OptimizeMode;
+const ResolvedTarget = Build.ResolvedTarget;
 
-pub fn build(b: *std.Build) void {
+pub fn build(b: *Build) void {
     const target = b.standardTargetOptions(.{});
 
     // Define build options.
@@ -34,21 +38,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     // Create root module.
-    const root_module = b.createModule(.{
-        .root_source_file = b.path("src/capi.zig"),
-        .target = target,
-        .optimize = optimize,
-        .pic = pic,
-    });
-
-    // Paths to external libraries. Include the PocketFFT source file directly in the build,
-    // as it's a single C file with no dependencies.
-    const pocketfft_path = b.path("lib/pocketfft");
-    const pocketfft_c_path = b.path("lib/pocketfft/pocketfft.c");
-
-    root_module.addIncludePath(pocketfft_path);
-    root_module.addCSourceFile(.{ .file = pocketfft_c_path });
-    root_module.link_libc = true;
+    const root_module = create_module_using_tersets(b, "src/capi.zig", target, optimize, pic);
 
     // Task for compilation.
     const library = b.addLibrary(.{
@@ -64,12 +54,58 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(library);
 
-    // Task for running tests.
-    const tests = b.addTest(.{
-        .root_module = root_module,
+    // Task for building and running tests.
+    const unit_tests = b.addTest(.{ .root_module = root_module });
+    const run_unit_tests = b.addRunArtifact(unit_tests);
+
+    const integration_test_builder = b.addExecutable(.{
+        .name = "integration_test_builder",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/codegen.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const build_integration_tests = b.addRunArtifact(integration_test_builder);
+
+    const integration_test_module = create_module_using_tersets(
+        b,
+        "src/integration_tests.zig",
+        target,
+        optimize,
+        null,
+    );
+    const integration_tests = b.addTest(.{ .root_module = integration_test_module });
+    const run_integration_tests = b.addRunArtifact(integration_tests);
+
+    const test_step = b.step("test", "Run unit and integration tests");
+    test_step.dependOn(&run_unit_tests.step);
+    test_step.dependOn(&build_integration_tests.step);
+    test_step.dependOn(&run_integration_tests.step);
+}
+
+/// Create a module with the provided arguments and the additional configuration required to compile TerseTS.
+fn create_module_using_tersets(
+    b: *Build,
+    root_source_file: []const u8,
+    target: ResolvedTarget,
+    optimize: OptimizeMode,
+    pic: ?bool,
+) *Module {
+    // Paths to external libraries. Include the PocketFFT source file directly in the build,
+    // as it's a single C file with no dependencies.
+    const pocketfft_path = b.path("lib/pocketfft");
+    const pocketfft_c_path = b.path("lib/pocketfft/pocketfft.c");
+
+    const integration_test_module = b.createModule(.{
+        .root_source_file = b.path(root_source_file),
+        .target = target,
+        .optimize = optimize,
+        .pic = pic,
     });
 
-    const run_tests = b.addRunArtifact(tests);
-    const test_step = b.step("test", "Run library tests");
-    test_step.dependOn(&run_tests.step);
+    integration_test_module.addIncludePath(pocketfft_path);
+    integration_test_module.addCSourceFile(.{ .file = pocketfft_c_path });
+    integration_test_module.link_libc = true;
+    return integration_test_module;
 }

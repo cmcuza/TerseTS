@@ -35,6 +35,7 @@ const IndexedPriorityQueue = @import("../../utilities/indexed_priority_queue.zig
 const shared_functions = @import("../../utilities/shared_functions.zig");
 
 const tester = @import("../../tester.zig");
+const tester_random = @import("../../tester/random.zig");
 const extractors = @import("../../utilities/extractors.zig");
 const rebuilders = @import("../../utilities/rebuilders.zig");
 
@@ -457,7 +458,7 @@ test "bottom-up cannot compress and decompress unbounded values" {
 
 test "bottom-up random lines and random error bound compress and decompress" {
     const allocator = testing.allocator;
-    const random = tester.getDefaultRandomGenerator();
+    const random = tester_random.getRandomGenerator();
 
     var uncompressed_values = ArrayList(f64).empty;
     defer uncompressed_values.deinit(allocator);
