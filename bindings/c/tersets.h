@@ -37,6 +37,7 @@ enum Method {
   LargestTriangleThreeBuckets   = 25,
   Elf                           = 26,
   Camel                         = 27,
+  ElfPlus                        = 28,
 };
 
 // A pointer to uncompressed values and the number of values.

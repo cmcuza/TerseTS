@@ -46,24 +46,24 @@ const Method = tersets.Method;
 //   g(alpha)             - mantissa cut point = f(alpha) + exponent - 1023.
 
 /// IEEE-754 `f64` layout used by the eraser: 52 mantissa bits and an exponent biased by 1023.
-const mantissa_bits: u6 = 52;
-const exponent_bias: i32 = 1023;
-const exponent_mask: u64 = 0x7ff;
+pub const mantissa_bits: u6 = 52;
+pub const exponent_bias: i32 = 1023;
+pub const exponent_mask: u64 = 0x7ff;
 
 /// Digits needed to round-trip any `f64`. beta returns this to mean "no short exact decimal
 /// form", which routes the value to no-erase.
-const maximum_significant_digits: u8 = 17;
+pub const maximum_significant_digits: u8 = 17;
 
 /// Cap on the `getSignificantCount` search. An `f64` carries ~16 significant digits, so beyond
 /// this many steps the multiply is only chasing rounding noise.
-const maximum_scale_iterations: u8 = 22;
+pub const maximum_scale_iterations: u8 = 22;
 
 /// Smallest value that `@intFromFloat` cannot truncate into an `i64`.
-const maximum_safe_int_float: f64 = 0x1p63;
+pub const maximum_safe_int_float: f64 = 0x1p63;
 
 /// f(alpha) = ceil(alpha * log2(10)) for alpha in [0, 20]: the binary bits needed to hold alpha
 /// decimal digits. The `eraser` reads it to find the mantissa cut point.
-const f_alpha_table = [_]u8{
+pub const f_alpha_table = [_]u8{
     0,  4,  7,  10, 14, 17, 20, 24, 27, 30,
     34, 37, 40, 44, 47, 50, 54, 57, 60, 64,
     67,
@@ -71,7 +71,7 @@ const f_alpha_table = [_]u8{
 
 /// 10^i for i in [0, 20]. The significant-digit search scales by these until the product is an
 /// exact integer.
-const power_of_10_table = [_]f64{
+pub const power_of_10_table = [_]f64{
     1.0,    1.0e1,  1.0e2,  1.0e3,  1.0e4,  1.0e5,  1.0e6,
     1.0e7,  1.0e8,  1.0e9,  1.0e10, 1.0e11, 1.0e12, 1.0e13,
     1.0e14, 1.0e15, 1.0e16, 1.0e17, 1.0e18, 1.0e19, 1.0e20,
@@ -79,7 +79,7 @@ const power_of_10_table = [_]f64{
 
 /// 10^-i for i in [0, 20]. `restorer` looks the value up here when the original was an exact
 /// negative power of ten.
-const negative_power_of_10_table = [_]f64{
+pub const negative_power_of_10_table = [_]f64{
     1.0,     1.0e-1,  1.0e-2,  1.0e-3,  1.0e-4,  1.0e-5,  1.0e-6,
     1.0e-7,  1.0e-8,  1.0e-9,  1.0e-10, 1.0e-11, 1.0e-12, 1.0e-13,
     1.0e-14, 1.0e-15, 1.0e-16, 1.0e-17, 1.0e-18, 1.0e-19, 1.0e-20,
@@ -88,12 +88,12 @@ const negative_power_of_10_table = [_]f64{
 /// End-of-stream marker, written as a case-11 header behind a no-erase marker bit. The pair is
 /// impossible for real data: bucket 7 means 24 leading zeros and a raw center of 0 means 64 center
 /// bits, which do not fit in 64 together. The decoder needs no explicit value count.
-const end_marker_lead_index: u3 = 7;
-const end_marker_center_raw: u6 = 0;
+pub const end_marker_lead_index: u3 = 7;
+pub const end_marker_center_raw: u6 = 0;
 
 /// State carried from one value to the next by `xorCompress` and `xorDecompress`. The bucket
 /// fields are null until a bucket is written, so the first value can never reuse one.
-const XorState = struct {
+pub const XorState = struct {
     stored_value_prime: u64,
     stored_leading_zeros: ?u6,
     stored_trailing_zeros: ?u6,
@@ -188,7 +188,7 @@ pub fn decompress(
 
 /// Return the significand position of `value_abs`, plus `is_negative_power_of_ten` for the
 /// 10^-i corner case where erasing would not preserve that position (paper Theorem 3).
-fn significandPosition(value_abs: f64) struct { position: i16, is_negative_power_of_ten: bool } {
+pub fn significandPosition(value_abs: f64) struct { position: i16, is_negative_power_of_ten: bool } {
     if (value_abs >= 1.0) {
         // Find i such that 10^i <= value_abs < 10^(i+1), so significand position = i >= 0.
         for (0..power_of_10_table.len - 1) |i| {
@@ -220,7 +220,7 @@ fn significandPosition(value_abs: f64) struct { position: i16, is_negative_power
 }
 
 /// Return f(alpha) for `alpha`, reading `f_alpha_table` when it is in range.
-fn getFAlpha(alpha: i32) i32 {
+pub fn getFAlpha(alpha: i32) i32 {
     if (alpha >= f_alpha_table.len) {
         // Rare: alpha > 20 happens for very small values (|value| < 1e-10). When this hits,
         // the `eraser`'s downstream `eraseBits > 4` check usually routes to no-erase.
@@ -230,7 +230,7 @@ fn getFAlpha(alpha: i32) i32 {
 }
 
 /// Return 10^`i`, reading `power_of_10_table` when `i` is in range.
-fn getPositivePowerOfTen(i: i32) f64 {
+pub fn getPositivePowerOfTen(i: i32) f64 {
     if (i >= power_of_10_table.len) {
         return math.pow(f64, 10.0, @floatFromInt(i));
     }
@@ -238,7 +238,7 @@ fn getPositivePowerOfTen(i: i32) f64 {
 }
 
 /// Return 10^-`i`, reading `negative_power_of_10_table` when `i` is in range.
-fn getNegativePowerOfTen(i: i32) f64 {
+pub fn getNegativePowerOfTen(i: i32) f64 {
     if (i >= negative_power_of_10_table.len) {
         return math.pow(f64, 10.0, -@as(f64, @floatFromInt(i)));
     }
@@ -291,7 +291,7 @@ fn computeAlphaAndBetaStar(value_abs: f64) struct { alpha: i32, beta_star: u8 } 
 }
 
 /// Return `value` rounded away from zero to `alpha` decimal places.
-fn roundUp(value: f64, alpha: i32) f64 {
+pub fn roundUp(value: f64, alpha: i32) f64 {
     const scale = getPositivePowerOfTen(alpha);
     if (value < 0) return @floor(value * scale) / scale;
     return @ceil(value * scale) / scale;
@@ -351,7 +351,7 @@ fn eraser(
 
 /// Return the original value for an erased `value_prime` and its `beta_star`, inverting `eraser`.
 /// Returns `Error.CorruptedCompressedData` when the pair cannot come from a valid stream.
-fn restorer(value_prime: f64, beta_star: u8) Error!f64 {
+pub fn restorer(value_prime: f64, beta_star: u8) Error!f64 {
     // A corrupted stream can reconstruct 0, an infinity or NaN here, which would trap the
     // `@intFromFloat` in `significandPosition`.
     if (!math.isFinite(value_prime) or value_prime == 0.0) return Error.CorruptedCompressedData;
@@ -376,7 +376,7 @@ fn restorer(value_prime: f64, beta_star: u8) Error!f64 {
 
 /// Write `value_prime_bits` to `bit_writer` as one of four XOR cases, updating `state` in place.
 /// Implements the paper's XOR_cmp.
-fn xorCompress(
+pub fn xorCompress(
     bit_writer: *shared_structs.BulkBitWriter,
     value_prime_bits: u64,
     state: *XorState,
@@ -447,7 +447,7 @@ fn writeEndMarker(bit_writer: *shared_structs.BulkBitWriter) Error!void {
 
 /// Read one XOR case from `bit_reader` and return the reconstructed value_prime bits, updating
 /// `state` in place. Returns null at the end-of-stream marker. Mirror of `xorCompress`.
-fn xorDecompress(
+pub fn xorDecompress(
     bit_reader: *shared_structs.BulkBitReader,
     state: *XorState,
 ) Error!?u64 {
