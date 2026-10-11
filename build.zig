@@ -41,14 +41,26 @@ pub fn build(b: *std.Build) void {
         .pic = pic,
     });
 
-    // Paths to external libraries. Include the PocketFFT source file directly in the build,
-    // as it's a single C file with no dependencies. The header is translated to Zig using the
-    // command zig translate-c as Zig 0.17.0 replaced cImport with the translate-c package.
-    const pocketfft_path = b.path("lib/pocketfft");
-    const pocketfft_c_path = b.path("lib/pocketfft/pocketfft.c");
-    root_module.addIncludePath(pocketfft_path);
-    root_module.addCSourceFile(.{ .file = pocketfft_c_path });
+    // Add PocketFFT directly to root_module, as it's a single C file with no dependencies.
+    const pocketfft_cflags: []const []const u8 = &.{};
+    root_module.addIncludePath(b.path("lib/pocketfft"));
+    root_module.addCSourceFile(.{
+        .file = b.path("lib/pocketfft/pocketfft.c"),
+        .flags = pocketfft_cflags,
+    });
     root_module.link_libc = true;
+
+    // Task for translate pocketfft.h to pocketfft.h.
+    // The official ZSF translate-c package is not used to avoid dependencies.
+    const translate_pocketfft = b.addTranslateC(.{
+        .root_source_file = b.path("lib/pocketfft/pocketfft.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    translate_pocketfft.addCFlags(pocketfft_cflags);
+
+    const translate_pocketfft_step = b.addUpdateSourceFiles();
+    translate_pocketfft_step.addCopyFileToSource(translate_pocketfft.getOutput(), "src/pocketfft.zig");
 
     // Task for compilation.
     const library = b.addLibrary(.{
@@ -57,6 +69,7 @@ pub fn build(b: *std.Build) void {
         .linkage = linking,
         .version = .{ .major = 0, .minor = 0, .patch = 1 },
     });
+    library.step.dependOn(&translate_pocketfft_step.step);
 
     if (linking == LinkMode.static) {
         library.bundle_compiler_rt = true;
