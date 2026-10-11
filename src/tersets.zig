@@ -807,7 +807,7 @@ pub fn rebuild(
 
 /// Get the maximum index of the available methods in TerseTS.
 pub fn getMaxMethodIndex() usize {
-    return @typeInfo(Method).@"enum".field_names.len - 1;
+    return @typeInfo(Method).@"enum".field_values.len - 1;
 }
 
 test "extract and rebuild works for any compression method supported" {
@@ -826,8 +826,8 @@ test "extract and rebuild works for any compression method supported" {
     );
 
     // Test each method.
-    inline for (std.meta.fields(Method)) |method_field| {
-        const method: Method = @enumFromInt(method_field.value);
+    inline for (@typeInfo(Method).@"enum".field_values) |method_value| {
+        const method: Method = @enumFromInt(method_value);
 
         if (method == Method.Uncompressed or
             method == Method.BitPackedQuantization or
