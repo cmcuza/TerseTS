@@ -77,6 +77,7 @@ pub fn build(b: *std.Build) void {
     const tests = b.addTest(.{
         .root_module = root_module,
     });
+    tests.step.dependOn(&translate_pocketfft_step.step);
 
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run library tests");
