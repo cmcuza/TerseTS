@@ -131,7 +131,7 @@ pub fn compress(
     } else if (uncompressed_values.len == 1) {
         const value_as_bytes: [8]u8 = @bitCast(uncompressed_values[0]);
         try compressed_values.appendSlice(allocator, value_as_bytes[0..]);
-        try compressed_values.append(allocator, @intFromEnum(Method.Uncompressed));
+        try compressed_values.append(allocator, @backingInt(Method.Uncompressed));
         return compressed_values;
     }
 
@@ -359,7 +359,7 @@ pub fn compress(
             );
         },
     }
-    try compressed_values.append(allocator, @intFromEnum(method));
+    try compressed_values.append(allocator, @backingInt(method));
     return compressed_values;
 }
 
@@ -381,7 +381,7 @@ pub fn decompress(
 
     if (method_index > getMaxMethodIndex()) return Error.UnknownMethod;
 
-    const method: Method = @enumFromInt(method_index);
+    const method: Method = @fromBackingInt(@intCast(method_index));
     const compressed_values_slice = compressed_values[0 .. compressed_values.len - 1];
 
     switch (method) {
@@ -489,7 +489,7 @@ pub fn extract(
     const method_index: u8 = compressed_values[compressed_values.len - 1];
     if (method_index > getMaxMethodIndex()) return Error.UnknownMethod;
 
-    const method: Method = @enumFromInt(method_index);
+    const method: Method = @fromBackingInt(@intCast(method_index));
     const compressed_values_slice = compressed_values[0 .. compressed_values.len - 1];
 
     switch (method) {
@@ -801,7 +801,7 @@ pub fn rebuild(
             return Error.UnsupportedMethod;
         },
     }
-    try compressed_values.append(allocator, @intFromEnum(method));
+    try compressed_values.append(allocator, @backingInt(method));
     return compressed_values;
 }
 
@@ -827,7 +827,7 @@ test "extract and rebuild works for any compression method supported" {
 
     // Test each method.
     inline for (@typeInfo(Method).@"enum".field_values) |method_value| {
-        const method: Method = @enumFromInt(method_value);
+        const method: Method = @fromBackingInt(@intCast(method_value));
 
         if (method == Method.Uncompressed or
             method == Method.BitPackedQuantization or
