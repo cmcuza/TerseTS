@@ -42,10 +42,10 @@ pub fn build(b: *std.Build) void {
     });
 
     // Paths to external libraries. Include the PocketFFT source file directly in the build,
-    // as it's a single C file with no dependencies.
+    // as it's a single C file with no dependencies. The header is translated to Zig using the
+    // command zig translate-c as Zig 0.17.0 replaced cImport with the translate-c package.
     const pocketfft_path = b.path("lib/pocketfft");
     const pocketfft_c_path = b.path("lib/pocketfft/pocketfft.c");
-
     root_module.addIncludePath(pocketfft_path);
     root_module.addCSourceFile(.{ .file = pocketfft_c_path });
     root_module.link_libc = true;
