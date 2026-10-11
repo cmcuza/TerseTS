@@ -807,7 +807,7 @@ pub fn rebuild(
 
 /// Get the maximum index of the available methods in TerseTS.
 pub fn getMaxMethodIndex() usize {
-    return @typeInfo(Method).@"enum".fields.len - 1;
+    return @typeInfo(Method).@"enum".field_names.len - 1;
 }
 
 test "extract and rebuild works for any compression method supported" {
