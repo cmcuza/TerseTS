@@ -105,14 +105,18 @@ class ZigBuildExt(build_ext):
         output_path = self.get_ext_fullpath(ext.name)
 
         optimize = "Debug" if self.debug else "ReleaseFast"
-        zig_cmd = [
-            sys.executable,
-            "-m",
-            "ziglang",
-            "build",
-            "-Dlinking=dynamic",
-            f"-Doptimize={optimize}",
-        ]
+        zig_executable = shutil.which("zig")
+        if zig_executable is None:
+            zig_cmd = [sys.executable, "-m", "ziglang"]
+        else:
+            zig_cmd = [zig_executable]
+        zig_cmd.extend(
+            [
+                "build",
+                "-Dlinking=dynamic",
+                f"-Doptimize={optimize}",
+            ]
+        )
         self.spawn(zig_cmd)
 
         if sys.platform == "win32":
