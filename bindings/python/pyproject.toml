@@ -38,5 +38,5 @@ classifiers = [
 ]
 
 [build-system]
-requires = ["setuptools", "ziglang == 0.17.0"]
+requires = ["setuptools", "ziglang == 0.17.0; sys_platform == 'linux' or sys_platform == 'darwin'"]
 build-backend = "setuptools.build_meta"
