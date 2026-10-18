@@ -17,10 +17,12 @@
 .idea
 .vscode
 .zig-cache
+zig-pkg
 tersets.egg-info
 __pycache__
 build
 zig-out
-binding/binding/src/ 
+src/pocketfft.zig
+binding/binding/src/
 bindings/python/dist
 bindings/rust/target
