@@ -13,14 +13,14 @@
 # limitations under the License.
 
 import os
-import sys
 import shutil
+import sys
 from pathlib import Path
 
-from setuptools import setup, find_packages, Extension
-from setuptools.command.sdist import sdist
-from setuptools.command.build_ext import build_ext
+from setuptools import Extension, find_packages, setup
 from setuptools.command.bdist_wheel import bdist_wheel
+from setuptools.command.build_ext import build_ext
+from setuptools.command.sdist import sdist
 
 
 def copy_if_repository(relative_path):
