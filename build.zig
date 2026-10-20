@@ -84,10 +84,15 @@ pub fn build(b: *Build) void {
         }),
     });
     const build_integration_tests = b.addRunArtifact(integration_test_builder);
+    const integration_test_paths_path = "src/integration_tests.zig";
+    const format_integration_tests = b.addFmt(.{
+        .paths = &.{b.path(integration_test_paths_path )},
+    });
+    format_integration_tests.step.dependOn(&build_integration_tests.step);
 
     const integration_test_module = create_module_using_tersets(
         b,
-        "src/integration_tests.zig",
+        integration_test_paths_path,
         target,
         optimize,
         null,
@@ -97,7 +102,7 @@ pub fn build(b: *Build) void {
 
     const test_step = b.step("test", "Run unit and integration tests");
     test_step.dependOn(&run_unit_tests.step);
-    test_step.dependOn(&build_integration_tests.step);
+    test_step.dependOn(&format_integration_tests.step);
     test_step.dependOn(&run_integration_tests.step);
 }
 
