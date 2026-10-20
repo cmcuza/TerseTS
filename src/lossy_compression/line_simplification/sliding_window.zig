@@ -39,6 +39,7 @@ const DiscretePoint = shared_structs.DiscretePoint;
 const LinearFunction = shared_structs.LinearFunction;
 
 const tester = @import("../../tester.zig");
+const tester_random = @import("../../tester/random.zig");
 const extractors = @import("../../utilities/extractors.zig");
 const rebuilders = @import("../../utilities/rebuilders.zig");
 
@@ -324,7 +325,7 @@ test "sliding-window cannot compress and decompress unbounded values" {
 
 test "sliding-window compress and decompress random lines and random error bound" {
     const allocator = testing.allocator;
-    const random = tester.getDefaultRandomGenerator();
+    const random = tester_random.getRandomGenerator();
 
     var uncompressed_values = ArrayList(f64).empty;
     defer uncompressed_values.deinit(allocator);

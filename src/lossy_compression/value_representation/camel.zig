@@ -48,6 +48,7 @@ const configuration = @import("../../configuration.zig");
 const shared_functions = @import("../../utilities/shared_functions.zig");
 const shared_structs = @import("../../utilities/shared_structs.zig");
 const tester = @import("../../tester.zig");
+const tester_random = @import("../../tester/random.zig");
 
 const Error = tersets.Error;
 
@@ -579,7 +580,7 @@ test "camel does roundtrips on representative integer and decimal encodings" {
 }
 
 test "camel preserves random values on configured decimal grids" {
-    const random = tester.getDefaultRandomGenerator();
+    const random = tester_random.getRandomGenerator();
 
     var generated_values = ArrayList(f64).empty;
     defer generated_values.deinit(testing.allocator);
@@ -653,7 +654,7 @@ test "camel random arbitrary values use the correct precision error bound" {
     var uncompressed_values = ArrayList(f64).empty;
     defer uncompressed_values.deinit(testing.allocator);
 
-    const random = tester.getDefaultRandomGenerator();
+    const random = tester_random.getRandomGenerator();
     const mean_value = tester.generateBoundedRandomValue(f64, -1e10, 1e10, random);
     // Camel stores each consecutive integer-part difference in 16 bits. Keeping the complete
     // random window narrower than 65,535 guarantees that every generated sequence is supported,
