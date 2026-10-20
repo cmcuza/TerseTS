@@ -77,11 +77,11 @@ fn buildIntegrationTests(writer: *Writer) !void {
                     \\test "{s} using generator {s} and configuration {s}" {{
                     \\    const allocator = testing.allocator;
                     \\    const random = tester_random.getRandomGenerator();
-                    \\   
+                    \\
                     \\    var uncompressed_values = ArrayList(f64).empty;
                     \\    defer uncompressed_values.deinit(allocator);
                     \\    try generators.{s}(allocator, &uncompressed_values, random);
-                    \\   
+                    \\
                     \\    const configuration = "{s}";
                     \\    var compressed_values = tersets.compress(
                     \\        allocator,
@@ -93,13 +93,13 @@ fn buildIntegrationTests(writer: *Writer) !void {
                     \\        else => return err,
                     \\    }};
                     \\    defer compressed_values.deinit(allocator);
-                    \\   
+                    \\
                     \\    var decompressed_values = try tersets.decompress(
                     \\        allocator,
                     \\        compressed_values.items,
                     \\    );
                     \\    defer decompressed_values.deinit(allocator);
-                    \\   
+                    \\
                     \\    try setups.{s}(allocator,
                     \\                   uncompressed_values.items,
                     \\                   decompressed_values.items,

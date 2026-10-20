@@ -15,10 +15,7 @@
 //! Provides functions for generating random values throughout TerseTS.
 
 const std = @import("std");
-const Io = std.Io;
 const Random = std.Random;
-const Threaded = Io.Threaded;
-const Clock = Io.Clock;
 
 /// Default seed used for generating random values. It is initialized by
 /// `getRandomGenerator()` the first time it is called.
@@ -32,20 +29,8 @@ var random_module: std.Random.DefaultPrng = undefined;
 /// pseudo-random number generator unless the seed is reset by setting it to the integer zero.
 pub fn getRandomGenerator() Random {
     if (random_seed == 0) {
-        random_seed = @bitCast(millisecondTimestamp());
+        random_seed = std.testing.random_seed;
         random_module = Random.DefaultPrng.init(random_seed);
-
-        // The seed is printed so it can be set to reproduce the same values.
-        // warn is used so that it gets printed for all current default log levels.
-        std.log.warn("\nTests Seed: {}\n", .{random_seed});
     }
     return random_module.random();
-}
-
-/// Return a timestamp in milliseconds relative to UTC 1970-01-01.
-fn millisecondTimestamp() i64 {
-    var threaded: Threaded = .init_single_threaded;
-    const timestamp = Clock.real.now(threaded.io());
-    threaded.deinit();
-    return timestamp.toMilliseconds();
 }
