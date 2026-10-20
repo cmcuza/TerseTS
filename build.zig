@@ -45,13 +45,7 @@ pub fn build(b: *Build) void {
         pic,
     );
 
-    // Add PocketFFT directly to root_module, as it's a single C file with no dependencies.
-    root_module.addIncludePath(b.path("lib/pocketfft"));
-    root_module.addCSourceFile(.{
-        .file = b.path("lib/pocketfft/pocketfft.c"),
-    });
-
-  // Task for translating pocketfft.h to Zig.
+    // Task for translating pocketfft.h to Zig.
     // The official ZSF translate-c package is not used to avoid dependencies.
     const translate_pocketfft = b.addTranslateC(.{
         .root_source_file = b.path("lib/pocketfft/pocketfft.h"),
@@ -61,7 +55,6 @@ pub fn build(b: *Build) void {
 
     const translate_pocketfft_step = b.addUpdateSourceFiles();
     translate_pocketfft_step.addCopyFileToSource(translate_pocketfft.getOutput(), "src/pocketfft.zig");
-    const root_module = create_module_using_tersets(b, "src/capi.zig", target, optimize, pic);
 
     // Task for compilation.
     const library = b.addLibrary(.{
@@ -70,6 +63,7 @@ pub fn build(b: *Build) void {
         .linkage = linking,
         .version = .{ .major = 0, .minor = 0, .patch = 1 },
     });
+    library.step.dependOn(&translate_pocketfft_step.step);
 
     if (linking == LinkMode.static) {
         library.bundle_compiler_rt = true;
@@ -98,7 +92,6 @@ pub fn build(b: *Build) void {
         optimize,
         null,
     );
-    const integration_test_module = create_module_using_tersets(b, "src/integration_tests.zig", target, optimize, null,);
     const integration_tests = b.addTest(.{ .root_module = integration_test_module });
     const run_integration_tests = b.addRunArtifact(integration_tests);
 
@@ -116,20 +109,16 @@ fn create_module_using_tersets(
     optimize: OptimizeMode,
     pic: ?bool,
 ) *Module {
-    // Paths to external libraries. Include the PocketFFT source file directly in the build,
-    // as it's a single C file with no dependencies.
-    const pocketfft_path = b.path("lib/pocketfft");
-    const pocketfft_c_path = b.path("lib/pocketfft/pocketfft.c");
-
-    const integration_test_module = b.createModule(.{
+    const module = b.createModule(.{
         .root_source_file = b.path(root_source_file),
         .target = target,
         .optimize = optimize,
         .pic = pic,
     });
 
-    integration_test_module.addIncludePath(pocketfft_path);
-    integration_test_module.addCSourceFile(.{ .file = pocketfft_c_path });
-    integration_test_module.link_libc = true;
-    return integration_test_module;
+    // Add PocketFFT directly to root_module, as it's a single C file with no dependencies.
+    module.addIncludePath(b.path("lib/pocketfft"));
+    module.addCSourceFile(.{ .file = b.path("lib/pocketfft/pocketfft.c") });
+    module.link_libc = true;
+    return module;
 }
