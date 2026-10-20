@@ -38,7 +38,8 @@ pub fn build(b: *Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     // Create root module.
-    const root_module = create_module_using_tersets(b,
+    const root_module = create_module_using_tersets(
+        b,
         "src/capi.zig",
         target,
         optimize,
@@ -86,7 +87,7 @@ pub fn build(b: *Build) void {
     const build_integration_tests = b.addRunArtifact(integration_test_builder);
     const integration_test_paths_path = "src/integration_tests.zig";
     const format_integration_tests = b.addFmt(.{
-        .paths = &.{b.path(integration_test_paths_path )},
+        .paths = &.{b.path(integration_test_paths_path)},
     });
     format_integration_tests.step.dependOn(&build_integration_tests.step);
 
