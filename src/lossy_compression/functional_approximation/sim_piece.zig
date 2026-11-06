@@ -38,6 +38,7 @@ const shared_functions = @import("../../utilities/shared_functions.zig");
 const DiscretePoint = shared_structs.DiscretePoint;
 
 const tester = @import("../../tester.zig");
+const tester_random = @import("../../tester/random.zig");
 
 /// Compresses `uncompressed_values` within `error_bound` using the "Sim-Piece" algorithm.
 /// The function writes the result to `compressed_values`. The `allocator` is used for memory
@@ -671,13 +672,13 @@ test "f64 context can hash" {
         f64,
     ).init(allocator);
     defer f64_hash_map.deinit();
-    var rnd = std.Random.DefaultPrng.init(@as(u64, @bitCast(tester.milliTimestamp())));
+    const random = tester_random.getRandomGenerator();
 
     // Add 100 elements into the HashMap. For each element, add two more with small deviation of
     // 1e-16 to test that the numbers are different and a new key is created.
     const deviation = 1e-16;
     for (0..100) |_| {
-        const rand_number = rnd.random().float(f64) - 0.5;
+        const rand_number = random.float(f64) - 0.5;
         try f64_hash_map.put(rand_number, rand_number);
         try f64_hash_map.put(rand_number - deviation, rand_number - deviation);
         try f64_hash_map.put(rand_number + deviation, rand_number + deviation);
@@ -709,10 +710,10 @@ test "hashmap can map f64 to segment metadata array list" {
     var f64_usize_hash_map = shared_structs.HashMapf64(usize).init(allocator);
     defer f64_usize_hash_map.deinit();
 
-    var rnd = std.Random.DefaultPrng.init(@as(u64, @bitCast(tester.milliTimestamp())));
+    const random = tester_random.getRandomGenerator();
 
     for (0..200) |_| {
-        const rand_number = @floor((rnd.random().float(f64) - 0.5) * 100) / 10;
+        const rand_number = @floor((random.float(f64) - 0.5) * 100) / 10;
 
         const count_map_result = try f64_usize_hash_map.getOrPut(rand_number);
         if (!count_map_result.found_existing) {

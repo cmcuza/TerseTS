@@ -42,6 +42,7 @@ const tersets = @import("../../tersets.zig");
 const shared_functions = @import("../../utilities/shared_functions.zig");
 const shared_structs = @import("../../utilities/shared_structs.zig");
 const configuration = @import("../../configuration.zig");
+const tester_random = @import("../../tester/random.zig");
 const tester = @import("../../tester.zig");
 
 const Error = tersets.Error;
@@ -576,7 +577,7 @@ test "decompose and reconstruct f64 array to fixed point representation at a kno
     try tester.generateDefaultBoundedValues(
         allocator,
         &uncompressed_values,
-        tester.getDefaultRandomGenerator(),
+        tester_random.getRandomGenerator(),
     );
 
     const decimal_precision: u8 = tester.generateBoundRandomInteger(u8, 1, 10, null);
@@ -611,7 +612,7 @@ test "buff bitpacked can compress and decompress with random values within decim
     try tester.generateDefaultBoundedValues(
         allocator,
         &uncompressed_values,
-        tester.getDefaultRandomGenerator(),
+        tester_random.getRandomGenerator(),
     );
 
     var compressed_values: ArrayList(u8) = ArrayList(u8).empty;

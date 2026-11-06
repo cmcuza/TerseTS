@@ -31,6 +31,7 @@ const ParameterSpacePoint = shared_structs.ParameterSpacePoint;
 
 const shared_functions = @import("../utilities/shared_functions.zig");
 const tester = @import("../tester.zig");
+const tester_random = @import("../tester/random.zig");
 
 /// Represents a domain on the X axis with a `start` and `end` value.
 /// This means that the values of the x axis are in the interval [start, end].
@@ -629,7 +630,7 @@ test "convex polygon can update random linear sequences with slope break" {
     // remains feasible after adding points from both sequences, and that it correctly
     // rejects points that would make the polygon empty.
     const allocator = testing.allocator;
-    const random = tester.getDefaultRandomGenerator();
+    const random = tester_random.getRandomGenerator();
 
     // Create polygon.
     var poly = ConvexPolygon.init(allocator);
