@@ -31,13 +31,10 @@ const ArrayList = std.ArrayList;
 const tersets = @import("../../tersets.zig");
 const configuration = @import("../../configuration.zig");
 const shared_functions = @import("../../utilities/shared_functions.zig");
+const pocketfft = @import("../../pocketfft.zig");
 const tester = @import("../../tester.zig");
 
 const Error = tersets.Error;
-
-const pocketfft = @cImport({
-    @cInclude("pocketfft.h");
-});
 
 /// Compresses the `uncompressed_values` using Discrete Fourier Transform (DFT) retaining
 /// `number_of_coefficients` largest magnitude coefficients as specified in the

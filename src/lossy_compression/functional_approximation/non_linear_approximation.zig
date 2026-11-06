@@ -153,7 +153,7 @@ pub fn compress(
     // - The high nibble (bits 4-7) holds the function type for the approximation at even index.
     // Approximations are packed in order: [0,1], [2,3], ...
     for (optimal_approximation.items, 0..) |approximation, idx| {
-        const code: u8 = @intCast(@intFromEnum(approximation.function_type));
+        const code: u8 = @intCast(@backingInt(approximation.function_type));
         const byte_idx = idx / function_types_per_byte;
         const is_high_nibble = (idx % function_types_per_byte) == 0;
         if (is_high_nibble) {
@@ -225,7 +225,7 @@ pub fn decompress(
         else
             @truncate((packed_code >> function_type_shift) & function_type_mask);
 
-        const function_type: FunctionType = @enumFromInt(@as(u8, code));
+        const function_type: FunctionType = @fromBackingInt(@intCast(@as(u8, code)));
 
         const slope = try shared_functions.readOffsetValue(f64, compressed_values, &offset);
         const intercept = try shared_functions.readOffsetValue(f64, compressed_values, &offset);

@@ -13,23 +13,22 @@
 // limitations under the License.
 
 const std = @import("std");
-const LinkMode = std.builtin.LinkMode;
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
 
     // Define build options.
     const linking = b.option(
-        LinkMode,
+        std.builtin.LinkMode,
         "linking",
         "Build a static or dynamic (default) library",
-    ) orelse LinkMode.dynamic;
+    ) orelse .dynamic;
 
     const pic = b.option(
         bool,
         "pic",
         "Use Position Independent Code (PIC)",
-    ) orelse null;
+    );
 
     const optimize = b.standardOptimizeOption(.{});
 
@@ -39,16 +38,25 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
         .pic = pic,
+        .link_libc = true,
     });
 
-    // Paths to external libraries. Include the PocketFFT source file directly in the build,
-    // as it's a single C file with no dependencies.
-    const pocketfft_path = b.path("lib/pocketfft");
-    const pocketfft_c_path = b.path("lib/pocketfft/pocketfft.c");
+    // Add PocketFFT directly to root_module, as it's a single C file with no dependencies.
+    root_module.addIncludePath(b.path("lib/pocketfft"));
+    root_module.addCSourceFile(.{
+        .file = b.path("lib/pocketfft/pocketfft.c"),
+    });
 
-    root_module.addIncludePath(pocketfft_path);
-    root_module.addCSourceFile(.{ .file = pocketfft_c_path });
-    root_module.link_libc = true;
+    // Task for translating pocketfft.h to Zig.
+    // The official ZSF translate-c package is not used to avoid dependencies.
+    const translate_pocketfft = b.addTranslateC(.{
+        .root_source_file = b.path("lib/pocketfft/pocketfft.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const translate_pocketfft_step = b.addUpdateSourceFiles();
+    translate_pocketfft_step.addCopyFileToSource(translate_pocketfft.getOutput(), "src/pocketfft.zig");
 
     // Task for compilation.
     const library = b.addLibrary(.{
@@ -57,8 +65,9 @@ pub fn build(b: *std.Build) void {
         .linkage = linking,
         .version = .{ .major = 0, .minor = 0, .patch = 1 },
     });
+    library.step.dependOn(&translate_pocketfft_step.step);
 
-    if (linking == LinkMode.static) {
+    if (linking == .static) {
         library.bundle_compiler_rt = true;
     }
 
@@ -68,6 +77,7 @@ pub fn build(b: *std.Build) void {
     const tests = b.addTest(.{
         .root_module = root_module,
     });
+    tests.step.dependOn(&translate_pocketfft_step.step);
 
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run library tests");
