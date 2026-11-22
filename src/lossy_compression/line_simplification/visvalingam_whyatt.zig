@@ -39,6 +39,7 @@ const Segment = shared_structs.Segment;
 const calculateArea = shared_functions.calculateTriangleArea;
 
 const tester = @import("../../tester.zig");
+const tester_random = @import("../../tester/random.zig");
 
 const extractors = @import("../../utilities/extractors.zig");
 const rebuilders = @import("../../utilities/rebuilders.zig");
@@ -299,9 +300,7 @@ pub fn testAreaWithinErrorBound(
 
 test "vw compress and decompress with zero error bound" {
     // Initialize a random number generator.
-    const seed: u64 = @bitCast(tester.milliTimestamp());
-    var prng = std.Random.DefaultPrng.init(seed);
-    const random = prng.random();
+    const random = tester_random.getRandomGenerator();
 
     const allocator = testing.allocator;
 
@@ -400,7 +399,7 @@ test "vw compress recalculates areas for points next to endpoints" {
 }
 
 test "vw compress and compress with random data" {
-    const random = tester.getDefaultRandomGenerator();
+    const random = tester_random.getRandomGenerator();
 
     const allocator = testing.allocator;
 
