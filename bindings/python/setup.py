@@ -13,14 +13,17 @@
 # limitations under the License.
 
 import os
-import sys
+import re
 import shutil
+import subprocess
+import sys
 from pathlib import Path
+from subprocess import CalledProcessError
 
-from setuptools import setup, find_packages, Extension
-from setuptools.command.sdist import sdist
-from setuptools.command.build_ext import build_ext
+from setuptools import Extension, find_packages, setup
 from setuptools.command.bdist_wheel import bdist_wheel
+from setuptools.command.build_ext import build_ext
+from setuptools.command.sdist import sdist
 
 
 def copy_if_repository(relative_path):
@@ -40,6 +43,32 @@ def copy_if_repository(relative_path):
         shutil.copytree(source, target)
     else:
         shutil.copy2(source, target)
+
+
+def find_zig_command():
+    """Find the command required for running the zig compiler. It tries the
+    official ziglang PyPi package first, and then tries zig in PATH."""
+
+    # zig_version is extracted using a regex as tomllib is not in Python 3.7
+    # and the format for specifying a specific version is not likely to change.
+    pyproject = Path("pyproject.toml").read_text()
+    zig_version = re.search(r'"ziglang\s*==\s*([^";]+)', pyproject).group(1).strip()
+
+    # Determine if there is a version of Zig that can be used to compile the package.
+    for zig_cmd in [[sys.executable, "-m", "ziglang"], ["zig"]]:
+        try:
+            zig_version_number = subprocess.run(zig_cmd + ["version"], capture_output=True, text=True, check=True)
+        # A CalledProcessError exception is raised if a process does not complete
+        # successfully, and a OSError exception is raised if the binary is not found.
+        except (CalledProcessError, OSError):
+            continue
+
+        if zig_version_number.stdout.strip() == zig_version:
+            return zig_cmd
+
+    raise RuntimeError(
+        f"Failed to locate Zig {zig_version}, install ziglang {zig_version} from PyPI or add zig {zig_version} to PATH."
+    )
 
 
 def delete_if_repository(relative_path):
@@ -105,14 +134,14 @@ class ZigBuildExt(build_ext):
         output_path = self.get_ext_fullpath(ext.name)
 
         optimize = "Debug" if self.debug else "ReleaseFast"
-        zig_cmd = [
-            sys.executable,
-            "-m",
-            "ziglang",
-            "build",
-            "-Dlinking=dynamic",
-            f"-Doptimize={optimize}",
-        ]
+        zig_cmd = find_zig_command()
+        zig_cmd.extend(
+            [
+                "build",
+                "-Dlinking=dynamic",
+                f"-Doptimize={optimize}",
+            ]
+        )
         self.spawn(zig_cmd)
 
         if sys.platform == "win32":
